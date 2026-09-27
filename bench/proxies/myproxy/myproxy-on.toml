@@ -1,0 +1,14 @@
+[server]
+listen = "0.0.0.0:8080"
+workers = 1
+
+[auth]
+api_keys = ["secret1"]
+
+[limits]
+max_connections = 200000
+max_header_bytes = 65536
+
+[timeouts]
+connect = "5s"
+idle = "120s"

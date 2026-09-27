@@ -1,0 +1,12 @@
+[package]
+name = "bench-client"
+version = "0.1.0"
+edition = "2021"
+description = "Load generator for the myproxy benchmark harness"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+httparse = "1.9"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "time", "macros", "sync"] }

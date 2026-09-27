@@ -1,0 +1,18 @@
+name: proxybench
+
+services:
+  upstream:
+    build: ./upstream
+
+  sink:
+    build: ./sink
+
+  proxy:
+    image: ${PROXY_IMAGE:-myproxy:bench}
+    environment:
+      AUTH: ${AUTH:-on}
+
+  client:
+    build: ./client
+    profiles: ["client"]
+    entrypoint: ["bench-client"]
