@@ -60,11 +60,20 @@ pub async fn handle_conn(mut client: TcpStream, cfg: Arc<Config>, auth: Arc<Auth
 
         match target {
             Target::Connect { host, port } => {
+                // Preserve any early data the client sent after the CONNECT
+                // head (spec-violating but seen in the wild).
+                let early = buf[head.raw_len..].to_vec();
+                // Free the head-read buffer: the tunnel relay has its own
+                // buffers, and holding this one would inflate RAM/connection.
+                drop(std::mem::take(&mut buf));
                 match connect_upstream(&host, port, connect).await {
                     Ok(mut up) => {
                         let _ = up.set_nodelay(true);
                         if client.write_all(RESP_200_CONNECT).await.is_err() {
                             return;
+                        }
+                        if !early.is_empty() {
+                            let _ = timeout(idle, up.write_all(&early)).await;
                         }
                         // Tunnel: relay both directions until one side closes.
                         match timeout(idle, tokio::io::copy_bidirectional(&mut client, &mut up))
@@ -157,9 +166,19 @@ async fn connect_upstream(
     port: u16,
     connect: Duration,
 ) -> Result<TcpStream, UpstreamError> {
-    match timeout(connect, TcpStream::connect((host, port))).await {
-        Ok(Ok(s)) => Ok(s),
-        Ok(Err(e)) => Err(UpstreamError::Other(e)),
-        Err(_) => Err(UpstreamError::Timeout),
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        // Fast path: numeric IP target, skip the blocking DNS pool entirely.
+        let addr = std::net::SocketAddr::from((ip, port));
+        match timeout(connect, TcpStream::connect(addr)).await {
+            Ok(Ok(s)) => Ok(s),
+            Ok(Err(e)) => Err(UpstreamError::Other(e)),
+            Err(_) => Err(UpstreamError::Timeout),
+        }
+    } else {
+        match timeout(connect, TcpStream::connect((host, port))).await {
+            Ok(Ok(s)) => Ok(s),
+            Ok(Err(e)) => Err(UpstreamError::Other(e)),
+            Err(_) => Err(UpstreamError::Timeout),
+        }
     }
 }

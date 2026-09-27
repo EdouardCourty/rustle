@@ -1,6 +1,6 @@
 FROM rust:1-slim AS build
 WORKDIR /build
-COPY bench/client /build
+COPY . /build
 RUN cargo build --release
 
 FROM debian:bookworm-slim

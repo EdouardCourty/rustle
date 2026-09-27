@@ -6,7 +6,7 @@ use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
 use clap::{Parser, Subcommand};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
@@ -19,11 +19,17 @@ struct Cli {
     /// API key sent as Basic auth password (user is always "bench").
     #[arg(long, default_value = "secret1")]
     api_key: String,
+    /// Number of measured runs; the median RESULT is reported.
+    #[arg(long, default_value_t = 3)]
+    repeat: u32,
+    /// Disable the warmup run.
+    #[arg(long)]
+    no_warmup: bool,
     #[command(subcommand)]
     cmd: Cmd,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 enum Cmd {
     /// Plain HTTP GET requests through the proxy (absolute-form).
     Http {
@@ -53,7 +59,7 @@ enum Cmd {
         #[arg(long, default_value_t = 65536)]
         chunk: usize,
     },
-    /// Open N CONNECT tunnels concurrently and hold them.
+    /// Open N CONNECT tunnels and hold them for a duration.
     Hold {
         /// Target host:port (TCP sink).
         target: String,
@@ -67,56 +73,142 @@ enum Cmd {
         #[arg(long, default_value_t = 4096)]
         ramp: u32,
     },
+    /// TCP discard server (sink): accepts connections and drops all bytes.
+    /// No process fork, no per-connection allocation.
+    Sink {
+        /// Listen address.
+        #[arg(default_value = "0.0.0.0:9000")]
+        listen: String,
+    },
+}
+
+/// One measured run. Static fields describe the workload; numeric fields are
+/// the measurements. Field layout is identical across runs of one mode, so
+/// medians can be taken index-wise.
+struct Metrics {
+    statics: Vec<(&'static str, String)>,
+    nums: Vec<(&'static str, f64)>,
+}
+
+impl Metrics {
+    fn line(&self, tag: &str) -> String {
+        let mut s = format!("RESULT {tag}");
+        for (k, v) in &self.statics {
+            s.push_str(&format!(" {k}={v}"));
+        }
+        for (k, v) in &self.nums {
+            s.push_str(&format!(" {k}={v:.3}"));
+        }
+        s
+    }
+}
+
+fn median_of(mut v: Vec<f64>) -> f64 {
+    if v.is_empty() {
+        return f64::NAN;
+    }
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    v[(v.len() - 1) / 2]
+}
+
+fn median_metrics(runs: Vec<Metrics>) -> Metrics {
+    let statics = runs[0].statics.clone();
+    let mut nums = Vec::with_capacity(runs[0].nums.len());
+    for (i, (key, _)) in runs[0].nums.iter().enumerate() {
+        let vals: Vec<f64> = runs.iter().map(|r| r.nums[i].1).collect();
+        nums.push((*key, median_of(vals)));
+    }
+    Metrics { statics, nums }
+}
+
+/// (p50, p95, p99) in milliseconds from a latency vector in seconds.
+fn pcts_ms(v: &[f64]) -> (f64, f64, f64) {
+    let mut s = v.to_vec();
+    s.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let p = |q: f64| -> f64 {
+        if s.is_empty() {
+            f64::NAN
+        } else {
+            let idx = ((s.len() - 1) as f64 * q).round() as usize;
+            s[idx] * 1e3
+        }
+    };
+    (p(0.50), p(0.95), p(0.99))
 }
 
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-    match cli.cmd {
+    if let Cmd::Sink { listen } = &cli.cmd {
+        run_sink(listen).await;
+    } else {
+        if !cli.no_warmup {
+            if let Some(w) = warmup_of(&cli.cmd) {
+                eprintln!("--- warmup");
+                let _ = run_once(&cli, &w).await;
+            }
+        }
+        let mut runs = Vec::new();
+        for k in 1..=cli.repeat {
+            let m = run_once(&cli, &cli.cmd).await;
+            println!("{}", m.line(&format!("run={k}")));
+            runs.push(m);
+        }
+        println!("{}", median_metrics(runs).line("median"));
+    }
+}
+
+fn warmup_of(cmd: &Cmd) -> Option<Cmd> {
+    match cmd {
         Cmd::Http {
             url,
             conns,
             requests,
             no_keepalive,
-        } => run_http(&cli.proxy, &cli.api_key, &url, conns, requests, no_keepalive).await,
+        } => Some(Cmd::Http {
+            url: url.clone(),
+            conns: *conns,
+            requests: (*requests).min(1000),
+            no_keepalive: *no_keepalive,
+        }),
+        Cmd::Flood {
+            target,
+            conns,
+            duration: _,
+            chunk,
+        } => Some(Cmd::Flood {
+            target: target.clone(),
+            conns: *conns,
+            duration: 2,
+            chunk: *chunk,
+        }),
+        Cmd::Hold { .. } => None, // opening connections IS the test
+        Cmd::Sink { .. } => None,
+    }
+}
+
+async fn run_once(cli: &Cli, cmd: &Cmd) -> Metrics {
+    match cmd {
+        Cmd::Http {
+            url,
+            conns,
+            requests,
+            no_keepalive,
+        } => run_http(&cli.proxy, &cli.api_key, url, *conns, *requests, *no_keepalive).await,
         Cmd::Flood {
             target,
             conns,
             duration,
             chunk,
-        } => run_flood(&cli.proxy, &cli.api_key, &target, conns, duration, chunk).await,
+        } => run_flood(&cli.proxy, &cli.api_key, target, *conns, *duration, *chunk).await,
         Cmd::Hold {
             target,
             conns,
             duration,
             ramp,
-        } => run_hold(&cli.proxy, &cli.api_key, &target, conns, duration, ramp).await,
+        } => run_hold(&cli.proxy, &cli.api_key, target, *conns, *duration, *ramp).await,
+        Cmd::Sink { .. } => unreachable!(),
     }
-}
-
-fn pct(sorted: &[f64], p: f64) -> f64 {
-    if sorted.is_empty() {
-        return f64::NAN;
-    }
-    let idx = ((sorted.len() - 1) as f64 * p).round() as usize;
-    sorted[idx.min(sorted.len() - 1)]
-}
-
-fn print_latency(label: &str, mut v: Vec<f64>) {
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let n = v.len();
-    if n == 0 {
-        println!("{label}: n/a");
-        return;
-    }
-    let sum: f64 = v.iter().sum();
-    println!(
-        "{label}: n={n} avg={:.3}ms p50={:.3}ms p95={:.3}ms p99={:.3}ms",
-        sum / n as f64 * 1e3,
-        pct(&v, 0.50) * 1e3,
-        pct(&v, 0.95) * 1e3,
-        pct(&v, 0.99) * 1e3,
-    );
 }
 
 fn parse_url(url: &str) -> (String, u16, String) {
@@ -175,11 +267,20 @@ async fn connect_via_proxy(proxy: &str, target: &str, api_key: &str) -> anyhow::
 // http
 // ---------------------------------------------------------------------------
 
-async fn run_http(proxy: &str, api_key: &str, url: &str, conns: u32, requests: u64, no_keepalive: bool) {
+#[allow(clippy::too_many_arguments)]
+async fn run_http(
+    proxy: &str,
+    api_key: &str,
+    url: &str,
+    conns: u32,
+    requests: u64,
+    no_keepalive: bool,
+) -> Metrics {
     let (host, port, path) = parse_url(url);
     let counter = Arc::new(AtomicU64::new(0));
     let errors = Arc::new(AtomicU64::new(0));
-    let lats: Arc<Mutex<Vec<f64>>> = Arc::default();
+    let bytes = Arc::new(AtomicU64::new(0));
+    let lats: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
 
     let start = Instant::now();
     let mut set = JoinSet::new();
@@ -190,6 +291,7 @@ async fn run_http(proxy: &str, api_key: &str, url: &str, conns: u32, requests: u
         let path = path.clone();
         let counter = counter.clone();
         let errors = errors.clone();
+        let bytes = bytes.clone();
         let lats = lats.clone();
         set.spawn(async move {
             let mut conn: Option<TcpStream> = None;
@@ -216,7 +318,10 @@ async fn run_http(proxy: &str, api_key: &str, url: &str, conns: u32, requests: u
                 let t0 = Instant::now();
                 let stream = conn.as_mut().unwrap();
                 match http_get(stream, &host, port, &path, &api_key, !no_keepalive).await {
-                    Ok(()) => lats.lock().unwrap().push(t0.elapsed().as_secs_f64()),
+                    Ok(body_bytes) => {
+                        lats.lock().unwrap().push(t0.elapsed().as_secs_f64());
+                        bytes.fetch_add(body_bytes, Ordering::Relaxed);
+                    }
                     Err(_) => {
                         errors.fetch_add(1, Ordering::Relaxed);
                         conn = None;
@@ -227,21 +332,34 @@ async fn run_http(proxy: &str, api_key: &str, url: &str, conns: u32, requests: u
     }
     while let Some(res) = set.join_next().await {
         if let Err(e) = res {
-            errors.fetch_add(1, Ordering::Relaxed);
             eprintln!("task error: {e}");
         }
     }
-    let elapsed = start.elapsed();
-    let done = requests;
-    println!(
-        "http: requests={done} errors={} rps={:.0} elapsed={:.2}s",
-        errors.load(Ordering::Relaxed),
-        done as f64 / elapsed.as_secs_f64(),
-        elapsed.as_secs_f64(),
-    );
-    print_latency("http latency", lats.lock().unwrap().clone());
+    let elapsed = start.elapsed().as_secs_f64();
+    let lat = lats.lock().unwrap().clone();
+    let done = lat.len() as u64;
+    let (p50, p95, p99) = pcts_ms(&lat);
+    Metrics {
+        statics: vec![
+            ("mode", "http".to_string()),
+            ("url", url.to_string()),
+            ("conns", conns.to_string()),
+            ("requests", requests.to_string()),
+            ("keepalive", (!no_keepalive).to_string()),
+        ],
+        nums: vec![
+            ("rps", done as f64 / elapsed),
+            ("mbps", bytes.load(Ordering::Relaxed) as f64 / elapsed / 1e6),
+            ("elapsed_s", elapsed),
+            ("p50_ms", p50),
+            ("p95_ms", p95),
+            ("p99_ms", p99),
+            ("errors", errors.load(Ordering::Relaxed) as f64),
+        ],
+    }
 }
 
+/// One GET through the proxy. Returns the response body size on success.
 async fn http_get(
     stream: &mut TcpStream,
     host: &str,
@@ -249,7 +367,7 @@ async fn http_get(
     path: &str,
     api_key: &str,
     keepalive: bool,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<u64> {
     let auth = B64.encode(format!("bench:{api_key}"));
     let ka = if keepalive { "keep-alive" } else { "close" };
     let req = format!(
@@ -290,7 +408,12 @@ async fn http_get(
             anyhow::bail!("response head too large");
         }
     };
-    let code = resp_code(&buf);
+    let code = std::str::from_utf8(&buf)
+        .ok()
+        .and_then(|s| s.lines().next())
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|c| c.parse::<u32>().ok())
+        .unwrap_or(0);
     if code != 200 {
         anyhow::bail!("HTTP status {code}");
     }
@@ -304,35 +427,32 @@ async fn http_get(
         }
         got += n as u64;
     }
-    Ok(())
-}
-
-fn resp_code(buf: &[u8]) -> u32 {
-    let line = std::str::from_utf8(buf)
-        .ok()
-        .and_then(|s| s.lines().next())
-        .unwrap_or("");
-    line.split_whitespace()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0)
+    Ok(content_length)
 }
 
 // ---------------------------------------------------------------------------
 // flood
 // ---------------------------------------------------------------------------
 
-async fn run_flood(proxy: &str, api_key: &str, target: &str, conns: u32, duration: u64, chunk: usize) {
+async fn run_flood(
+    proxy: &str,
+    api_key: &str,
+    target: &str,
+    conns: u32,
+    duration: u64,
+    chunk: usize,
+) -> Metrics {
     let deadline = Instant::now() + Duration::from_secs(duration);
     let total_bytes = Arc::new(AtomicU64::new(0));
     let errors = Arc::new(AtomicU64::new(0));
-    let est_lats: Arc<Mutex<Vec<f64>>> = Arc::default();
+    let est_lats: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
 
     let mut set = JoinSet::new();
     for _ in 0..conns {
         let proxy = proxy.to_string();
         let api_key = api_key.to_string();
         let target = target.to_string();
+        let deadline = deadline;
         let total_bytes = total_bytes.clone();
         let errors = errors.clone();
         let est_lats = est_lats.clone();
@@ -365,24 +485,47 @@ async fn run_flood(proxy: &str, api_key: &str, target: &str, conns: u32, duratio
         }
     }
     let bytes = total_bytes.load(Ordering::Relaxed);
-    let gbps = bytes as f64 * 8.0 / duration as f64 / 1e9;
-    println!(
-        "flood: conns={conns} duration={duration}s bytes={bytes} throughput={gbps:.3} Gbps errors={}",
-        errors.load(Ordering::Relaxed),
-    );
-    print_latency("flood connect latency", est_lats.lock().unwrap().clone());
+    let lat = est_lats.lock().unwrap().clone();
+    let (p50, p95, p99) = pcts_ms(&lat);
+    Metrics {
+        statics: vec![
+            ("mode", "flood".to_string()),
+            ("target", target.to_string()),
+            ("conns", conns.to_string()),
+            ("duration", duration.to_string()),
+            ("chunk", chunk.to_string()),
+        ],
+        nums: vec![
+            ("gbps", bytes as f64 * 8.0 / duration as f64 / 1e9),
+            ("mb", bytes as f64 / 1e6),
+            ("p50_ms", p50),
+            ("p95_ms", p95),
+            ("p99_ms", p99),
+            ("errors", errors.load(Ordering::Relaxed) as f64),
+        ],
+    }
 }
 
 // ---------------------------------------------------------------------------
 // hold
 // ---------------------------------------------------------------------------
 
-async fn run_hold(proxy: &str, api_key: &str, target: &str, conns: u32, duration: u64, ramp: u32) {
+async fn run_hold(
+    proxy: &str,
+    api_key: &str,
+    target: &str,
+    conns: u32,
+    duration: u64,
+    ramp: u32,
+) -> Metrics {
     let deadline = Instant::now() + Duration::from_secs(duration);
     let started = Instant::now();
     let opened = Arc::new(AtomicU64::new(0));
     let failed = Arc::new(AtomicU64::new(0));
-    let lats: Arc<Mutex<Vec<f64>>> = Arc::default();
+    let lats: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
+    // Instant (as unix-ish ms) of the most recent successful open, so the
+    // open rate uses the open window, not the total hold duration.
+    let last_open_ms = Arc::new(AtomicU64::new(0));
     let sem = Arc::new(Semaphore::new(ramp as usize));
 
     let mut set = JoinSet::new();
@@ -394,17 +537,27 @@ async fn run_hold(proxy: &str, api_key: &str, target: &str, conns: u32, duration
         let proxy = proxy.to_string();
         let api_key = api_key.to_string();
         let target = target.to_string();
+        let deadline = deadline;
         let opened = opened.clone();
         let failed = failed.clone();
         let lats = lats.clone();
+        let last_open_ms = last_open_ms.clone();
         set.spawn(async move {
+            // The permit gates the CONNECT phase only, not the hold:
+            // release it as soon as the tunnel is established.
             let _permit = permit;
             let t0 = Instant::now();
-            match connect_via_proxy(&proxy, &target, &api_key).await {
+            let res = connect_via_proxy(&proxy, &target, &api_key).await;
+            drop(_permit);
+            match res {
                 Ok(stream) => {
                     lats.lock().unwrap().push(t0.elapsed().as_secs_f64());
                     opened.fetch_add(1, Ordering::Relaxed);
-                    let _ = tokio::time::sleep_until(deadline.into()).await;
+                    last_open_ms.store(
+                        started.elapsed().as_millis() as u64,
+                        Ordering::Relaxed,
+                    );
+                    tokio::time::sleep_until(deadline.into()).await;
                     drop(stream);
                 }
                 Err(_) => {
@@ -418,12 +571,64 @@ async fn run_hold(proxy: &str, api_key: &str, target: &str, conns: u32, duration
             eprintln!("task error: {e}");
         }
     }
-    let opened = opened.load(Ordering::Relaxed);
-    let failed = failed.load(Ordering::Relaxed);
-    let open_elapsed = started.elapsed().as_secs_f64();
-    println!(
-        "hold: opened={opened} failed={failed} rate={:.0} conns/s elapsed={open_elapsed:.1}s",
-        opened as f64 / open_elapsed.max(0.001),
-    );
-    print_latency("hold connect latency", lats.lock().unwrap().clone());
+    let opened_n = opened.load(Ordering::Relaxed);
+    let failed_n = failed.load(Ordering::Relaxed);
+    let open_window_s =
+        last_open_ms.load(Ordering::Relaxed) as f64 / 1000.0;
+    let total_s = started.elapsed().as_secs_f64();
+    let lat = lats.lock().unwrap().clone();
+    let (p50, p95, p99) = pcts_ms(&lat);
+    Metrics {
+        statics: vec![
+            ("mode", "hold".to_string()),
+            ("target", target.to_string()),
+            ("conns", conns.to_string()),
+            ("duration", duration.to_string()),
+            ("ramp", ramp.to_string()),
+        ],
+        nums: vec![
+            ("opened", opened_n as f64),
+            ("failed", failed_n as f64),
+            ("rate", opened_n as f64 / open_window_s.max(0.001)),
+            ("open_s", open_window_s),
+            ("elapsed_s", total_s),
+            ("p50_ms", p50),
+            ("p95_ms", p95),
+            ("p99_ms", p99),
+        ],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// sink
+// ---------------------------------------------------------------------------
+
+async fn run_sink(listen: &str) -> ! {
+    let listener = match TcpListener::bind(listen).await {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("sink: bind {listen} failed: {e}");
+            std::process::exit(1);
+        }
+    };
+    eprintln!("sink: listening on {listen}");
+    loop {
+        let (mut s, _) = match listener.accept().await {
+            Ok(pair) => pair,
+            Err(e) => {
+                eprintln!("sink: accept error: {e}");
+                continue;
+            }
+        };
+        tokio::spawn(async move {
+            let _ = s.set_nodelay(true);
+            let mut buf = [0u8; 65536];
+            loop {
+                match s.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+            }
+        });
+    }
 }

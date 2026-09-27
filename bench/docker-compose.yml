@@ -1,18 +1,38 @@
 name: proxybench
 
+# CPU pinning: PROXY_CPU gives the proxy under test its own core,
+# BENCH_CPU hosts client/upstream/sink. Defaults 0/1; run-bench.sh
+# auto-detects from the cgroup cpuset (e.g. "0,2").
 services:
   upstream:
     build: ./upstream
+    cpuset: "${BENCH_CPU:-1}"
 
   sink:
-    build: ./sink
+    # Rust discard server (no fork per connection, unlike socat).
+    build: ./client
+    entrypoint: ["bench-client"]
+    command: ["sink", "0.0.0.0:9000"]
+    cpuset: "${BENCH_CPU:-1}"
+    ulimits:
+      nofile: { soft: 524288, hard: 524288 }
 
   proxy:
     image: ${PROXY_IMAGE:-myproxy:bench}
     environment:
       AUTH: ${AUTH:-on}
+    cpuset: "${PROXY_CPU:-0}"
+    sysctls:
+      - net.core.somaxconn=65535
+    ulimits:
+      nofile: { soft: 524288, hard: 524288 }
 
   client:
     build: ./client
-    profiles: ["client"]
     entrypoint: ["bench-client"]
+    profiles: ["client"]
+    cpuset: "${BENCH_CPU:-1}"
+    sysctls:
+      - net.ipv4.ip_local_port_range=1024 65535
+    ulimits:
+      nofile: { soft: 524288, hard: 524288 }
