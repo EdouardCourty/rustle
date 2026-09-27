@@ -229,6 +229,24 @@ fn parse_url(url: &str) -> (String, u16, String) {
     (host, port, path)
 }
 
+/// Resolve a host:port target ONCE to a numeric ip:port string, so the
+/// benchmark measures the proxy itself and not per-connection DNS
+/// (myproxy would do getaddrinfo per request; 3proxy caches via nscache).
+async fn resolve_once(target: &str) -> anyhow::Result<String> {
+    let (host, port) = match target.rfind(':') {
+        Some(i) => (&target[..i], target[i + 1..].parse::<u16>()?),
+        None => anyhow::bail!("target must be host:port: {target}"),
+    };
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return Ok(target.to_string());
+    }
+    let addr = tokio::net::lookup_host((host, port))
+        .await?
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("no address for {target}"))?;
+    Ok(addr.to_string())
+}
+
 /// TCP connect to the proxy, send CONNECT, wait for the 200.
 async fn connect_via_proxy(proxy: &str, target: &str, api_key: &str) -> anyhow::Result<TcpStream> {
     let mut s = TcpStream::connect(proxy).await?;
@@ -277,6 +295,10 @@ async fn run_http(
     no_keepalive: bool,
 ) -> Metrics {
     let (host, port, path) = parse_url(url);
+    let target = resolve_once(&format!("{host}:{port}"))
+        .await
+        .unwrap_or_else(|e| panic!("resolve {host}:{port}: {e}"));
+    let (host, port, _) = parse_url(&format!("http://{target}/"));
     let counter = Arc::new(AtomicU64::new(0));
     let errors = Arc::new(AtomicU64::new(0));
     let bytes = Arc::new(AtomicU64::new(0));
@@ -443,6 +465,10 @@ async fn run_flood(
     chunk: usize,
 ) -> Metrics {
     let deadline = Instant::now() + Duration::from_secs(duration);
+    let target_owned = resolve_once(target)
+        .await
+        .unwrap_or_else(|e| panic!("resolve {target}: {e}"));
+    let target: &str = &target_owned;
     let total_bytes = Arc::new(AtomicU64::new(0));
     let errors = Arc::new(AtomicU64::new(0));
     let est_lats: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
@@ -520,6 +546,10 @@ async fn run_hold(
 ) -> Metrics {
     let deadline = Instant::now() + Duration::from_secs(duration);
     let started = Instant::now();
+    let target_owned = resolve_once(target)
+        .await
+        .unwrap_or_else(|e| panic!("resolve {target}: {e}"));
+    let target: &str = &target_owned;
     let opened = Arc::new(AtomicU64::new(0));
     let failed = Arc::new(AtomicU64::new(0));
     let lats: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
@@ -560,7 +590,8 @@ async fn run_hold(
                     tokio::time::sleep_until(deadline.into()).await;
                     drop(stream);
                 }
-                Err(_) => {
+                Err(e) => {
+                    eprintln!("hold connect error: {e}");
                     failed.fetch_add(1, Ordering::Relaxed);
                 }
             }
@@ -603,8 +634,23 @@ async fn run_hold(
 // sink
 // ---------------------------------------------------------------------------
 
+/// Bind with a large accept backlog (tokio/mio default is only 1024, which
+/// drops SYNs under the hold test's connection bursts).
+async fn bind_sink(listen: &str) -> anyhow::Result<TcpListener> {
+    use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+    let addr: std::net::SocketAddr = listen.parse()?;
+    let socket = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
+    socket.set_reuse_address(true)?;
+    let sa: SockAddr = addr.into();
+    socket.bind(&sa)?;
+    socket.listen(65535)?;
+    socket.set_nonblocking(true)?;
+    let std_listener: std::net::TcpListener = socket.into();
+    Ok(TcpListener::from_std(std_listener)?)
+}
+
 async fn run_sink(listen: &str) -> ! {
-    let listener = match TcpListener::bind(listen).await {
+    let listener = match bind_sink(listen).await {
         Ok(l) => l,
         Err(e) => {
             eprintln!("sink: bind {listen} failed: {e}");

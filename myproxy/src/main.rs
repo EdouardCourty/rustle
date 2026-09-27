@@ -7,6 +7,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Context;
+use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 use tracing_subscriber::EnvFilter;
@@ -35,7 +36,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 async fn run(cfg: Arc<Config>) -> anyhow::Result<()> {
-    let listener = TcpListener::bind(&cfg.server.listen)
+    let listener = bind(&cfg.server.listen)
         .await
         .with_context(|| format!("binding {}", cfg.server.listen))?;
     tracing::info!(
@@ -83,4 +84,21 @@ fn reject(mut sock: TcpStream) {
             .write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
             .await;
     });
+}
+
+/// Bind with a large accept backlog. Tokio/mio's default backlog is 1024,
+/// which drops SYNs under connection bursts (benchmark: hold >= 5k showed
+/// SYN retransmission latencies of 1s/3s/7s).
+async fn bind(listen: &str) -> anyhow::Result<TcpListener> {
+    let addr: std::net::SocketAddr = listen
+        .parse()
+        .with_context(|| format!("invalid listen address: {listen}"))?;
+    let socket = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
+    socket.set_reuse_address(true)?;
+    socket.bind(&addr.into())?;
+    // Capped by net.core.somaxconn (65535 in the benchmark harness).
+    socket.listen(65535)?;
+    socket.set_nonblocking(true)?;
+    let std_listener: std::net::TcpListener = socket.into();
+    Ok(TcpListener::from_std(std_listener)?)
 }
