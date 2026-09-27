@@ -1,0 +1,20 @@
+[server]
+listen = "0.0.0.0:8080"
+# V1 runs a single worker thread. Multi-worker scaling is a later milestone.
+workers = 1
+
+[auth]
+# API keys accepted as Basic auth passwords: Proxy-Authorization: Basic <base64(user:key)>.
+# Leave empty to disable authentication entirely.
+api_keys = [
+    "secret1",
+    "secret2",
+]
+
+[limits]
+max_connections = 10000
+max_header_bytes = 65536
+
+[timeouts]
+connect = "5s"
+idle = "60s"

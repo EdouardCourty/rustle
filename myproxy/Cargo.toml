@@ -1,0 +1,17 @@
+[package]
+name = "myproxy"
+version = "0.1.0"
+edition = "2021"
+description = "Ultra-minimal, high-performance HTTP forward proxy"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+httparse = "1.9"
+humantime = "2"
+serde = { version = "1", features = ["derive"] }
+subtle = "2"
+tokio = { version = "1", features = ["net", "io-util", "rt-multi-thread", "time", "sync", "macros"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
