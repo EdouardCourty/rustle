@@ -32,4 +32,5 @@ cd bench
 ./run-bench.sh myproxy on   # ou 3proxy / off
 ```
 
-Résultats dans `bench/results/<proxy>/auth-<on|off>/summary.txt`.
+Résultats bruts dans `bench/results/<proxy>/auth-<on|off>/<timestamp>/results.txt`.
+Premiers chiffres comparatifs (myproxy vs 3proxy) : `bench/RESULTS.md`.

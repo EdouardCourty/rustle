@@ -26,6 +26,11 @@ services:
     cpuset: "${PROXY_CPU:-0}"
     sysctls:
       - net.core.somaxconn=65535
+      # The proxy is the active closer of proxy->sink tunnels: without
+      # tw_reuse + a wide port range, TIME_WAIT sockets exhaust ephemeral
+      # ports across back-to-back hold runs (EADDRNOTAVAIL -> 502).
+      - net.ipv4.ip_local_port_range=1024 65535
+      - net.ipv4.tcp_tw_reuse=1
     ulimits:
       nofile: { soft: 524288, hard: 524288 }
 
@@ -36,5 +41,6 @@ services:
     cpuset: "${BENCH_CPU:-1}"
     sysctls:
       - net.ipv4.ip_local_port_range=1024 65535
+      - net.ipv4.tcp_tw_reuse=1
     ulimits:
       nofile: { soft: 524288, hard: 524288 }
