@@ -10,6 +10,7 @@ base64 = "0.22"
 httparse = "1.9"
 humantime = "2"
 serde = { version = "1", features = ["derive"] }
+socket2 = "0.5"
 subtle = "2"
 tokio = { version = "1", features = ["net", "io-util", "rt-multi-thread", "time", "sync", "macros"] }
 toml = "0.8"
