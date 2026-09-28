@@ -18,3 +18,9 @@ max_header_bytes = 65536
 [timeouts]
 connect = "5s"
 idle = "60s"
+
+[dns]
+# TTL of positive cache entries (0s disables). All resolved addresses are
+# kept and tried in order. Wiped when max_entries is exceeded.
+ttl = "60s"
+max_entries = 4096
