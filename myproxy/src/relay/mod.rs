@@ -1,0 +1,113 @@
+//! Transport engines: move bytes across two sockets, fast.
+//!
+//! Engines know nothing about HTTP, pools or the pipeline — they receive
+//! byte-stream boundaries (`limit`) and teardown semantics only:
+//!
+//! - [`bidirectional`]: CONNECT tunnel relay (Linux: zero-copy splice with
+//!   half-close propagation; portable fallback: adaptive user-space copy);
+//! - [`response`]: HTTP response relay (adaptive copy that spills to
+//!   splice on sustained bulk, bounded by the declared body length);
+//! - [`chunked`]: transparent framing relay for chunked bodies;
+//! - [`adaptive`]: the plain copy engine used by all of the above.
+
+mod adaptive;
+mod chunked;
+mod splice;
+
+pub use chunked::chunked;
+
+/// Initial per-direction read buffer. Small on purpose: an idle tunnel only
+/// faults in this many pages, and most real tunnels (TLS handshakes, first
+/// requests) fit inside it.
+pub(crate) const RELAY_BUF0: usize = 8 * 1024;
+/// Cap after adaptive growth. A read that fills the buffer completely
+/// doubles it (8 -> 16 -> 32 -> 64 KB), so a bulk flow settles at
+/// `RELAY_BUF_MAX`: one read+write pair per 64 KB instead of per 8 KB.
+pub(crate) const RELAY_BUF_MAX: usize = 64 * 1024;
+
+/// Bidirectional tunnel relay with a per-direction adaptive buffer.
+///
+/// Why not `tokio::io::copy_bidirectional`: its fixed 8 KB buffer costs
+/// ~2 syscalls per 8 KB of bulk data; the benchmark showed a 10x
+/// CPU-efficiency gap versus 3proxy (0.46 vs 4.4 Gbps/core). Here a
+/// direction that consistently fills its buffer grows it up to
+/// `RELAY_BUF_MAX`, cutting syscalls per byte by up to 8x, while sparse
+/// flows keep the small buffer. On Linux the bulk case is additionally
+/// handed to a zero-copy splice engine.
+///
+/// Semantics match `copy_bidirectional`: both directions run to EOF; the
+/// returned byte counts are cumulative per direction; EOF half-closes the
+/// opposite write side.
+pub async fn bidirectional(
+    client: tokio::net::TcpStream,
+    up: tokio::net::TcpStream,
+) -> std::io::Result<(u64, u64)> {
+    #[cfg(target_os = "linux")]
+    {
+        match splice::bidirectional(client, up).await {
+            Ok(res) => return Ok(res),
+            Err((client, up)) => return adaptive::bidirectional(client, up).await,
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    adaptive::bidirectional(client, up).await
+}
+
+/// HTTP response relay (upstream -> client): adaptive copy that spills to
+/// the zero-copy engine on sustained bulk, bounded by `remaining` body
+/// bytes when known (keep-alive upstream: the next response may already be
+/// queued; we must not over-read). EOF does *not* half-close the client
+/// (keep-alive must survive for the next request).
+pub async fn response(
+    up: &mut tokio::net::TcpStream,
+    client: &mut tokio::net::TcpStream,
+    remaining: Option<u64>,
+) -> u64 {
+    adaptive::response(up, client, remaining).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// End-to-end tunnel relay check: two TCP pairs, relay between the two
+    /// server-side sockets, push bytes through, verify integrity and that
+    /// half-close propagates. Exercises the splice path on Linux.
+    #[tokio::test]
+    async fn tunnel_relay_moves_bytes_and_propagates_eof() {
+        let ln = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = ln.local_addr().unwrap();
+
+        let a_cli = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (a_srv, _) = ln.accept().await.unwrap();
+        let b_cli = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (b_srv, _) = ln.accept().await.unwrap();
+
+        let (mut a_r, mut a_w) = a_cli.into_split();
+        let (mut b_r, mut b_w) = b_cli.into_split();
+
+        let relay = tokio::spawn(bidirectional(a_srv, b_srv));
+
+        // a -> b: 4 MB in both small and large chunks (grow the relay path).
+        let payload: Vec<u8> = (0..4 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
+        let writer = a_w.write_all(&payload);
+        let mut got = vec![0u8; payload.len()];
+        let reader = b_r.read_exact(&mut got);
+        let (wres, rres) = tokio::join!(writer, reader);
+        wres.unwrap();
+        rres.unwrap();
+        assert_eq!(got, payload, "relay corrupted data");
+
+        // Half-close: a shuts down writing -> b must see EOF.
+        a_w.shutdown().await.unwrap();
+        let n = b_r.read(&mut [0u8; 8]).await.unwrap();
+        assert_eq!(n, 0, "b should see EOF after a's half-close");
+
+        // Close b too -> both relay directions end, relay returns.
+        b_w.shutdown().await.unwrap();
+        let (a2b, b2a) = relay.await.unwrap().unwrap();
+        assert_eq!(a2b, payload.len() as u64);
+        assert_eq!(b2a, 0);
+    }
+}

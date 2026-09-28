@@ -10,7 +10,7 @@
 # proxy container's CPU (utime+stime of PID 1) and RSS around each test and
 # appends: cpu_s_per_run=... rss_mb=...
 #
-# Layout (2 cores): proxy pinned to core 0; client/upstream/sink on core 1.
+# Layout (2 cores): proxy pinned to core 0; generator/upstream/sink on core 1.
 # Results: bench/results/<proxy>/auth-<on|off>/<timestamp>/results.txt
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -34,12 +34,12 @@ BENCH_CPU=$(awk -F',' -v skip="$PROXY_CPU" '{
     print (out==""?skip:out)
 }' <<<"$ALL_CPUS")
 export PROXY_CPU BENCH_CPU
-echo "==> cpu pinning: proxy=$PROXY_CPU client/upstream/sink=$BENCH_CPU (available: $ALL_CPUS)"
+echo "==> cpu pinning: proxy=$PROXY_CPU generator/upstream/sink=$BENCH_CPU (available: $ALL_CPUS)"
 
 echo "==> building images (serialized: rustc peaks ~1-2 GB transiently)"
 docker compose build client >/dev/null
 docker compose build upstream >/dev/null
-docker build -q -t "$PROXY_IMAGE" -f "proxies/$PROXY/Dockerfile" .. >/dev/null
+docker build -q -t "$PROXY_IMAGE" -f "dut/$PROXY/Dockerfile" .. >/dev/null
 
 echo "==> starting stack (proxy=$PROXY auth=$AUTH repeat=$REPEAT)"
 docker compose up -d upstream sink proxy >/dev/null
@@ -63,7 +63,7 @@ run_test() {
     sleep 0.5
     local tick0 tick1 median cpu_s_per_run
     tick0=$(cpu_ticks)
-    docker compose --profile client run --rm -T client \
+    docker compose --profile generator run --rm -T generator \
         --repeat "$REPEAT" "$@" | tee /dev/stderr | grep '^RESULT median' > /tmp/opencode/median.txt
     tick1=$(cpu_ticks)
     median=$(cat /tmp/opencode/median.txt)
@@ -92,8 +92,8 @@ run_hold() {
     local half=$(( (conns+1)/2 )) tick0 tick1
     tick0=$(cpu_ticks)
     for i in 1 2; do
-        docker compose --profile client run -d --name "holdrep-$i" \
-            client --repeat 1 --no-warmup hold sink:9000 \
+        docker compose --profile generator run -d --name "holdrep-$i" \
+            generator --repeat 1 --no-warmup hold sink:9000 \
             --conns "$half" --duration "$duration" --ramp 4096 >/dev/null
     done
     for i in 1 2; do docker wait "holdrep-$i" >/dev/null; done
