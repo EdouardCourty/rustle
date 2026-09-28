@@ -241,6 +241,7 @@ dependencies = [
  "base64",
  "httparse",
  "humantime",
+ "libc",
  "serde",
  "socket2 0.5.10",
  "subtle",
