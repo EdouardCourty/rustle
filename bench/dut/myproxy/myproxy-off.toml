@@ -12,3 +12,13 @@ max_header_bytes = 65536
 [timeouts]
 connect = "5s"
 idle = "120s"
+
+[dns]
+ttl = "60s"
+max_entries = 4096
+
+[http]
+upstream_keepalive = true
+max_idle_per_origin = 32
+
+# auth section omitted on purpose: no keys -> auth disabled
