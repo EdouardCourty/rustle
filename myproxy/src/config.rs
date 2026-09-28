@@ -18,6 +18,26 @@ pub struct Config {
     pub auth: AuthConfig,
     pub limits: LimitsConfig,
     pub timeouts: TimeoutsConfig,
+    pub dns: DnsConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct DnsConfig {
+    /// TTL of positive cache entries. 0 disables caching.
+    #[serde(deserialize_with = "de_duration")]
+    pub ttl: Duration,
+    /// Cache entry cap. When exceeded the cache is wiped (simple, bounded).
+    pub max_entries: usize,
+}
+
+impl Default for DnsConfig {
+    fn default() -> Self {
+        Self {
+            ttl: Duration::from_secs(60),
+            max_entries: 4096,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

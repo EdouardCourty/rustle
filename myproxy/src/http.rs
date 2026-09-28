@@ -57,7 +57,7 @@ pub async fn read_head(
         if buf.len() >= max_bytes {
             return Err(HeadError::TooLarge);
         }
-        buf.reserve(4096);
+        buf.reserve(2048);
         let n = timeout(idle, sock.read_buf(buf))
             .await
             .map_err(|_| HeadError::Io(std::io::Error::from(std::io::ErrorKind::TimedOut)))?

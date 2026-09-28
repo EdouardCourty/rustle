@@ -107,7 +107,9 @@ fn median_of(mut v: Vec<f64>) -> f64 {
     if v.is_empty() {
         return f64::NAN;
     }
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    // NaN-tolerant: a run with zero successful connects yields NaN
+    // percentiles; unwrap() on NaN.partial_cmp(NaN) would panic.
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     v[(v.len() - 1) / 2]
 }
 
@@ -124,7 +126,7 @@ fn median_metrics(runs: Vec<Metrics>) -> Metrics {
 /// (p50, p95, p99) in milliseconds from a latency vector in seconds.
 fn pcts_ms(v: &[f64]) -> (f64, f64, f64) {
     let mut s = v.to_vec();
-    s.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    s.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let p = |q: f64| -> f64 {
         if s.is_empty() {
             f64::NAN
@@ -237,7 +239,13 @@ async fn resolve_once(target: &str) -> anyhow::Result<String> {
         Some(i) => (&target[..i], target[i + 1..].parse::<u16>()?),
         None => anyhow::bail!("target must be host:port: {target}"),
     };
-    if host.parse::<std::net::IpAddr>().is_ok() {
+    // Numeric target (IPv6 may be bracketed, e.g. "[::1]:9000"): keep as-is.
+    let unbracketed = host.strip_prefix('[').and_then(|h| h.strip_suffix(']'));
+    let numeric = host.parse::<std::net::IpAddr>().is_ok()
+        || unbracketed
+            .map(|h| h.parse::<std::net::IpAddr>().is_ok())
+            .unwrap_or(false);
+    if numeric {
         return Ok(target.to_string());
     }
     let addr = tokio::net::lookup_host((host, port))
