@@ -44,6 +44,10 @@ pub async fn handle_conn(
     // read_head holds the vector's *capacity*, whose untouched pages cost
     // nothing; capacity is reused across requests on the same connection.
     let mut buf: Vec<u8> = Vec::new();
+    // Connection-owned reusable relay pipe pair (created lazily on the
+    // first bulk response, reused across keep-alive requests, dropped with
+    // the connection).
+    let mut resp_pipes: Option<relay::PipePair> = None;
     loop {
         let head = match read_head(&mut client, &mut buf, max_head, idle).await {
             Ok(Some(h)) => h,
@@ -122,6 +126,7 @@ pub async fn handle_conn(
                     &head,
                     &dns,
                     &pool,
+                    &mut resp_pipes,
                 )
                 .await;
                 if !keep_going {

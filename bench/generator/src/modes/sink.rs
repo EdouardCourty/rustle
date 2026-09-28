@@ -28,6 +28,13 @@ pub(crate) async fn run_sink(listen: &str) -> ! {
         }
     };
     eprintln!("sink: listening on {listen}");
+    // Reusable 8 KB read buffers: without the pool, each connection
+    // allocates from the heap and glibc retains the pages after close —
+    // at 25k tunnels the sink's heap grew past 1.5 GB (OOM-pressure on
+    // the 4 GB box). With the pool the heap never grows: fixed 512 bufs
+    // circulate, freed on task end.
+    static POOL_SIZE: usize = 512;
+    let pool = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::VecDeque::new()));
     loop {
         let (mut s, _) = match listener.accept().await {
             Ok(pair) => pair,
@@ -36,14 +43,28 @@ pub(crate) async fn run_sink(listen: &str) -> ! {
                 continue;
             }
         };
+        let pool = pool.clone();
         tokio::spawn(async move {
             let _ = s.set_nodelay(true);
-            let mut buf = [0u8; 65536];
-            loop {
-                match s.read(&mut buf).await {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {}
+            // Take a buffer from the pool (or allocate a fresh one).
+            let mut buf = {
+                let mut p = pool.lock().await;
+                p.pop_front().unwrap_or_else(|| {
+                    let mut v = Vec::new();
+                    v.reserve(8192);
+                    v
+                })
+            };
+            while let Ok(n) = s.read_buf(&mut buf).await {
+                if n == 0 {
+                    break; // EOF: connection closed
                 }
+                buf.clear(); // discard: keep the capacity
+            }
+            // Return the buffer to the pool (bounded).
+            let mut p = pool.lock().await;
+            if p.len() < POOL_SIZE {
+                p.push_back(buf);
             }
         });
     }

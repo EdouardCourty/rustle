@@ -15,6 +15,7 @@ mod chunked;
 mod splice;
 
 pub use chunked::chunked;
+pub use splice::PipePair;
 
 /// Initial per-direction read buffer. Small on purpose: an idle tunnel only
 /// faults in this many pages, and most real tunnels (TLS handshakes, first
@@ -58,12 +59,17 @@ pub async fn bidirectional(
 /// bytes when known (keep-alive upstream: the next response may already be
 /// queued; we must not over-read). EOF does *not* half-close the client
 /// (keep-alive must survive for the next request).
+///
+/// `pipes` is the connection-owned reusable pipe pair: `None` until the
+/// first bulk response; on zero-copy failure mid-relay the pair is
+/// dropped (state unknown → fresh pair next time).
 pub async fn response(
     up: &mut tokio::net::TcpStream,
     client: &mut tokio::net::TcpStream,
     remaining: Option<u64>,
+    pipes: &mut Option<PipePair>,
 ) -> u64 {
-    adaptive::response(up, client, remaining).await
+    adaptive::response(up, client, remaining, pipes).await
 }
 
 #[cfg(test)]

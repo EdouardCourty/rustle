@@ -20,7 +20,8 @@ pub(crate) async fn run_http(
     api_key: &str,
     url: &str,
     conns: u32,
-    requests: u64,
+    duration: Option<u64>,
+    requests: Option<u64>,
     no_keepalive: bool,
 ) -> Metrics {
     let (host, port, path) = parse_url(url);
@@ -48,7 +49,15 @@ pub(crate) async fn run_http(
             let mut conn: Option<TcpStream> = None;
             loop {
                 let i = counter.fetch_add(1, Ordering::Relaxed);
-                if i >= requests {
+                // Stop on the count budget or the time budget (whichever
+                // is configured). Time-budget keeps both proxies under the
+                // same wall-clock protocol (3proxy needs it: its delayed-
+                // ACK turned 100k 1 KB requests into ~17 min).
+                if let Some(secs) = duration {
+                    if start.elapsed().as_secs_f64() >= secs as f64 {
+                        break;
+                    }
+                } else if i >= requests.unwrap_or(0) {
                     break;
                 }
                 if no_keepalive {
@@ -95,7 +104,14 @@ pub(crate) async fn run_http(
             ("mode", "http".to_string()),
             ("url", url.to_string()),
             ("conns", conns.to_string()),
-            ("requests", requests.to_string()),
+            (
+                "budget",
+                match (duration, requests) {
+                    (Some(d), _) => format!("{d}s"),
+                    (None, Some(r)) => format!("{r} reqs"),
+                    _ => "?".to_string(),
+                },
+            ),
             ("keepalive", (!no_keepalive).to_string()),
         ],
         nums: vec![
