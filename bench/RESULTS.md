@@ -30,7 +30,7 @@ Dates : 2026-09-27/28 · `{myproxy, 3proxy} × {auth=on, auth=off}`, médiane de
 | Hold 25 000 | **25 000/25 000 ×3 · RSS 28,3 MB** | 16 745/25 000 (mur ~17k, reconfirmé ×3) | **myproxy seul à tenir** |
 | RAM tunnel idle | ~1,1-1,4 KB/conn | ~0,35 KB/conn | 3proxy ×4 (M10 pooling) |
 
-## Ce que M9 a ajouté (médiane M8 → M9, ordre randomisé)
+## Ce que M9→M10.1 a ajouté (médiane M8 → M10.1)
 
 1. **Pipes de relay 64 KB → 1 MB** (`fcntl F_SETPIPE_SZ`, best-effort,
    fallback silencieux sur `fs.pipe-max-size`) : le fill/drain du splice
@@ -41,10 +41,19 @@ Dates : 2026-09-27/28 · `{myproxy, 3proxy} × {auth=on, auth=off}`, médiane de
 3. **Harnais randomisé** (warmup réseau + shuffle des 10 tests à seed
    fixe) : les chiffres passent de ±30 % de variance (flood surtout) à
    ±3 % — les médianes deviennent comparables entre passes.
-4. **Coût de l'auth chiffré** (auth-off matrix) : 1-6 % selon les
-   workloads, invisible sur le p50 — la doc peut dire "auth gratuite".
-   10 MB 2 675 → 2 832-3 575 MB/s (devant/parité), flood 18,5 → 19,2 Gbps.
-3. **Cost de l'auth chiffré** (auth-off matrix) : 1-6 % selon les
+4. **Mode http à budget temps** (`--duration 15`) : le protocole est
+   identique pour les deux proxies (fini le 17 min du 1 KB chez 3proxy).
+5. **Fix du deadlock du fill-to-capacity** (drain-when-loaded au lieu de
+   park-on-src avec un pipe chargé) : le 10 MB passe de hang à 3 852 MB/s
+   (+28 % vs 3proxy).
+6. **Timeout d'inactivité** (IdleTimer, reset à chaque progress) à la
+   place du timeout absolu : les tunnels/flux réels de plus de 60 s ne
+   meurent plus (B1 — critique avant un VPS public).
+7. **Robustesse HTTP** (revue code) : 1xx re-handled (100 Continue
+   anti cross-contamination de pool), trailer borné (anti DoS), pas de
+   pooling si sur-lecture backend, retry idempotent-only (anti
+   double-POST), retry élargi au RST.
+8. **Coût de l'auth chiffré** (auth-off matrix) : 1-6 % selon les
    workloads, invisible sur le p50 — la doc peut dire "auth gratuite".
 
 ## Coût de l'auth (chiffré, auth-off vs auth-on)
@@ -71,12 +80,13 @@ workloads, invisible sur le p50.** Aucune raison de la désactiver.
 
 ## Conclusions
 
-- **myproxy est devant ou à parité avec 3proxy sur tout le data plane**
-  (10 KB +20 %, 1 MB +9 %, 10 MB −3 % dans le bruit, flood +8 % débit à
-  CPU −4 %) — et le hold-10k aussi (+5 % débit à CPU ÷1,4).
+- **myproxy est devant PARTOUT sur le data plane** : 10 KB +16 %,
+  1 MB +20 %, 10 MB +28 %, flood +7 % débit à CPU ÷1,3 — plus aucune
+  case négative (le 10 MB est passé de −3 % à +28 % avec le fix
+  fill-to-capacity).
 - **Chemin d'établissement + tunnels : myproxy domine** (×38 sur les
-  petits objets, +60 % en connexions courtes, et seul à tenir 25 000
-  tunnels simultanés sur cette machine).
+  petits objets, +48 % en connexions courtes, hold-25k solo avec un
+  écart ×2,3 sur le taux d'ouverture).
 - **L'auth temps-constant est gratuite** au sens de la mesure (~1-6 %
   selon les workloads, invisible sur le p50).
 - **RAM idle** : ×4 contre 3proxy — l'architecture task-per-conn de
