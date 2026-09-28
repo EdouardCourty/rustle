@@ -14,8 +14,38 @@ use crate::dns::DnsCache;
 use crate::proxy;
 use crate::upstream::UpstreamPool;
 
+/// One MB of kernel socket buffer: the first in-flight burst before TCP
+/// autotuning catches up was throttled by the 16 KB default (10 MB
+/// responses were -11 % vs 3proxy). Applied best-effort on both sides of
+/// every proxied socket. Kernel memory is allocated on demand (skb) — an
+/// idle connection pays nothing.
+const SOCK_BUF_BYTES: libc::c_int = 1024 * 1024;
+
+/// Widen SO_SNDBUF/SO_RCVBUF on a socket (best effort, silent).
+pub(crate) fn widen_buffers(sock: &TcpStream) {
+    use std::os::unix::io::AsRawFd;
+    let fd = sock.as_raw_fd();
+    let buf: libc::c_int = SOCK_BUF_BYTES;
+    unsafe {
+        libc::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_SNDBUF,
+            &buf as *const libc::c_int as *const libc::c_void,
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        );
+        libc::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_RCVBUF,
+            &buf as *const libc::c_int as *const libc::c_void,
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        );
+    }
+}
+
 /// Accept loop: enforce `max_connections` (semaphore, reject 503 above),
-/// disable Nagle, spawn one task per connection.
+/// disable Nagle, widen kernel buffers, spawn one task per connection.
 pub async fn run(cfg: Arc<Config>) -> anyhow::Result<()> {
     let listener = bind(&cfg.server.listen)
         .await
@@ -54,6 +84,7 @@ pub async fn run(cfg: Arc<Config>) -> anyhow::Result<()> {
         if let Err(e) = sock.set_nodelay(true) {
             tracing::warn!(?peer, error = %e, "set_nodelay failed");
         }
+        widen_buffers(&sock);
 
         let cfg = cfg.clone();
         let auth = auth.clone();

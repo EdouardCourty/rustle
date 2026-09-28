@@ -195,7 +195,10 @@ pub(super) async fn connect_upstream(
         // Fast path: numeric IP target, skip the blocking DNS pool entirely.
         let addr = std::net::SocketAddr::from((ip, port));
         match timeout(connect, TcpStream::connect(addr)).await {
-            Ok(Ok(s)) => Ok(s),
+            Ok(Ok(s)) => {
+                widen_buffers(&s);
+                Ok(s)
+            }
             Ok(Err(e)) => Err(UpstreamError::Other(e)),
             Err(_) => Err(UpstreamError::Timeout),
         }
@@ -222,11 +225,20 @@ pub(super) async fn connect_upstream(
             },
         };
         match timeout(connect, connect_first(&addrs)).await {
-            Ok(Ok(s)) => Ok(s),
+            Ok(Ok(s)) => {
+                widen_buffers(&s);
+                Ok(s)
+            }
             Ok(Err(e)) => Err(UpstreamError::Other(e)),
             Err(_) => Err(UpstreamError::Timeout),
         }
     }
+}
+
+/// One MB of kernel socket buffer on the upstream socket too (the
+/// response->proxy leg benefits as much as the proxy->client one).
+fn widen_buffers(sock: &TcpStream) {
+    crate::server::widen_buffers(sock);
 }
 
 /// Try each address in order until one connects (sequential, same as
