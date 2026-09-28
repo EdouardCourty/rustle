@@ -117,23 +117,48 @@ run_hold() {
     echo "RESULT median mode=hold conns=$conns replicas=2 opened=$opened failed=$failed rate=$rate elapsed_s=$maxelapsed cpu_s_per_run=$cpu_s_per_run rss_mb=$(rss_mb)" | tee -a "$out/results.txt"
 }
 
-# --- A. HTTP small / medium / large (keep-alive, also covers D) ---
-run_test http-1kb  http http://upstream:8000/1kb  --conns 16 --requests 100000
-run_test http-10kb http http://upstream:8000/10kb --conns 16 --requests 50000
-run_test http-1mb  http http://upstream:8000/1mb  --conns 16 --requests 5000
-run_test http-10mb http http://upstream:8000/10mb --conns 8  --requests 300
+# --- Warmup réseau (avant toute mesure): montée des conntrack, caches
+# DNS/kernel, fenêtres TCP autotunées — sans ça, les 1ers tests de la
+# matrice absorbent la chauffe et la variance entre passes est ±30 %.
+echo "### warmup-network"
+docker compose --profile generator run --rm -T generator --repeat 1 --no-warmup \
+    http http://upstream:8000/1mb --conns 16 --requests 200 >/dev/null 2>&1 || true
+docker compose --profile generator run --rm -T generator --repeat 1 --no-warmup \
+    flood sink:9000 --conns 8 --duration 3 >/dev/null 2>&1 || true
 
-# --- C. Short connections (1 request per connection) ---
-run_test http-1kb-short http http://upstream:8000/1kb --conns 64 --requests 50000 --no-keepalive
+# --- Workloads, ordre randomisé à seed fixe (reproductible d'une passe à
+# l'autre, mais supprime le biais d'ordre: le réseau n'est pas dans le même
+# état après le hold-25k qu'après le 1kb). OVERRIDE=$SEED pour reproduire.
+if [ -n "${BENCH_SEED:-}" ]; then SEED="$BENCH_SEED"; else SEED=$RANDOM$RANDOM; fi
+echo "seed=$SEED" | tee -a "$out/results.txt"
 
-# --- B. CONNECT tunnel throughput ---
-run_test flood-8 flood sink:9000 --conns 8 --duration 10
+declare -a TESTS=(
+    "run_test http-1kb http http://upstream:8000/1kb --conns 16 --requests 100000"
+    "run_test http-10kb http http://upstream:8000/10kb --conns 16 --requests 50000"
+    "run_test http-1mb http http://upstream:8000/1mb --conns 16 --requests 5000"
+    "run_test http-10mb http http://upstream:8000/10mb --conns 8 --requests 300"
+    "run_test http-1kb-short http http://upstream:8000/1kb --conns 64 --requests 50000 --no-keepalive"
+    "run_test flood-8 flood sink:9000 --conns 8 --duration 10"
+    "run_hold 1000 10"
+    "run_hold 5000 10"
+    "run_hold 10000 10"
+    "run_hold 25000 10"
+)
+# Fisher-Yates avec seed
+shopt -s extglob
+shuffled=(); tmp=("${TESTS[@]}")
+n=${#tmp[@]}
+for ((i=0; i<n; i++)); do
+    # pseudo-random déterministe sur le seed
+    SEED=$(( (SEED * 1103515245 + 12345) & 0x7fffffff ))
+    j=$(( i + (SEED % (n - i)) ))
+    shuffled[i]=${tmp[j]}
+    tmp[j]=${tmp[i]}
+done
 
-# --- E. Concurrency curve (held tunnels) ---
-run_hold 1000
-run_hold 5000
-run_hold 10000
-run_hold 25000
+for entry in "${shuffled[@]}"; do
+    eval "$entry"
+done
 
 echo
 echo "==> results in $out/results.txt"
