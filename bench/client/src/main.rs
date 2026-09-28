@@ -141,6 +141,17 @@ fn pcts_ms(v: &[f64]) -> (f64, f64, f64) {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+    // Own RSS (MB): the hold/flood generators spawn tens of thousands of
+    // tasks; knowing the harness footprint matters on small boxes (the
+    // 4 GB dev instance once OOM'd mid-matrix). Read at start …
+    let rss_pages = || -> f64 {
+        std::fs::read_to_string("/proc/self/statm")
+            .ok()
+            .and_then(|s| s.split_whitespace().nth(1)?.parse().ok())
+            .map(|pages: f64| pages * 4096.0 / 1024.0 / 1024.0)
+            .unwrap_or(-1.0)
+    };
+    let own_rss_start = rss_pages();
     if let Cmd::Sink { listen } = &cli.cmd {
         run_sink(listen).await;
     } else {
@@ -153,10 +164,24 @@ async fn main() {
         let mut runs = Vec::new();
         for k in 1..=cli.repeat {
             let m = run_once(&cli, &cli.cmd).await;
-            println!("{}", m.line(&format!("run={k}")));
+            println!(
+                "{}",
+                m.line(&format!(
+                    "run={k} own_rss_mb={:.1}",
+                    own_rss_start
+                ))
+            );
             runs.push(m);
         }
-        println!("{}", median_metrics(runs).line("median"));
+        // … and again after the runs: the retained footprint (tasks, buffers
+        // kept by the allocator) is the load the client puts on the box.
+        let own_rss_end = rss_pages();
+        println!(
+            "{}",
+            median_metrics(runs).line(&format!(
+                "median own_rss_mb={own_rss_start:.1} own_rss_end={own_rss_end:.1}"
+            ))
+        );
     }
 }
 

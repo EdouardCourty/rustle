@@ -36,8 +36,9 @@ BENCH_CPU=$(awk -F',' -v skip="$PROXY_CPU" '{
 export PROXY_CPU BENCH_CPU
 echo "==> cpu pinning: proxy=$PROXY_CPU client/upstream/sink=$BENCH_CPU (available: $ALL_CPUS)"
 
-echo "==> building images"
-docker compose build client upstream sink >/dev/null
+echo "==> building images (serialized: rustc peaks ~1-2 GB transiently)"
+docker compose build client >/dev/null
+docker compose build upstream >/dev/null
 docker build -q -t "$PROXY_IMAGE" -f "proxies/$PROXY/Dockerfile" .. >/dev/null
 
 echo "==> starting stack (proxy=$PROXY auth=$AUTH repeat=$REPEAT)"
@@ -120,6 +121,7 @@ run_hold() {
 run_test http-1kb  http http://upstream:8000/1kb  --conns 16 --requests 100000
 run_test http-10kb http http://upstream:8000/10kb --conns 16 --requests 50000
 run_test http-1mb  http http://upstream:8000/1mb  --conns 16 --requests 5000
+run_test http-10mb http http://upstream:8000/10mb --conns 8  --requests 300
 
 # --- C. Short connections (1 request per connection) ---
 run_test http-1kb-short http http://upstream:8000/1kb --conns 64 --requests 50000 --no-keepalive
