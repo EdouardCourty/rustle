@@ -68,13 +68,31 @@ curl -x http://127.0.0.1:8080 -U bench:secret1 http://example.com
 cargo test -p myproxy
 ```
 
+## Make (résumé des cibles)
+
+```sh
+make help              # lister les cibles
+make build             # build release (myproxy + bench-client)
+make test              # tests unitaires
+make images            # images Docker (sérialisé, box 4 GB friendly)
+make up / make down    # stack upstream+sink+proxy
+make smoke             # test http rapide via la stack
+make latest            # afficher la dernière passe de résultats
+```
+
 ## Benchmark
 
 ```sh
-cd bench
-./run-bench.sh myproxy on   # ou 3proxy / off
+make bench                    # myproxy, auth on (défaut)
+make bench P=3proxy           # matrice 3proxy
+make bench A=off P=3proxy     # sans auth
+make bench P=myproxy A=off R=5
+make bench-all                # les 4 matrices en séquence (~1 h)
 ```
 
+Variables : `P` = proxy testé (`myproxy`|`3proxy`), `A` = auth (`on`|`off`),
+`R` = répétitions (défaut 3, médiane calculée).
+
 Résultats bruts dans `bench/results/<proxy>/auth-<on|off>/<timestamp>/results.txt`.
-Comparatif complet (M5→M8, delayed-ACK 3proxy vérifié à la capture) :
+Comparatif complet (M5→M10, delayed-ACK 3proxy vérifié à la capture) :
 `bench/RESULTS.md`.

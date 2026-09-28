@@ -23,17 +23,8 @@ HOLD_MAX_SINGLE=30000   # above this, split across 2 client replicas (ephemeral 
 export PROXY_IMAGE="${PROXY}:bench"
 export AUTH
 
-# CPU pinning: give the proxy its own core, everything else another one.
-# Auto-detect from the cgroup cpuset (e.g. containers exposing "0,2").
-ALL_CPUS=$(cat /sys/fs/cgroup/cpuset.cpus.effective 2>/dev/null || grep Cpus_allowed_list /proc/self/status | awk '{print $2}')
-PROXY_CPU=$(awk -F',' '{split($1,a,"-"); print a[1]}' <<<"$ALL_CPUS")
-BENCH_CPU=$(awk -F',' -v skip="$PROXY_CPU" '{
-    n=split($0,t,","); out="";
-    for (i=1;i<=n;i++) { split(t[i],a,"-"); s=a[1]; e=(a[2]==""?s:a[2]);
-        for (c=s;c<=e;c++) if (c+0!=skip+0) { out=out (out==""?"":",") c } }
-    print (out==""?skip:out)
-}' <<<"$ALL_CPUS")
-export PROXY_CPU BENCH_CPU
+# CPU pinning auto-détecté (partagé avec le Makefile).
+. "$(dirname "$0")/env.sh"
 echo "==> cpu pinning: proxy=$PROXY_CPU generator/upstream/sink=$BENCH_CPU (available: $ALL_CPUS)"
 
 echo "==> building images (serialized: rustc peaks ~1-2 GB transiently)"
