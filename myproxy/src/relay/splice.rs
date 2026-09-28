@@ -9,6 +9,30 @@ use std::os::unix::io::AsRawFd;
 use tokio::io::unix::AsyncFd;
 use tokio::net::TcpStream;
 
+/// Kernel pipe buffer size for relay pipes. Default is 64 KB; enlarging
+/// to 1 MB cuts the fill/drain iteration rate by ~16x on bulk flows
+/// (10 MB responses: 45k -> 3k pump iterations/s) — measured as the last
+/// CPU-side gap vs 3proxy on 10 MB objects (-13%). Requires root or
+/// CAP_SYS_RESOURCE above `/proc/sys/fs/pipe-max-size`; on failure the
+/// pipe keeps its default capacity (performance loss, not a breakage).
+const PIPE_CAPACITY: libc::c_int = 1024 * 1024;
+
+/// Create a non-blocking pipe sized to [`PIPE_CAPACITY`] (`F_SETPIPE_SZ`,
+/// best effort): returns `None` and no allocations on failure.
+fn sized_pipe() -> Option<[std::ffi::c_int; 2]> {
+    let mut p = [0 as std::ffi::c_int; 2];
+    if unsafe { libc::pipe2(p.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC) } != 0 {
+        return None;
+    }
+    unsafe {
+        // Best effort: the kernel may clamp to fs.pipe-max-size; failures
+        // keep the default 64 KB capacity, which still works correctly.
+        libc::fcntl(p[0], libc::F_SETPIPE_SZ, PIPE_CAPACITY);
+        libc::fcntl(p[1], libc::F_SETPIPE_SZ, PIPE_CAPACITY);
+    }
+    Some(p)
+}
+
 /// Bidirectional tunnel relay (both directions, half-close propagation).
 ///
 /// Returns `Err` with the un-consumed streams when the zero-copy setup
@@ -18,16 +42,16 @@ pub(super) async fn bidirectional(
     client: TcpStream,
     up: TcpStream,
 ) -> Result<(u64, u64), (TcpStream, TcpStream)> {
-    let mut p_ab = [0 as std::ffi::c_int; 2];
-    let mut p_ba = [0 as std::ffi::c_int; 2];
-    let ok = unsafe {
-        libc::pipe2(p_ab.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC) == 0
-            && libc::pipe2(p_ba.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC) == 0
-    };
-    if !ok {
-        // No pipes (EMFILE/ENFILE?): fall back to the adaptive relay.
+    let Some(p_ab) = sized_pipe() else {
         return Err((client, up));
-    }
+    };
+    let Some(p_ba) = sized_pipe() else {
+        unsafe {
+            libc::close(p_ab[0]);
+            libc::close(p_ab[1]);
+        }
+        return Err((client, up));
+    };
     let (pipe_ab_r, pipe_ab_w) = (PipeFd(p_ab[0]), PipeFd(p_ab[1]));
     let (pipe_ba_r, pipe_ba_w) = (PipeFd(p_ba[0]), PipeFd(p_ba[1]));
 
@@ -70,14 +94,13 @@ pub(super) async fn response(
         unsafe { libc::close(up_fd_raw) };
         return None;
     }
-    let mut p = [0 as std::ffi::c_int; 2];
-    if unsafe { libc::pipe2(p.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC) } != 0 {
+    let Some(p) = sized_pipe() else {
         unsafe {
             libc::close(up_fd_raw);
             libc::close(client_fd_raw);
         };
         return None;
-    }
+    };
     let (pipe_r, pipe_w) = (PipeFd(p[0]), PipeFd(p[1]));
 
     // from_raw_fd objects own their fd and close it on drop: nothing leaks

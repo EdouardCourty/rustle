@@ -37,7 +37,7 @@ export PROXY_CPU BENCH_CPU
 echo "==> cpu pinning: proxy=$PROXY_CPU generator/upstream/sink=$BENCH_CPU (available: $ALL_CPUS)"
 
 echo "==> building images (serialized: rustc peaks ~1-2 GB transiently)"
-docker compose build client >/dev/null
+docker compose build generator >/dev/null
 docker compose build upstream >/dev/null
 docker build -q -t "$PROXY_IMAGE" -f "dut/$PROXY/Dockerfile" .. >/dev/null
 
