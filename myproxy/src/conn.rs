@@ -10,7 +10,8 @@ use tokio::time::timeout;
 use crate::auth::Authenticator;
 use crate::config::Config;
 use crate::dns::DnsCache;
-use crate::http::{classify, read_head, rewrite_head, HeadError, Target};
+use crate::http::{classify, read_head, rewrite_head, HeadError, RespError, Target};
+use crate::pool::UpstreamPool;
 
 const RESP_407: &[u8] = b"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"myproxy\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 const RESP_400: &[u8] = b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
@@ -29,6 +30,7 @@ pub async fn handle_conn(
     cfg: Arc<Config>,
     auth: Arc<Authenticator>,
     dns: Arc<DnsCache>,
+    pool: Arc<UpstreamPool>,
 ) {
     let idle = cfg.timeouts.idle;
     let connect = cfg.timeouts.connect;
@@ -108,27 +110,109 @@ pub async fn handle_conn(
                 return;
             }
             Target::Http { host, port, origin } => {
-                let mut up = match connect_upstream(&host, port, connect, &dns).await {
-                    Ok(s) => s,
-                    Err(UpstreamError::Timeout) => {
-                        let _ = client.write_all(RESP_504).await;
+                let key = format!("{host}:{port}");
+                // Upstream connection: pooled reuse when possible, fresh
+                // otherwise. A pooled connection that died while idle is
+                // retried once on a fresh one (safe: no response byte has
+                // reached the client at that point).
+                let mut attempt = 0;
+                let (mut up, _from_pool, rhead, rbuf) = loop {
+                    attempt += 1;
+                    let (mut up, from_pool) = match pool.take(&key) {
+                        Some(s) => (s, true),
+                        None => match connect_upstream(&host, port, connect, &dns).await {
+                            Ok(s) => (s, false),
+                            Err(UpstreamError::Timeout) => {
+                                let _ = client.write_all(RESP_504).await;
+                                return;
+                            }
+                            Err(UpstreamError::Other(e)) => {
+                                tracing::debug!(error = %e, "upstream connect failed");
+                                let _ = client.write_all(RESP_502).await;
+                                return;
+                            }
+                        },
+                    };
+                    let _ = up.set_nodelay(true);
+
+                    if !forward_request(&mut client, &mut up, &buf, &head, &origin, idle).await {
                         return;
                     }
-                    Err(UpstreamError::Other(e)) => {
-                        tracing::debug!(error = %e, "upstream connect failed");
-                        let _ = client.write_all(RESP_502).await;
-                        return;
+                    let mut rbuf: Vec<u8> = Vec::new();
+                    rbuf.reserve(1024);
+                    match timeout(
+                        idle,
+                        crate::http::read_response_head(&mut up, &mut rbuf, max_head, idle),
+                    )
+                    .await
+                    {
+                        Ok(Ok(h)) => break (up, from_pool, h, rbuf),
+                        Ok(Err(RespError::Closed)) if from_pool && attempt == 1 => {
+                            continue; // stale pooled socket: retry, fresh this time
+                        }
+                        Ok(Err(_)) => return,
+                        Err(_) => return, // idle timeout on the response head
                     }
                 };
-                let _ = up.set_nodelay(true);
 
-                if !forward_request(&mut client, &mut up, &buf, &head, &origin, idle).await {
+                // Body end: Content-Length, zero for HEAD/204/304, chunked
+                // framing, or unknown (then: relay until EOF, no pooling).
+                let body_left = if rhead.no_body_status || head.method == "HEAD" {
+                    Some(0)
+                } else {
+                    rhead.content_length
+                };
+                let spare = (rbuf.len() - rhead.raw_len) as u64;
+                let forward_n = match body_left {
+                    Some(l) => l.min(spare) as usize,
+                    None => spare as usize,
+                };
+                // Forward what was already read (= the response head AND,
+                // if pipelined into the same packets, early body bytes),
+                // capped at the body length (anything beyond would belong
+                // to a backend-pipelined response — not supported, dropped):
+                // the head itself is relayed verbatim (transparent proxy).
+                let window_end = (rhead.raw_len + forward_n).min(rbuf.len());
+                if window_end > 0
+                    && client.write_all(&rbuf[..window_end]).await.is_err()
+                {
                     return;
                 }
-                // Response relay: upstream is Connection: close, so the
-                // response ends at EOF. Then loop for the next keep-alive
-                // request (zero-copy when available, adaptive copy else).
-                let _ = timeout(idle, relay_response(&mut up, &mut client)).await;
+                let remaining: Option<u64> = body_left.map(|l| l - forward_n as u64);
+
+                // Relay the rest of the body (zero-copy when the flow is
+                // bulk), or chunk framing transparently, or until EOF.
+                let relaid = if rhead.chunked {
+                    match timeout(idle, relay_chunked(&mut up, &mut client)).await {
+                        Ok(Ok(n)) => Some(n),
+                        _ => None, // error or timeout: stop here
+                    }
+                } else {
+                    Some(
+                        timeout(idle, relay_response(&mut up, &mut client, remaining))
+                            .await
+                            .unwrap_or(0),
+                    )
+                };
+                let Some(relaid) = relaid else {
+                    return;
+                };
+
+                // Pool the upstream when the response allows clean reuse.
+                let complete = match body_left {
+                    Some(left) => forward_n as u64 + relaid == left,
+                    None => true, // chunked counts only until its terminal chunk
+                };
+                if !complete {
+                    tracing::warn!(
+                        upstream = %key, http = "incomplete-upstream-response",
+                        left = ?body_left, got = relaid
+                    );
+                    return;
+                }
+                if rhead.keep_alive {
+                    pool.put(&key, up);
+                }
                 if head.close || head.version_minor == 0 {
                     return;
                 }
@@ -269,8 +353,7 @@ async fn relay_bidirectional(
 ) -> std::io::Result<(u64, u64)> {
     #[cfg(target_os = "linux")]
     {
-        match splice_bidirectional(client, up).await {
-            Ok(res) => return Ok(res),
+        match splice_bidirectional(client, up).await {            Ok(res) => return Ok(res),
             Err((client, up)) => return adaptive_bidirectional(client, up).await,
         }
     }
@@ -326,35 +409,44 @@ async fn splice_bidirectional(
         _ => return Ok((0, 0)),
     };
     let (a2b, b2a) = tokio::join!(
-        splice_dir(&client_fd, &up_fd, &pipe_ab_r, &pipe_ab_w, true),
-        splice_dir(&up_fd, &client_fd, &pipe_ba_r, &pipe_ba_w, true)
+        splice_dir(&client_fd, &up_fd, &pipe_ab_r, &pipe_ab_w, true, None),
+        splice_dir(&up_fd, &client_fd, &pipe_ba_r, &pipe_ba_w, true, None)
     );
     Ok((a2b, b2a))
 }
 
-/// HTTP response relay (upstream -> client), adaptive and zero-copy hybrid.
-///
-/// Phase 1 copies user-space with a growing buffer (8 -> 64 KB): small
-/// responses (the common case) never touch the zero-copy machinery
-/// (per-request pipe + fd dups + reactor registrations cost ~8% on 1 KB
-/// objects, measured). Phase 2: when reads sustain the max buffer (bulk
-/// response detected), switch to splice() for the remainder — measured
-/// 1 MB responses go 1.2 GB/s -> 2.1 GB/s with it.
-async fn relay_response(up: &mut TcpStream, client: &mut TcpStream) -> u64 {
+/// HTTP response relay (upstream -> client), adaptive and zero-copy hybrid,
+/// bounded by `remaining` body bytes when known (keep-alive upstream: the
+/// next response may already be queued; we must not over-read).
+async fn relay_response(up: &mut TcpStream, client: &mut TcpStream, remaining: Option<u64>) -> u64 {
     use tokio::io::AsyncReadExt;
 
     let mut buf: Vec<u8> = Vec::new();
     buf.reserve(RELAY_BUF0);
     let mut total: u64 = 0;
     loop {
+        if let Some(l) = remaining {
+            if total == l {
+                return total; // body fully consumed, over-read avoided
+            }
+        }
         buf.clear();
-        let n = match up.read_buf(&mut buf).await {
+        // Bound the read to what remains (a take wrapper caps reads even
+        // when more bytes are queued on the socket).
+        let n = match remaining {
+            Some(l) => {
+                let mut lim = (&mut *up).take(l - total);
+                lim.read_buf(&mut buf).await
+            }
+            None => up.read_buf(&mut buf).await,
+        };
+        let n = match n {
             Ok(n) => n,
             Err(_) => return total,
         };
         if n == 0 {
-            // Upstream EOF: response complete. No shutdown of the client:
-            // keep-alive must survive for the next request.
+            // Upstream EOF: fine when unlimited (Connection: close), an
+            // error against a declared Content-Length (truncated body).
             return total;
         }
         if client.write_all(&buf[..n]).await.is_err() {
@@ -364,14 +456,146 @@ async fn relay_response(up: &mut TcpStream, client: &mut TcpStream) -> u64 {
         if buf.len() == buf.capacity() {
             if buf.capacity() < RELAY_BUF_MAX {
                 buf.reserve(buf.capacity()); // double
-            } else {
+            } else if remaining.is_none() || remaining.unwrap() > total {
                 // Sustained bulk flow: hand the rest to the zero-copy relay.
-                if let Some(extra) = splice_response(up, client).await {
+                if let Some(extra) = splice_response(up, client, remaining.map(|l| l - total)).await {
                     return total + extra;
                 }
-                // Zero-copy unavailable (no pipes / registration): keep
-                // copying adaptively; capacity stays at RELAY_BUF_MAX.
+                // Zero-copy unavailable: keep copying adaptively.
             }
+        }
+    }
+}
+
+/// Transparent chunked-body relay: forwards every byte verbatim (framing
+/// included) while tracking boundaries, and returns once the terminal
+/// chunk has been consumed — the upstream is then at a clean response
+/// boundary (possible candidate for pooling). Verbatim forwarding keeps
+/// transfer-level details (chunk sizes, extensions) untouched.
+async fn relay_chunked(up: &mut TcpStream, client: &mut TcpStream) -> std::io::Result<u64> {
+    let byte = &mut [0u8; 1];
+    let mut total: u64 = 0;
+    loop {
+        // ---- size line: hex [;ext] CRLF, read byte-wise, forward verbatim
+        let mut size_line: Vec<u8> = Vec::with_capacity(16);
+        loop {
+            up.read_exact(byte).await?;
+            let b = byte[0];
+            size_line.push(b);
+            if b == b'\n' {
+                break;
+            }
+            if size_line.len() > 128 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "chunk size line too long",
+                ));
+            }
+        }
+        let hex_end = size_line
+            .iter()
+            .position(|&b| b == b';' || b == b'\r' || b == b'\n')
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "no chunk size")
+            })?;
+        let chunk_size = std::str::from_utf8(&size_line[..hex_end])
+            .ok()
+            .and_then(|s| u64::from_str_radix(s, 16).ok())
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "bad chunk size")
+            })?;
+
+        client.write_all(&size_line).await?;
+
+        if chunk_size == 0 {
+            // Terminal chunk: zero or more trailer lines, ended by a bare
+            // CRLF; all forwarded verbatim, then the upstream stands at a
+            // clean response boundary.
+            loop {
+                let mut trailer: Vec<u8> = Vec::with_capacity(64);
+                loop {
+                    up.read_exact(byte).await?;
+                    let b = byte[0];
+                    trailer.push(b);
+                    if b == b'\n' {
+                        break;
+                    }
+                }
+                client.write_all(&trailer).await?;
+                if trailer == b"\r\n" {
+                    return Ok(total);
+                }
+                if trailer.len() > 1024 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "trailer line too long",
+                    ));
+                }
+            }
+        }
+
+        // ---- chunk data (transparent, adaptively relayed), then its CRLF
+        let mut left = chunk_size;
+        while left > 0 {
+            let n = relay_response_copy(up, client, Some(left)).await;
+            if n == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "chunk truncated",
+                ));
+            }
+            left -= n;
+            total += n;
+        }
+        let mut crlf = [0u8; 2];
+        up.read_exact(&mut crlf).await?;
+        client.write_all(&crlf).await?;
+        if crlf != [b'\r', b'\n'] {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "bad chunk terminator",
+            ));
+        }
+    }
+}
+
+/// Copy-only body relay (used inside chunked framing, where the underlying
+/// source is a bounded `Take` wrapper that cannot feed the splice path).
+async fn relay_response_copy<R>(up: &mut R, client: &mut TcpStream, remaining: Option<u64>) -> u64
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    use tokio::io::AsyncReadExt;
+    let mut buf: Vec<u8> = Vec::new();
+    buf.reserve(RELAY_BUF0);
+    let mut total: u64 = 0;
+    loop {
+        if let Some(l) = remaining {
+            if total == l {
+                return total;
+            }
+        }
+        buf.clear();
+        let n = match remaining {
+            Some(l) => {
+                let mut lim = (&mut *up).take(l - total);
+                lim.read_buf(&mut buf).await
+            }
+            None => up.read_buf(&mut buf).await,
+        };
+        let n = match n {
+            Ok(n) => n,
+            Err(_) => return total,
+        };
+        if n == 0 {
+            return total;
+        }
+        if client.write_all(&buf[..n]).await.is_err() {
+            return total;
+        }
+        total += n as u64;
+        if buf.len() == buf.capacity() && buf.capacity() < RELAY_BUF_MAX {
+            buf.reserve(buf.capacity());
         }
     }
 }
@@ -381,7 +605,11 @@ async fn relay_response(up: &mut TcpStream, client: &mut TcpStream) -> u64 {
 /// connection loop). A dup shares the file description, so O_NONBLOCK and
 /// the underlying socket state are shared with the original.
 #[cfg(target_os = "linux")]
-async fn splice_response(up: &mut TcpStream, client: &mut TcpStream) -> Option<u64> {
+async fn splice_response(
+    up: &mut TcpStream,
+    client: &mut TcpStream,
+    limit: Option<u64>,
+) -> Option<u64> {
     use std::os::unix::io::{AsRawFd, FromRawFd};
     use tokio::io::unix::AsyncFd;
 
@@ -413,7 +641,7 @@ async fn splice_response(up: &mut TcpStream, client: &mut TcpStream) -> Option<u
         _ => return None,
     };
     // No half-close of the client on EOF: keep-alive must survive.
-    Some(splice_dir(&up_fd, &client_fd, &pipe_r, &pipe_w, false).await)
+    Some(splice_dir(&up_fd, &client_fd, &pipe_r, &pipe_w, false, limit).await)
 }
 
 /// RAII around a raw pipe fd so cancellation (idle timeout dropping the
@@ -438,6 +666,7 @@ async fn splice_dir(
     pipe_r: &PipeFd,
     pipe_w: &PipeFd,
     shutdown_on_eof: bool,
+    limit: Option<u64>,
 ) -> u64 {
     const SPLICE_F_MOVE: u32 = 1;
     const SPLICE_F_NONBLOCK: u32 = 2;
@@ -448,8 +677,16 @@ async fn splice_dir(
     const SPLICE_CHUNK: usize = 256 * 1024;
 
     let mut moved: u64 = 0;
+    let mut left: u64 = match limit {
+        Some(l) => l,
+        None => u64::MAX,
+    };
 
     'outer: loop {
+        if left == 0 {
+            return moved; // body fully relayed, no over-splice
+        }
+
         // Phase 1: wait for data on src and move up to one pipe-full.
         let mut in_pipe: usize;
         loop {
@@ -463,7 +700,7 @@ async fn splice_dir(
                     std::ptr::null_mut(),
                     pipe_w.0,
                     std::ptr::null_mut(),
-                    SPLICE_CHUNK,
+                    SPLICE_CHUNK.min(left as usize),
                     flags,
                 )
             };
@@ -507,6 +744,7 @@ async fn splice_dir(
             if n > 0 {
                 in_pipe -= n as usize;
                 moved += n as u64;
+                left -= n as u64;
             } else if n < 0 {
                 let err = std::io::Error::last_os_error();
                 if err.kind() == std::io::ErrorKind::WouldBlock {

@@ -19,6 +19,7 @@ pub struct Config {
     pub limits: LimitsConfig,
     pub timeouts: TimeoutsConfig,
     pub dns: DnsConfig,
+    pub http: HttpConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -92,6 +93,25 @@ impl Default for TimeoutsConfig {
         Self {
             connect: Duration::from_secs(5),
             idle: Duration::from_secs(60),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct HttpConfig {
+    /// Reuse idle upstream connections across requests (profiled: the
+    /// per-request connect/close chain dominated the HTTP bulk gap).
+    pub upstream_keepalive: bool,
+    /// Idle sockets kept per origin (host:port). 0 disables pooling.
+    pub max_idle_per_origin: usize,
+}
+
+impl Default for HttpConfig {
+    fn default() -> Self {
+        Self {
+            upstream_keepalive: true,
+            max_idle_per_origin: 32,
         }
     }
 }

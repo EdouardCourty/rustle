@@ -3,6 +3,7 @@ mod config;
 mod conn;
 mod dns;
 mod http;
+mod pool;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -16,6 +17,7 @@ use tracing_subscriber::EnvFilter;
 use auth::Authenticator;
 use config::Config;
 use dns::DnsCache;
+use pool::UpstreamPool;
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -55,6 +57,13 @@ async fn run(cfg: Arc<Config>) -> anyhow::Result<()> {
     let slots = Arc::new(Semaphore::new(cfg.limits.max_connections));
     let auth = Arc::new(Authenticator::new(&cfg.auth.api_keys));
     let dns = Arc::new(DnsCache::new(cfg.dns.ttl, cfg.dns.max_entries));
+    let pool = Arc::new(UpstreamPool::new(
+        if cfg.http.upstream_keepalive {
+            cfg.http.max_idle_per_origin
+        } else {
+            0
+        },
+    ));
 
     loop {
         let (sock, peer) = match listener.accept().await {
@@ -78,9 +87,10 @@ async fn run(cfg: Arc<Config>) -> anyhow::Result<()> {
         let cfg = cfg.clone();
         let auth = auth.clone();
         let dns = dns.clone();
+        let pool = pool.clone();
         tokio::spawn(async move {
             let _permit = permit;
-            conn::handle_conn(sock, cfg, auth, dns).await;
+            conn::handle_conn(sock, cfg, auth, dns, pool).await;
         });
     }
 }

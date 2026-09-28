@@ -24,3 +24,10 @@ idle = "60s"
 # kept and tried in order. Wiped when max_entries is exceeded.
 ttl = "60s"
 max_entries = 4096
+
+[http]
+# Reuse idle upstream connections across requests (LIFO pool; one retry on
+# a connection that died while idle). Disable to open/close an upstream
+# connection per request.
+upstream_keepalive = true
+max_idle_per_origin = 32
