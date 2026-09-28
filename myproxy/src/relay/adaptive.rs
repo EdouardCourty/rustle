@@ -28,11 +28,13 @@ pub(super) async fn bidirectional(client: TcpStream, up: TcpStream) -> std::io::
 }
 
 /// HTTP response relay: upstream -> client, adaptive with spill-to-splice
-/// on sustained bulk (`limit` bounds the relayed body).
+/// on sustained bulk (`limit` bounds the relayed body). `pipes` is the
+/// connection-owned reusable pair (`None` = create on first bulk).
 pub(super) async fn response(
     up: &mut TcpStream,
     client: &mut TcpStream,
     remaining: Option<u64>,
+    pipes: &mut Option<super::PipePair>,
 ) -> u64 {
     let mut buf: Vec<u8> = Vec::new();
     buf.reserve(RELAY_BUF0);
@@ -70,12 +72,26 @@ pub(super) async fn response(
             if buf.capacity() < RELAY_BUF_MAX {
                 buf.reserve(buf.capacity()); // double
             } else if remaining.is_none() || remaining.unwrap() > total {
-                // Sustained bulk flow: hand the rest to the zero-copy relay.
-                if let Some(extra) =
-                    super::splice::response(up, client, remaining.map(|l| l - total)).await
-                {
+                // Sustained bulk flow: hand the rest to the zero-copy relay
+                // with the connection's reusable pipe pair.
+                let limit = remaining.map(|l| l - total);
+                let result = match pipes {
+                    Some(pair) => super::splice::response(up, client, limit, pair).await,
+                    None => match super::splice::PipePair::new() {
+                        Some(pair) => {
+                            let r = super::splice::response(up, client, limit, &pair).await;
+                            *pipes = Some(pair);
+                            r
+                        }
+                        None => None, // kernel refused: adaptive continues
+                    },
+                };
+                if let Some(extra) = result {
                     return total + extra;
                 }
+                // Zero-copy failed mid-relay: the pipe state is unknown,
+                // drop the pair so the next response starts fresh.
+                *pipes = None;
                 // Zero-copy unavailable: keep copying adaptively.
             }
         }

@@ -124,11 +124,11 @@ if [ -n "${BENCH_SEED:-}" ]; then SEED="$BENCH_SEED"; else SEED=$RANDOM$RANDOM; 
 echo "seed=$SEED" | tee -a "$out/results.txt"
 
 declare -a TESTS=(
-    "run_test http-1kb http http://upstream:8000/1kb --conns 16 --requests 100000"
-    "run_test http-10kb http http://upstream:8000/10kb --conns 16 --requests 50000"
-    "run_test http-1mb http http://upstream:8000/1mb --conns 16 --requests 5000"
-    "run_test http-10mb http http://upstream:8000/10mb --conns 8 --requests 300"
-    "run_test http-1kb-short http http://upstream:8000/1kb --conns 64 --requests 50000 --no-keepalive"
+    "run_test http-1kb http http://upstream:8000/1kb --conns 16 --duration 15"
+    "run_test http-10kb http http://upstream:8000/10kb --conns 16 --duration 15"
+    "run_test http-1mb http http://upstream:8000/1mb --conns 16 --duration 15"
+    "run_test http-10mb http http://upstream:8000/10mb --conns 8 --duration 15"
+    "run_test http-1kb-short http http://upstream:8000/1kb --conns 64 --duration 15 --no-keepalive"
     "run_test flood-8 flood sink:9000 --conns 8 --duration 10"
     "run_hold 1000 10"
     "run_hold 5000 10"

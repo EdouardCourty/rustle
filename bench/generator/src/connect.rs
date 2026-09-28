@@ -58,7 +58,15 @@ pub(crate) async fn connect_via_proxy(
     target: &str,
     api_key: &str,
 ) -> anyhow::Result<TcpStream> {
-    let mut s = TcpStream::connect(proxy).await?;
+    // 10 s connect timeout: without it, a proxy that drops SYNs (3proxy
+    // over its ~17k wall) makes the kernel retransmit for ~127 s per
+    // connection and the hold matrix crawls for minutes.
+    let mut s = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        TcpStream::connect(proxy),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("connect timeout"))??;
     s.set_nodelay(true)?;
     let auth = B64.encode(format!("bench:{api_key}"));
     let req = format!(

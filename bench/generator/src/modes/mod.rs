@@ -14,12 +14,16 @@ pub(crate) fn warmup_of(cmd: &crate::Cmd) -> Option<crate::Cmd> {
         crate::Cmd::Http {
             url,
             conns,
+            duration,
             requests,
             no_keepalive,
         } => Some(crate::Cmd::Http {
             url: url.clone(),
             conns: *conns,
-            requests: (*requests).min(1000),
+            // Time-budgeted warmup: a fifth of the measured budget, at
+            // least 2 s. Count-based: a quarter of the requests.
+            duration: duration.map(|d| d.min(5).max(2)),
+            requests: requests.map(|r| (r / 4).max(100)),
             no_keepalive: *no_keepalive,
         }),
         crate::Cmd::Flood {
@@ -43,6 +47,7 @@ pub(crate) async fn run_once(cli: &crate::Cli, cmd: &crate::Cmd) -> Metrics {
         crate::Cmd::Http {
             url,
             conns,
+            duration,
             requests,
             no_keepalive,
         } => {
@@ -51,6 +56,7 @@ pub(crate) async fn run_once(cli: &crate::Cli, cmd: &crate::Cmd) -> Metrics {
                 &cli.api_key,
                 url,
                 *conns,
+                *duration,
                 *requests,
                 *no_keepalive,
             )

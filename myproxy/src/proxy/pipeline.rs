@@ -13,6 +13,7 @@ use crate::config::Config;
 use crate::dns::DnsCache;
 use crate::http::{read_response_head, HeadError, RequestHead, RespError};
 use crate::relay;
+use crate::relay::PipePair;
 use crate::upstream::UpstreamPool;
 
 use super::{RESP_502, RESP_504};
@@ -37,6 +38,7 @@ pub(super) async fn http(
     head: &RequestHead,
     dns: &DnsCache,
     pool: &UpstreamPool,
+    pipes: &mut Option<PipePair>,
 ) -> bool {
     let idle = cfg.timeouts.idle;
     let connect = cfg.timeouts.connect;
@@ -113,7 +115,7 @@ pub(super) async fn http(
         }
     } else {
         Some(
-            timeout(idle, relay::response(&mut up, client, remaining))
+            timeout(idle, relay::response(&mut up, client, remaining, pipes))
                 .await
                 .unwrap_or(0),
         )

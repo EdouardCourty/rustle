@@ -48,9 +48,13 @@ enum Cmd {
         /// Concurrent connections.
         #[arg(long)]
         conns: u32,
-        /// Total number of requests.
+        /// Stop after this many seconds (time-budgeted mode). Mutually
+        /// exclusive with --requests.
+        #[arg(long, conflicts_with = "requests")]
+        duration: Option<u64>,
+        /// Stop after this many requests. Ignored when --duration is set.
         #[arg(long)]
-        requests: u64,
+        requests: Option<u64>,
         /// Open a fresh connection for every request.
         #[arg(long)]
         no_keepalive: bool,
@@ -92,12 +96,25 @@ enum Cmd {
     },
 }
 
-#[tokio::main]
-async fn main() {
-    let cli = Cli::parse();
-    // Own RSS (MB): the hold/flood generators spawn tens of thousands of
-    // tasks; knowing the harness footprint matters on small boxes (the
-    // 4 GB dev instance once OOM'd mid-matrix). Read at start …
+// Standalone binary (not part of the myproxy workspace build profile):
+// the sink mode spawns tens of thousands of tasks at 25k tunnels — the
+// default 2 MB stacks cost ~25 KB touched per task (627 MB RSS at 25k,
+// measured) and OOM-pressure the 4 GB box. A hand-built runtime with
+// small stacks (like myproxy's) cuts that ~4x.
+fn main() -> anyhow::Result<()> {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .thread_stack_size(128 * 1024)
+        .build()?;
+    rt.block_on(amain());
+    Ok(())
+}
+
+async fn amain() {
+    let cli = Cli::parse(); // Own RSS (MB): the hold/flood generators spawn tens of thousands of
+                            // tasks; knowing the harness footprint matters on small boxes (the
+                            // 4 GB dev instance once OOM'd mid-matrix). Read at start …
     let own_rss_start = rss_pages();
     if let Cmd::Sink { listen } = &cli.cmd {
         modes::sink::run_sink(listen).await;
