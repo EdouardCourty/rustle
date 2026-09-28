@@ -14,8 +14,48 @@ mod adaptive;
 mod chunked;
 mod splice;
 
+pub(crate) use adaptive::copy_limited;
 pub use chunked::chunked;
 pub use splice::PipePair;
+
+use std::time::Duration;
+use tokio::time::Instant;
+
+/// Inactivity deadline (B1): reset on every successful transfer step and
+/// checked at every park. Replaces the external absolute `timeout(idle,
+/// ...)` which killed active tunnels/downloads longer than `idle` wall
+/// clock. Anti-leak on the public internet is then TCP keepalive's job
+/// (SO_KEEPALIVE + TCP_KEEPIDLE), not a wall-clock cap.
+pub(crate) struct IdleTimer {
+    idle: Duration,
+    deadline: Instant,
+}
+
+impl IdleTimer {
+    pub fn new(idle: Duration) -> Self {
+        Self {
+            idle,
+            deadline: Instant::now() + idle,
+        }
+    }
+
+    /// Call after every successful fill/drain (progress = new deadline).
+    pub fn reset(&mut self) {
+        self.deadline = Instant::now() + self.idle;
+    }
+
+    /// Park on `fut` until it resolves OR the inactivity deadline passes.
+    /// Returns `None` on inactivity timeout.
+    pub async fn park<F>(&mut self, fut: F) -> Option<F::Output>
+    where
+        F: std::future::Future,
+    {
+        tokio::select! {
+            out = fut => Some(out),
+            _ = tokio::time::sleep_until(self.deadline) => None,
+        }
+    }
+}
 
 /// Initial per-direction read buffer. Small on purpose: an idle tunnel only
 /// faults in this many pages, and most real tunnels (TLS handshakes, first
@@ -42,12 +82,13 @@ pub(crate) const RELAY_BUF_MAX: usize = 64 * 1024;
 pub async fn bidirectional(
     client: tokio::net::TcpStream,
     up: tokio::net::TcpStream,
+    idle: Duration,
 ) -> std::io::Result<(u64, u64)> {
     #[cfg(target_os = "linux")]
     {
-        match splice::bidirectional(client, up).await {
+        match splice::bidirectional(client, up, idle).await {
             Ok(res) => return Ok(res),
-            Err((client, up)) => return adaptive::bidirectional(client, up).await,
+            Err((client, up)) => return adaptive::bidirectional(client, up, idle).await,
         }
     }
     #[cfg(not(target_os = "linux"))]
@@ -68,8 +109,9 @@ pub async fn response(
     client: &mut tokio::net::TcpStream,
     remaining: Option<u64>,
     pipes: &mut Option<PipePair>,
+    idle: Duration,
 ) -> u64 {
-    adaptive::response(up, client, remaining, pipes).await
+    adaptive::response(up, client, remaining, pipes, idle).await
 }
 
 #[cfg(test)]
@@ -93,7 +135,11 @@ mod tests {
         let (mut a_r, mut a_w) = a_cli.into_split();
         let (mut b_r, mut b_w) = b_cli.into_split();
 
-        let relay = tokio::spawn(bidirectional(a_srv, b_srv));
+        let relay = tokio::spawn(bidirectional(
+            a_srv,
+            b_srv,
+            std::time::Duration::from_secs(60),
+        ));
 
         // a -> b: 4 MB in both small and large chunks (grow the relay path).
         let payload: Vec<u8> = (0..4 * 1024 * 1024).map(|i| (i % 251) as u8).collect();

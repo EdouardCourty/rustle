@@ -17,6 +17,9 @@ pub struct ResponseHead {
     /// Bytes of the head inside the buffer it was parsed from; the rest of
     /// the buffer belongs to the body.
     pub raw_len: usize,
+    /// HTTP status code (0 if unparsable). 1xx responses are not final —
+    /// the pipeline forwards them and re-reads the real head.
+    pub status: u16,
     pub content_length: Option<u64>,
     /// False when the response carries `Connection: close` or HTTP/1.0.
     pub keep_alive: bool,
@@ -44,8 +47,10 @@ pub async fn read_response_head(
     buf: &mut Vec<u8>,
     max_bytes: usize,
     idle: Duration,
+    prefix: &[u8],
 ) -> Result<ResponseHead, RespError> {
     buf.clear();
+    buf.extend_from_slice(prefix);
     loop {
         let mut headers = [httparse::EMPTY_HEADER; MAX_HEADERS];
         let mut resp = httparse::Response::new(&mut headers);
@@ -86,12 +91,17 @@ pub async fn read_response_head(
             }
             let status = resp.code.unwrap_or(0);
             let version11 = resp.version == Some(1);
-            let no_body_status: bool =
-                status == 204 || status == 304 || (100..200).contains(&status);
+            let no_body_status: bool = status == 204 || status == 304 || status == 101;
             return Ok(ResponseHead {
                 raw_len: len,
+                status,
                 content_length: if chunked { None } else { content_length },
-                keep_alive: version11 && !close,
+                // Framing must be declared for a clean reuse boundary:
+                // HTTP/1.1 without Content-Length/chunked means "until
+                // EOF" — such a connection can never be pooled (B8).
+                keep_alive: version11
+                    && !close
+                    && (chunked || content_length.is_some() || no_body_status),
                 chunked,
                 no_body_status,
             });

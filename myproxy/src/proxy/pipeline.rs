@@ -49,7 +49,7 @@ pub(super) async fn http(
     // pooled connection that died while idle is retried once on a fresh
     // one (safe: no response byte has reached the client at that point).
     let mut attempt = 0;
-    let (mut up, _from_pool, rhead, rbuf) = loop {
+    let (mut up, _from_pool, mut rhead, mut rbuf) = loop {
         attempt += 1;
         let (mut up, from_pool) = match pool.take(&key) {
             Some(s) => (s, true),
@@ -68,13 +68,34 @@ pub(super) async fn http(
         };
         let _ = up.set_nodelay(true);
 
+        // B7: a retry is only safe when the request was forwarded from the
+        // already-buffered bytes (no client body still being drained) and
+        // the method is idempotent — otherwise a retry could re-execute a
+        // POST or resend a head without its body.
+        let idempotent =
+            head.method.eq_ignore_ascii_case("GET") || head.method.eq_ignore_ascii_case("HEAD");
+        let replayable = idempotent
+            && head.content_length.unwrap_or(0) as usize == buf.len().saturating_sub(head.raw_len);
+
         if !forward_request(client, &mut up, buf, head, origin, idle).await {
             return false;
         }
         let mut rbuf: Vec<u8> = Vec::new();
         rbuf.reserve(1024);
-        match timeout(idle, read_response_head(&mut up, &mut rbuf, max_head, idle)).await {
+        match timeout(
+            idle,
+            read_response_head(&mut up, &mut rbuf, max_head, idle, &[]),
+        )
+        .await
+        {
             Ok(Ok(h)) => break (up, from_pool, h, rbuf),
+            // B6: retry once on ANY I/O failure of a pooled socket — clean
+            // EOF or RST — as long as the request is replayable (B7).
+            Ok(Err(RespError::Head(HeadError::Io(_))))
+                if from_pool && attempt == 1 && replayable =>
+            {
+                continue; // stale/rst pooled socket: retry, fresh this time
+            }
             Ok(Err(RespError::Closed)) if from_pool && attempt == 1 => {
                 continue; // stale pooled socket: retry, fresh this time
             }
@@ -83,9 +104,41 @@ pub(super) async fn http(
         }
     };
 
-    // Body end: Content-Length, zero for HEAD/204/304, chunked framing, or
-    // unknown (then: relay until EOF, no pooling).
-    let body_left = if rhead.no_body_status || head.method == "HEAD" {
+    // B2: informational responses (1xx — e.g. `100 Continue`) are not
+    // final. Forward each verbatim and re-read the real head on the same
+    // socket; never pool in between (the response is still in flight).
+    let mut hops = 0u8;
+    loop {
+        if !(100..200).contains(&rhead.status) {
+            break;
+        }
+        hops += 1;
+        if hops > 3 {
+            return false;
+        }
+        if client.write_all(&rbuf[..rhead.raw_len]).await.is_err() {
+            return false;
+        }
+        let mut next: Vec<u8> = rbuf[rhead.raw_len..].to_vec(); // residual = next head prefix
+        let head_res = timeout(
+            idle,
+            read_response_head(&mut up, &mut next, max_head, idle, &[]),
+        )
+        .await;
+        match head_res {
+            Ok(Ok(h)) => {
+                rhead = h;
+                rbuf = next;
+            }
+            _ => return false, // backend died after a 1xx: drop safely
+        }
+    }
+
+    // Body end: Content-Length, zero for HEAD/204/304 (B5: case-insensitive
+    // and chunked must not override a declared zero body), chunked framing,
+    // or unknown (then: relay until EOF, no pooling).
+    let zero_body = rhead.no_body_status || head.method.eq_ignore_ascii_case("HEAD");
+    let body_left = if zero_body {
         Some(0)
     } else {
         rhead.content_length
@@ -108,21 +161,23 @@ pub(super) async fn http(
 
     // Relay the rest of the body (zero-copy when the flow is bulk), or the
     // chunk framing transparently, or until EOF.
-    let relaid = if rhead.chunked {
-        match timeout(idle, relay::chunked(&mut up, client)).await {
-            Ok(Ok(n)) => Some(n),
-            _ => None, // error or timeout: stop here
+    // B1: no external absolute timeout — the engines carry their own
+    // inactivity deadline (reset on every progress step).
+    let relaid: Option<u64> = if rhead.chunked && !zero_body {
+        match relay::chunked(&mut up, client, idle).await {
+            Ok(n) => Some(n),
+            Err(_) => None, // error: drop the connection
         }
     } else {
-        Some(
-            timeout(idle, relay::response(&mut up, client, remaining, pipes))
-                .await
-                .unwrap_or(0),
-        )
+        Some(relay::response(&mut up, client, remaining, pipes, idle).await)
     };
     let Some(relaid) = relaid else {
         return false;
     };
+
+    // B4: bytes buffered beyond the body belong to a backend-pipelined
+    // response — the stream is desynchronized, never pool it.
+    let over_read = rbuf.len() > window_end;
 
     // Pool the upstream when the response allows clean reuse.
     let complete = match body_left {
@@ -136,7 +191,7 @@ pub(super) async fn http(
         );
         return false;
     }
-    if rhead.keep_alive {
+    if rhead.keep_alive && !over_read {
         pool.put(&key, up);
     }
     !(head.close || head.version_minor == 0)
@@ -171,12 +226,9 @@ async fn forward_request(
     let remaining = content_length - body.len() as u64;
     if remaining > 0 {
         let mut limited = (&mut *client).take(remaining);
-        if timeout(idle, tokio::io::copy(&mut limited, up))
-            .await
-            .is_err()
-        {
-            return false;
-        }
+        // Inactivity-bounded (idle resets on progress): slow uploads no
+        // longer die at the absolute cap.
+        let _ = crate::relay::copy_limited(&mut limited, up, None, idle).await;
     }
     true
 }

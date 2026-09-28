@@ -97,12 +97,12 @@ pub async fn handle_conn(
                             let _ = timeout(idle, up.write_all(&early)).await;
                         }
                         // Tunnel: relay both directions until one side closes.
-                        match timeout(idle, relay::bidirectional(client, up)).await {
-                            Ok(Ok((c2u, u2c))) => {
+                        // Inactivity-bounded internally (no absolute cap).
+                        match relay::bidirectional(client, up, idle).await {
+                            Ok((c2u, u2c)) => {
                                 tracing::trace!(c2u, u2c, "tunnel closed");
                             }
-                            Ok(Err(e)) => tracing::trace!(error = %e, "tunnel error"),
-                            Err(_) => tracing::trace!("tunnel idle timeout"),
+                            Err(e) => tracing::trace!(error = %e, "tunnel error"),
                         }
                     }
                     Err(UpstreamError::Timeout) => {
