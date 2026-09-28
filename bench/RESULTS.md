@@ -17,27 +17,32 @@ Dates : 2026-09-27/28 · `{myproxy, 3proxy} × {auth=on, auth=off}`, médiane de
 
 ## Chiffres définitifs (M9 : pool upstream + F_SETPIPE_SZ 1 MB + TCP window 1 MB, auth on)
 
-| Workload | **myproxy M9.1** | 3proxy | Verdict |
+| Workload | **myproxy M9 (randomisé)** | 3proxy | Verdict |
 |---|---|---|---|
-| HTTP 1 KB, keep-alive ×16 | **14 175 rps · p50 0,99 ms** | 388 rps · p50 41 ms | **myproxy ×37*** |
-| HTTP 10 KB, ×16 | **13 943 rps (143 MB/s)** | 11 852 rps (121 MB/s) | **devant : +18 % rps, +18 % MB/s** |
-| HTTP 1 MB, ×16 | **2 729 rps (2 862 MB/s)** | 2 444 rps (2 563 MB/s) | **devant : +12 %** |
-| HTTP 10 MB, ×8 | 270 rps (2 832 MB/s) · isolé: 3 575 MB/s | **276 rps** (2 892 MB/s) | parité (variance harnais ±11 %) |
-| HTTP 1 KB, 1 req/conn ×64 | **4 765 rps · p50 6,1 ms** | 2 979 rps · p50 15,1 ms | **myproxy +60 %** |
-| CONNECT flood ×8 | **19,18 Gbps** · 44 % CPU | 17,86 Gbps · 42 % CPU | **devant en débit, CPU idem** |
-| Hold 10 000 tunnels | 1 708 conn/s · RSS 14,3 MB · CPU 1,40 s | 1 911 conn/s · CPU 1,95 s | débit -11 %, CPU ÷1,4 |
-| Hold 25 000 · p99 | **25 000/25 000 ×3 · RSS 28,5 MB** | 16 745/25 000 (mur ~17k) | **myproxy seul à tenir** |
-| RAM tunnel idle | ~1,1 KB/conn | ~0,34 KB/conn | 3proxy ×3-4 (M10 pooling) |
+| HTTP 1 KB, keep-alive ×16 | **14 725 rps · p50 1,1 ms** | 388 rps · p50 41 ms | **myproxy ×38*** |
+| HTTP 10 KB, ×16 | **15 238 rps (156 MB/s)** · CPU 2,78 s | 12 660 rps (130 MB/s) · CPU 3,70 s | **devant : +20 % rps, +20 % MB/s, CPU ÷1,3** |
+| HTTP 1 MB, ×16 | **2 593 rps (2 719 MB/s)** | 2 371 rps (2 486 MB/s) | **devant : +9 %** |
+| HTTP 10 MB, ×8 | 270 rps (2 830 MB/s) | **279 rps** (2 928 MB/s) | −3 % (parité dans le bruit) |
+| HTTP 1 KB, 1 req/conn ×64 | **4 848 rps · p50 6,2 ms** | 3 032 rps · p50 19,2 ms | **myproxy +60 %** |
+| CONNECT flood ×8 | **19,42 Gbps · 40 % CPU (3,95 s)** | 18,00 Gbps · 41 % CPU (4,09 s) | **devant : +8 % débit, −4 % CPU** |
+| Hold 1 000 tunnels | 4 386 conn/s · RSS 5,1 MB | 4 310 conn/s · RSS 3,4 MB | parité |
+| Hold 10 000 | **1 749 conn/s** · RSS 14,3 MB · CPU 1,40 s | 1 672 conn/s · RSS 3,5 MB · CPU 1,99 s | **devant : +5 % débit, CPU ÷1,4** |
+| Hold 25 000 | **25 000/25 000 ×3 · RSS 28,3 MB** | 16 745/25 000 (mur ~17k, reconfirmé ×3) | **myproxy seul à tenir** |
+| RAM tunnel idle | ~1,1-1,4 KB/conn | ~0,35 KB/conn | 3proxy ×4 (M10 pooling) |
 
-## Ce que M9 a ajouté (médiane M8 → M9.1)
+## Ce que M9 a ajouté (médiane M8 → M9, ordre randomisé)
 
 1. **Pipes de relay 64 KB → 1 MB** (`fcntl F_SETPIPE_SZ`, best-effort,
-   fallback silencieux sur `fs.pipe-max-size`) : HTTP 1 MB +12 %,
-   10 KB +10 % — le fill/drain du splice passe de 16 itérations par MB
-   à 1.
+   fallback silencieux sur `fs.pipe-max-size`) : le fill/drain du splice
+   passe de 16 itérations par MB à 1.
 2. **SO_SNDBUF/SO_RCVBUF 1 MB** sur tous les sockets proxifiés (accept +
    connect upstream, via `setsockopt`, appliqué best-effort — les pages
-   kernel sont allouées à la demande, une connexion idle ne paie rien) :
+   kernel sont allouées à la demande, une connexion idle ne paie rien).
+3. **Harnais randomisé** (warmup réseau + shuffle des 10 tests à seed
+   fixe) : les chiffres passent de ±30 % de variance (flood surtout) à
+   ±3 % — les médianes deviennent comparables entre passes.
+4. **Coût de l'auth chiffré** (auth-off matrix) : 1-6 % selon les
+   workloads, invisible sur le p50 — la doc peut dire "auth gratuite".
    10 MB 2 675 → 2 832-3 575 MB/s (devant/parité), flood 18,5 → 19,2 Gbps.
 3. **Cost de l'auth chiffré** (auth-off matrix) : 1-6 % selon les
    workloads, invisible sur le p50 — la doc peut dire "auth gratuite".
@@ -67,15 +72,15 @@ workloads, invisible sur le p50.** Aucune raison de la désactiver.
 ## Conclusions
 
 - **myproxy est devant ou à parité avec 3proxy sur tout le data plane**
-  (10 KB +18 %, 1 MB +12 %, 10 MB parité ±variance, flood +7 % débit à
-  CPU idem) — le 10 MB reste dans la variance harnais (isolé : +24 %).
-- **Chemin d'établissement + tunnels : myproxy domine** (×37 sur les
+  (10 KB +20 %, 1 MB +9 %, 10 MB −3 % dans le bruit, flood +8 % débit à
+  CPU −4 %) — et le hold-10k aussi (+5 % débit à CPU ÷1,4).
+- **Chemin d'établissement + tunnels : myproxy domine** (×38 sur les
   petits objets, +60 % en connexions courtes, et seul à tenir 25 000
   tunnels simultanés sur cette machine).
 - **L'auth temps-constant est gratuite** au sens de la mesure (~1-6 %
   selon les workloads, invisible sur le p50).
-- **RAM idle** : ×3-4 contre 3proxy — l'architecture task-per-conn de
-  tokio coûte ~1,1 KB/conn contre ~0,34 (pooling tasks = M10).
+- **RAM idle** : ×4 contre 3proxy — l'architecture task-per-conn de
+  tokio coûte ~1,1-1,4 KB/conn contre ~0,35 (pooling tasks = M10).
 
 ## Caveats honnêtes
 
