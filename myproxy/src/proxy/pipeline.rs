@@ -305,18 +305,41 @@ async fn forward_request(
         head.method.slice(buf),
         origin.slice(buf),
     );
-    if timeout(idle, up.write_all(rewrite_buf)).await.is_err() {
-        return false;
-    }
-
     let body = &buf[head.raw_len..];
     if body.len() as u64 > content_length {
         // Pipelined bytes beyond the body are not supported in V1.
         return false;
     }
-    if !body.is_empty() {
-        if timeout(idle, up.write_all(body)).await.is_err() {
+    if body.is_empty() {
+        // Fast path (GET/HEAD, the keep-alive hot path): one write, no
+        // iovec bookkeeping.
+        if timeout(idle, up.write_all(rewrite_buf)).await.is_err() {
             return false;
+        }
+    } else {
+        // Head + pipelined body prefix in ONE syscall (writev) instead of
+        // two sequential write_all calls. Rare partial writes advance the
+        // cursor and retry.
+        let total = rewrite_buf.len() + body.len();
+        let mut written = 0usize;
+        loop {
+            let (first, second): (&[u8], &[u8]) = if written >= rewrite_buf.len() {
+                (&body[written - rewrite_buf.len()..], &[])
+            } else {
+                (&rewrite_buf[written..], body)
+            };
+            let iovecs = [std::io::IoSlice::new(first), std::io::IoSlice::new(second)];
+            match timeout(idle, up.write_vectored(&iovecs)).await {
+                Ok(Ok(n)) if n > 0 => {
+                    written += n;
+                    if written >= total {
+                        break;
+                    }
+                }
+                Ok(Ok(_)) => return false, // zero: peer closed
+                Ok(Err(_)) => return false,
+                Err(_) => return false, // idle deadline
+            }
         }
     }
     let remaining = content_length - body.len() as u64;
