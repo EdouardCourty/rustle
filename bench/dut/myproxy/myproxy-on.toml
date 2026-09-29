@@ -20,3 +20,6 @@ max_entries = 4096
 [http]
 upstream_keepalive = true
 max_idle_per_origin = 32
+# Body budget (bytes) test: 1 KB upstream objects pass, 1 MB is rejected.
+max_request_body_bytes = 0
+max_response_body_bytes = 0
