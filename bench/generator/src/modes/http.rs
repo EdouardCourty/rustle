@@ -24,6 +24,8 @@ pub(crate) async fn run_http(
     requests: Option<u64>,
     no_keepalive: bool,
 ) -> Metrics {
+    let kinds: Arc<Mutex<std::collections::HashMap<String, u64>>> =
+        Arc::new(Mutex::new(std::collections::HashMap::new()));
     let (host, port, path) = parse_url(url);
     let target = resolve_once(&format!("{host}:{port}"))
         .await
@@ -45,6 +47,7 @@ pub(crate) async fn run_http(
         let errors = errors.clone();
         let bytes = bytes.clone();
         let lats = lats.clone();
+        let kinds = kinds.clone();
         set.spawn(async move {
             let mut conn: Option<TcpStream> = None;
             loop {
@@ -69,8 +72,10 @@ pub(crate) async fn run_http(
                             let _ = s.set_nodelay(true);
                             conn = Some(s);
                         }
-                        Err(_) => {
+                        Err(e) => {
                             errors.fetch_add(1, Ordering::Relaxed);
+                            *kinds.lock().unwrap().entry("connect".into()).or_insert(0) += 1;
+                            let _ = e;
                             continue;
                         }
                     }
@@ -82,8 +87,23 @@ pub(crate) async fn run_http(
                         lats.lock().unwrap().push(t0.elapsed().as_secs_f64());
                         bytes.fetch_add(body_bytes, Ordering::Relaxed);
                     }
-                    Err(_) => {
+                    Err(e) => {
                         errors.fetch_add(1, Ordering::Relaxed);
+                        let msg = format!("{e:#}");
+                        let cls: String = if msg.contains("EOF before response head") {
+                            "eof-head".into()
+                        } else if msg.contains("HTTP status") {
+                            // Keep the code: "bad-status-502" etc.
+                            let code: String = msg.chars().filter(|c| c.is_ascii_digit()).collect();
+                            format!("bad-status-{code}")
+                        } else if msg.contains("EOF before body end") {
+                            "eof-body".into()
+                        } else if msg.contains("bad response") {
+                            "bad-head".into()
+                        } else {
+                            "io".into()
+                        };
+                        *kinds.lock().unwrap().entry(cls).or_insert(0) += 1;
                         conn = None;
                     }
                 }
@@ -95,6 +115,14 @@ pub(crate) async fn run_http(
             eprintln!("task error: {e}");
         }
     }
+    // Bound the guard's lifetime before the tail-expression Metrics.
+    let kinds_line = kinds
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join(";");
     let elapsed = start.elapsed().as_secs_f64();
     let lat = lats.lock().unwrap().clone();
     let done = lat.len() as u64;
@@ -102,6 +130,7 @@ pub(crate) async fn run_http(
     Metrics {
         statics: vec![
             ("mode", "http".to_string()),
+            ("err_kinds", kinds_line),
             ("url", url.to_string()),
             ("conns", conns.to_string()),
             (
