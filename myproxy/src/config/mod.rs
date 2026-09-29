@@ -105,6 +105,13 @@ pub struct HttpConfig {
     pub upstream_keepalive: bool,
     /// Idle sockets kept per origin (host:port). 0 disables pooling.
     pub max_idle_per_origin: usize,
+    /// Max bytes a client request body may reach (Content-Length or
+    /// streamed total). 0 = unlimited. On exceed: 413 to the client.
+    pub max_request_body_bytes: u64,
+    /// Max bytes a response body may relay to the client. 0 = unlimited.
+    /// On exceed: relay aborted (the upstream has already been consumed
+    /// when known — pool dropped), connection closed.
+    pub max_response_body_bytes: u64,
 }
 
 impl Default for HttpConfig {
@@ -112,6 +119,8 @@ impl Default for HttpConfig {
         Self {
             upstream_keepalive: true,
             max_idle_per_origin: 32,
+            max_request_body_bytes: 0,
+            max_response_body_bytes: 0,
         }
     }
 }

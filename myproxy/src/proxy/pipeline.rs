@@ -23,6 +23,12 @@ pub(crate) enum UpstreamError {
     Other(std::io::Error),
 }
 
+/// 413 Payload Too Large (body limit exceeded) — one-line each way, the
+/// client must know the request was rejected before it finishes sending
+/// (the proxy closes write-up on the response to free the upload).
+pub(crate) const RESP_413: &[u8] =
+    b"HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+
 /// Serves one HTTP request end-to-end (upstream fetch + body relay + pool
 /// accounting). Returns `false` when the client connection must be dropped
 /// (client asked to close, broken state); `true` keeps the keep-alive loop
@@ -77,7 +83,24 @@ pub(super) async fn http(
         let replayable = idempotent
             && head.content_length.unwrap_or(0) as usize == buf.len().saturating_sub(head.raw_len);
 
-        if !forward_request(client, &mut up, buf, head, origin, idle).await {
+        let mut body_rejected = false;
+        if !forward_request(
+            client,
+            &mut up,
+            buf,
+            head,
+            origin,
+            idle,
+            cfg.http.max_request_body_bytes,
+            &mut body_rejected,
+        )
+        .await
+        {
+            // Body over budget: answer 413 and drop (the client may still
+            // be uploading — the close aborts it, like nginx does).
+            if body_rejected {
+                let _ = client.write_all(RESP_413).await;
+            }
             return false;
         }
         let mut rbuf: Vec<u8> = Vec::new();
@@ -153,6 +176,21 @@ pub(super) async fn http(
     // (anything beyond would belong to a backend-pipelined response — not
     // supported, dropped): the head itself is relayed verbatim (transparent
     // proxy).
+    // Response body budget (config):
+    // - declared Content-Length over the limit: answer 502 BEFORE
+    //   forwarding the upstream head (clean, the client understands);
+    // - unknown length (chunked / until-EOF): relay until the budget is
+    //   consumed, then close the connection — a truncated stream is the
+    //   only honest signal once the head has been forwarded.
+    let over_declared = cfg.http.max_response_body_bytes > 0
+        && body_left
+            .map(|l| l > cfg.http.max_response_body_bytes)
+            .unwrap_or(false);
+    if over_declared {
+        let _ = client.write_all(RESP_502).await;
+        return false;
+    }
+
     let window_end = (rhead.raw_len + forward_n).min(rbuf.len());
     if window_end > 0 && client.write_all(&rbuf[..window_end]).await.is_err() {
         return false;
@@ -163,13 +201,24 @@ pub(super) async fn http(
     // chunk framing transparently, or until EOF.
     // B1: no external absolute timeout — the engines carry their own
     // inactivity deadline (reset on every progress step).
-    let relaid: Option<u64> = if rhead.chunked && !zero_body {
-        match relay::chunked(&mut up, client, idle).await {
-            Ok(n) => Some(n),
-            Err(_) => None, // error: drop the connection
-        }
+    // Unknown-length bodies (chunked / until-EOF) are budget-capped: the
+    // relay stops at the limit, then the connection is dropped (see
+    // `budget_cut` below) — a truncated stream is the honest signal.
+    let budget = cfg.http.max_response_body_bytes;
+    let until_eof_capped = budget > 0 && body_left.is_none() && !rhead.chunked && !zero_body;
+    let remaining_capped = if until_eof_capped {
+        Some(budget.saturating_sub(forward_n as u64))
     } else {
-        Some(relay::response(&mut up, client, remaining, pipes, idle).await)
+        remaining
+    };
+    let relaid: Option<u64> = if rhead.chunked && !zero_body {
+        Some(
+            relay::chunked(&mut up, client, idle)
+                .await
+                .unwrap_or(u64::MAX),
+        )
+    } else {
+        Some(relay::response(&mut up, client, remaining_capped, pipes, idle).await)
     };
     let Some(relaid) = relaid else {
         return false;
@@ -180,16 +229,24 @@ pub(super) async fn http(
     let over_read = rbuf.len() > window_end;
 
     // Pool the upstream when the response allows clean reuse.
+    let over_budget = budget > 0 && forward_n as u64 + relaid > budget;
     let complete = match body_left {
         Some(left) => forward_n as u64 + relaid == left,
-        None => true, // chunked counts only until its terminal chunk
+        None => !over_budget, // chunked reached its terminal chunk within budget
     };
-    if !complete {
-        tracing::warn!(
-            upstream = %key, http = "incomplete-upstream-response",
-            left = ?body_left, got = relaid
-        );
-        return false;
+    if !complete || over_budget {
+        if over_budget {
+            tracing::warn!(
+                upstream = %key, http = "response-over-budget",
+                limit = budget, relayed = forward_n as u64 + relaid
+            );
+        } else {
+            tracing::warn!(
+                upstream = %key, http = "incomplete-upstream-response",
+                left = ?body_left, got = relaid
+            );
+        }
+        return false; // close: truncated stream is the honest signal
     }
     if rhead.keep_alive && !over_read {
         pool.put(&key, up);
@@ -198,7 +255,9 @@ pub(super) async fn http(
 }
 
 /// Writes the rewritten request head plus the request body to the upstream.
-/// Returns false when the client connection must be dropped.
+/// Returns false when the client connection must be dropped. Sets
+/// `*body_rejected` when the configured request-body budget was exceeded
+/// (the caller answers 413 instead of relaying).
 async fn forward_request(
     client: &mut TcpStream,
     up: &mut TcpStream,
@@ -206,13 +265,25 @@ async fn forward_request(
     head: &RequestHead,
     origin: &str,
     idle: Duration,
+    max_request_body: u64,
+    body_rejected: &mut bool,
 ) -> bool {
+    let content_length = head.content_length.unwrap_or(0);
+
+    // Request body budget: reject on the declared size BEFORE anything is
+    // forwarded (the rewritten head is dropped too). No Content-Length in
+    // V1 means no streaming request body — so the declared size is the
+    // only way a body can exceed the budget.
+    if max_request_body > 0 && content_length > max_request_body {
+        *body_rejected = true;
+        return false;
+    }
+
     let rewritten = crate::http::rewrite_head(&buf[..head.raw_len], &head.method, origin);
     if timeout(idle, up.write_all(&rewritten)).await.is_err() {
         return false;
     }
 
-    let content_length = head.content_length.unwrap_or(0);
     let body = &buf[head.raw_len..];
     if body.len() as u64 > content_length {
         // Pipelined bytes beyond the body are not supported in V1.

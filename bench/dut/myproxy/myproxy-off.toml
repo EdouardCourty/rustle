@@ -3,7 +3,7 @@ listen = "0.0.0.0:8080"
 workers = 1
 
 [auth]
-api_keys = []
+api_keys = ["secret1"]
 
 [limits]
 max_connections = 200000
@@ -20,5 +20,6 @@ max_entries = 4096
 [http]
 upstream_keepalive = true
 max_idle_per_origin = 32
-
-# auth section omitted on purpose: no keys -> auth disabled
+# Body budget (bytes) test: 1 KB upstream objects pass, 1 MB is rejected.
+max_request_body_bytes = 0
+max_response_body_bytes = 0
