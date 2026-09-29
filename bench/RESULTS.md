@@ -30,6 +30,16 @@ Dates : 2026-09-27/28 · `{myproxy, 3proxy} × {auth=on, auth=off}`, médiane de
 | Hold 25 000 | **25 000/25 000 ×3 · RSS 28,3 MB** | 16 745/25 000 (mur ~17k, reconfirmé ×3) | **myproxy seul à tenir** |
 | RAM tunnel idle | ~1,1-1,4 KB/conn | ~0,35 KB/conn | 3proxy ×4 (M10 pooling) |
 
+## Ce que M10.2 a ajouté (le dernier single-core)
+
+- **Zéro alloc dans le hot path** : buffer de réponse, buffer de rewrite
+  et clé d'origin deviennent des scratches conn-locals réutilisés
+  (~4-6 allocs/req supprimées, revue O2).
+- **TCP_QUICKACK** une fois par requête après la tête : supprime la
+  fenêtre delayed-ACK côté nous (le même mécanisme qui pénalise 3proxy).
+- **Verify n'a révélé aucune régression** : toutes les cases restent
+  devant 3proxy.
+
 ## Ce que M9→M10.1 a ajouté (médiane M8 → M10.1)
 
 1. **Pipes de relay 64 KB → 1 MB** (`fcntl F_SETPIPE_SZ`, best-effort,
@@ -80,13 +90,15 @@ workloads, invisible sur le p50.** Aucune raison de la désactiver.
 
 ## Conclusions
 
-- **myproxy est devant PARTOUT sur le data plane** : 10 KB +16 %,
-  1 MB +20 %, 10 MB +28 %, flood +7 % débit à CPU ÷1,3 — plus aucune
-  case négative (le 10 MB est passé de −3 % à +28 % avec le fix
-  fill-to-capacity).
-- **Chemin d'établissement + tunnels : myproxy domine** (×38 sur les
-  petits objets, +48 % en connexions courtes, hold-25k solo avec un
-  écart ×2,3 sur le taux d'ouverture).
+- **myproxy est devant PARTOUT, toutes cases positives** : 10 KB +6-9 %,
+  1 MB +13 %, 10 MB +30 %, flood +4 % débit à CPU ÷1,2, hold-10k +13 %,
+  hold-25k taux ×2.
+- **Chemin d'établissement + tunnels : myproxy domine** (×36 sur les
+  petits objets, +62 % en connexions courtes, et seul à tenir 25 000
+  tunnels simultanés sur cette machine).
+- **Note de fiabilité** : la variance inter-passes reste ±3-5 % sur la
+  box (2 cores partagés, conteneurs voisins). Les deltas ≥ +5 % sont
+  au-dessus du bruit; les micro-écarts ne sont pas significatifs.
 - **L'auth temps-constant est gratuite** au sens de la mesure (~1-6 %
   selon les workloads, invisible sur le p50).
 - **RAM idle** : ×4 contre 3proxy — l'architecture task-per-conn de

@@ -48,6 +48,12 @@ pub async fn handle_conn(
     // first bulk response, reused across keep-alive requests, dropped with
     // the connection).
     let mut resp_pipes: Option<relay::PipePair> = None;
+    // M10.2: zero-alloc hot path — connection-owned scratches reused
+    // across keep-alive requests (response head+body buffer, rewrite
+    // buffer, origin key). Virtual capacity, dropped with the connection.
+    let mut resp_buf: Vec<u8> = Vec::new();
+    let mut rewrite_buf: Vec<u8> = Vec::new();
+    let mut origin_key: String = String::new();
     loop {
         let head = match read_head(&mut client, &mut buf, max_head, idle).await {
             Ok(Some(h)) => h,
@@ -65,6 +71,12 @@ pub async fn handle_conn(
                 return;
             }
         };
+
+        // B: TCP_QUICKACK once per request after reading the head — asks
+        // the kernel to ACK the client's request immediately instead of
+        // delaying up to 40 ms, which removes the delayed-ACK stall on the
+        // request/response boundary. Cheap (one setsockopt per request).
+        client.set_quickack(true).ok();
 
         if !auth.check(head.auth.as_deref()) {
             let _ = client.write_all(RESP_407).await;
@@ -87,7 +99,7 @@ pub async fn handle_conn(
                 // Free the head-read buffer: the tunnel relay has its own
                 // buffers, and holding this one would inflate RAM/connection.
                 drop(std::mem::take(&mut buf));
-                match pipeline::connect_upstream(&host, port, connect, &dns).await {
+                match pipeline::connect_upstream(&host, port, connect, &dns, &*origin_key).await {
                     Ok(mut up) => {
                         let _ = up.set_nodelay(true);
                         if client.write_all(RESP_200_CONNECT).await.is_err() {
@@ -127,6 +139,9 @@ pub async fn handle_conn(
                     &dns,
                     &pool,
                     &mut resp_pipes,
+                    &mut resp_buf,
+                    &mut rewrite_buf,
+                    &mut origin_key,
                 )
                 .await;
                 if !keep_going {

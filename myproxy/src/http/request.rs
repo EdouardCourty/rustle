@@ -187,9 +187,11 @@ fn parse_authority(a: &str) -> Result<(String, Option<u16>), &'static str> {
 /// Rewrites a raw HTTP/1.x request head into an origin-form request for the
 /// upstream, dropping proxy-specific headers and forcing `Connection:
 /// keep-alive` (the pool decides per-response whether the connection ends
-/// up reused or dropped).
-pub fn rewrite_head(head_raw: &[u8], method: &str, origin: &str) -> Vec<u8> {
-    let mut out = Vec::with_capacity(head_raw.len() + 64);
+/// up reused or dropped). Zero-alloc: writes into a connection-owned
+/// scratch buffer cleared then reused across keep-alive requests.
+pub fn rewrite_head_into(out: &mut Vec<u8>, head_raw: &[u8], method: &str, origin: &str) {
+    out.clear();
+    out.reserve(head_raw.len() + 64);
     out.extend_from_slice(method.as_bytes());
     out.push(b' ');
     out.extend_from_slice(origin.as_bytes());
@@ -199,7 +201,7 @@ pub fn rewrite_head(head_raw: &[u8], method: &str, origin: &str) -> Vec<u8> {
         Some(i) => &head_raw[i + 1..],
         None => {
             out.extend_from_slice(b"Connection: keep-alive\r\n\r\n");
-            return out;
+            return;
         }
     };
     for line in rest.split_inclusive(|&b| b == b'\n') {
@@ -220,7 +222,6 @@ pub fn rewrite_head(head_raw: &[u8], method: &str, origin: &str) -> Vec<u8> {
         out.extend_from_slice(line);
     }
     out.extend_from_slice(b"Connection: keep-alive\r\n\r\n");
-    out
 }
 
 #[cfg(test)]
@@ -291,7 +292,8 @@ mod tests {
     #[test]
     fn rewrite_drops_proxy_headers() {
         let raw = b"GET http://upstream:8000/1kb HTTP/1.1\r\nHost: upstream:8000\r\nProxy-Authorization: Basic abc\r\nProxy-Connection: keep-alive\r\nAccept: */*\r\n\r\n";
-        let out = rewrite_head(raw, "GET", "/1kb");
+        let mut out = Vec::new();
+        rewrite_head_into(&mut out, raw, "GET", "/1kb");
         let out = String::from_utf8_lossy(&out);
         assert!(out.starts_with("GET /1kb HTTP/1.1\r\n"));
         assert!(out.contains("Host: upstream:8000"));
