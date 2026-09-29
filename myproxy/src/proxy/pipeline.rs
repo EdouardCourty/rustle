@@ -45,21 +45,30 @@ pub(super) async fn http(
     dns: &DnsCache,
     pool: &UpstreamPool,
     pipes: &mut Option<PipePair>,
+    // Connection-owned scratches (M10.2: zero alloc in the hot path —
+    // reused across keep-alive requests, dropped with the connection).
+    resp_buf: &mut Vec<u8>,
+    rewrite_buf: &mut Vec<u8>,
+    origin_key: &mut String,
 ) -> bool {
     let idle = cfg.timeouts.idle;
     let connect = cfg.timeouts.connect;
     let max_head = cfg.limits.max_header_bytes;
-    let key = format!("{host}:{port}");
+    origin_key.clear();
+    origin_key.push_str(host);
+    origin_key.push(':');
+    origin_key.push_str(&port.to_string());
+    let key: &str = origin_key;
 
     // Upstream connection: pooled reuse when possible, fresh otherwise. A
     // pooled connection that died while idle is retried once on a fresh
     // one (safe: no response byte has reached the client at that point).
     let mut attempt = 0;
-    let (mut up, _from_pool, mut rhead, mut rbuf) = loop {
+    let (mut up, _from_pool, mut rhead) = loop {
         attempt += 1;
         let (mut up, from_pool) = match pool.take(&key) {
             Some(s) => (s, true),
-            None => match connect_upstream(host, port, connect, dns).await {
+            None => match connect_upstream(host, port, connect, dns, key).await {
                 Ok(s) => (s, false),
                 Err(UpstreamError::Timeout) => {
                     let _ = client.write_all(RESP_504).await;
@@ -93,6 +102,7 @@ pub(super) async fn http(
             idle,
             cfg.http.max_request_body_bytes,
             &mut body_rejected,
+            rewrite_buf,
         )
         .await
         {
@@ -103,15 +113,13 @@ pub(super) async fn http(
             }
             return false;
         }
-        let mut rbuf: Vec<u8> = Vec::new();
-        rbuf.reserve(1024);
         match timeout(
             idle,
-            read_response_head(&mut up, &mut rbuf, max_head, idle, &[]),
+            read_response_head(&mut up, resp_buf, max_head, idle, &[]),
         )
         .await
         {
-            Ok(Ok(h)) => break (up, from_pool, h, rbuf),
+            Ok(Ok(h)) => break (up, from_pool, h),
             // B6: retry once on ANY I/O failure of a pooled socket — clean
             // EOF or RST — as long as the request is replayable (B7).
             Ok(Err(RespError::Head(HeadError::Io(_))))
@@ -139,10 +147,10 @@ pub(super) async fn http(
         if hops > 3 {
             return false;
         }
-        if client.write_all(&rbuf[..rhead.raw_len]).await.is_err() {
+        if client.write_all(&resp_buf[..rhead.raw_len]).await.is_err() {
             return false;
         }
-        let mut next: Vec<u8> = rbuf[rhead.raw_len..].to_vec(); // residual = next head prefix
+        let mut next: Vec<u8> = resp_buf[rhead.raw_len..].to_vec(); // residual = next head prefix
         let head_res = timeout(
             idle,
             read_response_head(&mut up, &mut next, max_head, idle, &[]),
@@ -151,7 +159,7 @@ pub(super) async fn http(
         match head_res {
             Ok(Ok(h)) => {
                 rhead = h;
-                rbuf = next;
+                *resp_buf = next;
             }
             _ => return false, // backend died after a 1xx: drop safely
         }
@@ -166,7 +174,7 @@ pub(super) async fn http(
     } else {
         rhead.content_length
     };
-    let spare = (rbuf.len() - rhead.raw_len) as u64;
+    let spare = (resp_buf.len() - rhead.raw_len) as u64;
     let forward_n = match body_left {
         Some(l) => l.min(spare) as usize,
         None => spare as usize,
@@ -191,8 +199,8 @@ pub(super) async fn http(
         return false;
     }
 
-    let window_end = (rhead.raw_len + forward_n).min(rbuf.len());
-    if window_end > 0 && client.write_all(&rbuf[..window_end]).await.is_err() {
+    let window_end = (rhead.raw_len + forward_n).min(resp_buf.len());
+    if window_end > 0 && client.write_all(&resp_buf[..window_end]).await.is_err() {
         return false;
     }
     let remaining: Option<u64> = body_left.map(|l| l - forward_n as u64);
@@ -226,7 +234,7 @@ pub(super) async fn http(
 
     // B4: bytes buffered beyond the body belong to a backend-pipelined
     // response — the stream is desynchronized, never pool it.
-    let over_read = rbuf.len() > window_end;
+    let over_read = resp_buf.len() > window_end;
 
     // Pool the upstream when the response allows clean reuse.
     let over_budget = budget > 0 && forward_n as u64 + relaid > budget;
@@ -267,6 +275,7 @@ async fn forward_request(
     idle: Duration,
     max_request_body: u64,
     body_rejected: &mut bool,
+    rewrite_buf: &mut Vec<u8>,
 ) -> bool {
     let content_length = head.content_length.unwrap_or(0);
 
@@ -279,8 +288,8 @@ async fn forward_request(
         return false;
     }
 
-    let rewritten = crate::http::rewrite_head(&buf[..head.raw_len], &head.method, origin);
-    if timeout(idle, up.write_all(&rewritten)).await.is_err() {
+    crate::http::rewrite_head_into(rewrite_buf, &buf[..head.raw_len], &head.method, origin);
+    if timeout(idle, up.write_all(rewrite_buf)).await.is_err() {
         return false;
     }
 
@@ -314,8 +323,8 @@ pub(super) async fn connect_upstream(
     port: u16,
     connect: Duration,
     dns: &DnsCache,
+    key: &str,
 ) -> Result<TcpStream, UpstreamError> {
-    let key = format!("{host}:{port}");
     if let Ok(ip) = host.parse::<std::net::IpAddr>() {
         // Fast path: numeric IP target, skip the blocking DNS pool entirely.
         let addr = std::net::SocketAddr::from((ip, port));
@@ -342,7 +351,7 @@ pub(super) async fn connect_upstream(
                             "no address for host",
                         )));
                     }
-                    dns.put(key.clone(), v.clone());
+                    dns.put(key.to_string(), v.clone());
                     v
                 }
                 Ok(Err(e)) => return Err(UpstreamError::Other(e)),
