@@ -17,3 +17,14 @@ tokio = { version = "1", features = ["net", "io-util", "rt-multi-thread", "time"
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Alternative global allocators (features, mutually exclusive). glibc
+# malloc is the default and retains freed pages aggressively - a workload
+# with per-connection alloc/free churn (our benchmark) keeps pages in RSS
+# after close. jemalloc/mimalloc return them sooner.
+jemallocator = { version = "0.5", optional = true }
+mimalloc = { version = "0.1", optional = true }
+
+[features]
+jemalloc = ["dep:jemallocator"]
+mimalloc = ["dep:mimalloc"]

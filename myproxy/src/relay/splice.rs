@@ -9,6 +9,8 @@ use std::os::unix::io::AsRawFd;
 use tokio::io::unix::AsyncFd;
 use tokio::net::TcpStream;
 
+use super::IdleTimer;
+
 /// Kernel pipe buffer size for relay pipes. Default is 64 KB; enlarging
 /// to 1 MB cuts the fill/drain iteration rate by ~16x on bulk flows
 /// (10 MB responses: 45k -> 3k pump iterations/s) — measured as the last
@@ -77,6 +79,7 @@ impl PipePair {
 pub(super) async fn bidirectional(
     client: TcpStream,
     up: TcpStream,
+    idle: std::time::Duration,
 ) -> Result<(u64, u64), (TcpStream, TcpStream)> {
     let Some(pair_ab) = PipePair::new() else {
         return Err((client, up));
@@ -94,9 +97,27 @@ pub(super) async fn bidirectional(
         (Ok(c), Ok(u)) => (c, u),
         _ => return Ok((0, 0)),
     };
+    let mut timer_a = IdleTimer::new(idle);
+    let mut timer_b = IdleTimer::new(idle);
     let (a2b, b2a) = tokio::join!(
-        dir(&client_fd, &up_fd, &pair_ab.r, &pair_ab.w, true, None),
-        dir(&up_fd, &client_fd, &pair_ba.r, &pair_ba.w, true, None)
+        dir(
+            &client_fd,
+            &up_fd,
+            &pair_ab.r,
+            &pair_ab.w,
+            true,
+            None,
+            &mut timer_a
+        ),
+        dir(
+            &up_fd,
+            &client_fd,
+            &pair_ba.r,
+            &pair_ba.w,
+            true,
+            None,
+            &mut timer_b
+        )
     );
     Ok((a2b, b2a))
 }
@@ -116,6 +137,7 @@ pub(super) async fn response(
     client: &mut TcpStream,
     limit: Option<u64>,
     pair: &PipePair,
+    idle: std::time::Duration,
 ) -> Option<u64> {
     use std::os::unix::io::FromRawFd;
 
@@ -137,7 +159,13 @@ pub(super) async fn response(
         _ => return None,
     };
     // No half-close of the client on EOF: keep-alive must survive.
-    Some(dir(&up_fd, &client_fd, &pair.r, &pair.w, false, limit).await)
+    let mut timer = IdleTimer::new(idle);
+    Some(
+        dir(
+            &up_fd, &client_fd, &pair.r, &pair.w, false, limit, &mut timer,
+        )
+        .await,
+    )
 }
 
 /// One direction of the zero-copy relay: `src` -> pipe -> `dst`.
@@ -156,6 +184,7 @@ async fn dir(
     pipe_w: &PipeFd,
     shutdown_on_eof: bool,
     limit: Option<u64>,
+    timer: &mut IdleTimer,
 ) -> u64 {
     const SPLICE_F_MOVE: u32 = 1;
     const SPLICE_F_NONBLOCK: u32 = 2;
@@ -180,9 +209,6 @@ async fn dir(
         loop {
             let want = SPLICE_CHUNK.min(left as usize).saturating_sub(in_pipe);
             if want == 0 {
-                if std::env::var("SPLICE_DEBUG").is_ok() {
-                    eprintln!("D fillfull ip={in_pipe} l={left}");
-                }
                 break; // pipe full or limit reached: go drain
             }
             // Attempt 1: without any readiness wait (data often queued).
@@ -198,15 +224,10 @@ async fn dir(
             };
             if n > 0 {
                 in_pipe += n as usize;
-                if std::env::var("SPLICE_DEBUG").is_ok() {
-                    eprintln!("D fill1 n={n} ip={in_pipe} l={left}");
-                }
+                timer.reset();
                 continue; // keep filling without parking
             }
             if n == 0 {
-                if std::env::var("SPLICE_DEBUG").is_ok() {
-                    eprintln!("D eof1 ip={in_pipe} l={left}");
-                }
                 pending_eof = true;
                 break;
             }
@@ -221,10 +242,11 @@ async fn dir(
             if in_pipe > 0 {
                 break; // go drain the pipe into dst
             }
-            // Socket empty: park until readable, then one guarded attempt.
-            let mut ready = match src.readable().await {
-                Ok(g) => g,
-                Err(_) => break 'outer, // reactor gone: bail out
+            // Socket empty: park until readable (inactivity-bounded),
+            // then one guarded attempt.
+            let mut ready = match timer.park(src.readable()).await {
+                Some(Ok(g)) => g,
+                _ => break 'outer, // reactor gone or idle timeout
             };
             let n = unsafe {
                 libc::splice(
@@ -238,15 +260,9 @@ async fn dir(
             };
             if n > 0 {
                 in_pipe += n as usize;
-                if std::env::var("SPLICE_DEBUG").is_ok() {
-                    eprintln!("D fill2 n={n} ip={in_pipe} l={left}");
-                }
                 break; // got data: go drain the pipe into dst
             }
             if n == 0 {
-                if std::env::var("SPLICE_DEBUG").is_ok() {
-                    eprintln!("D eof2 ip={in_pipe} l={left}");
-                }
                 pending_eof = true;
                 break;
             }
@@ -260,9 +276,9 @@ async fn dir(
 
         // Phase 2: drain the pipe into dst (still zero-copy).
         while in_pipe > 0 {
-            let mut ready = match dst.writable().await {
-                Ok(g) => g,
-                Err(_) => break 'outer,
+            let mut ready = match timer.park(dst.writable()).await {
+                Some(Ok(g)) => g,
+                _ => break 'outer, // inactivity or reactor gone
             };
             let n = unsafe {
                 libc::splice(
@@ -278,6 +294,7 @@ async fn dir(
                 in_pipe -= n as usize;
                 moved += n as u64;
                 left -= n as u64;
+                timer.reset();
             } else if n < 0 {
                 let err = std::io::Error::last_os_error();
                 if err.kind() == std::io::ErrorKind::WouldBlock {
