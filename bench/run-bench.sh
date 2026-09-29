@@ -147,6 +147,32 @@ declare -a TESTS=(
     "run_hold 10000 10"
     "run_hold 25000 10"
 )
+# BENCH_ONLY=<test-name>: run a single step (validate/iterate cheaply —
+# a failed step is re-run alone instead of the whole matrix).
+if [[ -n "${BENCH_ONLY:-}" ]]; then
+    TESTS=()
+    for t in "${shuffled-init:-}"; do :; done # no-op keeps shopt sane
+    declare -a TESTS_ALL=(
+        "run_test http-1kb http http://upstream:8000/1kb --conns 64 --duration 15"
+        "run_test http-10kb http http://upstream:8000/10kb --conns 16 --duration 15"
+        "run_test http-1mb http http://upstream:8000/1mb --conns 16 --duration 15"
+        "run_test http-10mb http http://upstream:8000/10mb --conns 8 --duration 15"
+        "run_test http-1kb-short http http://upstream:8000/1kb --conns 64 --duration 15 --no-keepalive"
+        "run_test flood-8 flood sink:9000 --conns 8 --duration 10"
+        "run_hold 1000 10"
+        "run_hold 5000 10"
+        "run_hold 10000 10"
+        "run_hold 25000 10"
+    )
+    found=""
+    for t in "${TESTS_ALL[@]}"; do
+        if [[ "$t" == *" ${BENCH_ONLY} "* || "$t" == "run_${BENCH_ONLY} "* || "$t" == *" ${BENCH_ONLY} 10" ]]; then
+            TESTS+=("$t")
+            found=1
+        fi
+    done
+    [[ -n "$found" ]] || { echo "no test matches BENCH_ONLY=${BENCH_ONLY}" >&2; exit 2; }
+fi
 # Fisher-Yates avec seed
 shopt -s extglob
 shuffled=(); tmp=("${TESTS[@]}")
