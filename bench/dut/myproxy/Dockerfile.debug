@@ -1,0 +1,7 @@
+# Debug profile: same build as bench + strace wrapper (syscall profiling runs).
+FROM myproxy:bench
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends strace && \
+    rm -rf /var/lib/apt/lists/*
+ENV TRACE_PATH=/tmp/syscall.trace
+ENTRYPOINT ["sh", "-c", "exec strace -f -qq -e trace=network,epoll_wait,epoll_ctl,epoll_pwait,read,write,writev,close,splice,futex -o ${TRACE_PATH} myproxy /etc/myproxy/${AUTH:-on}.toml"]

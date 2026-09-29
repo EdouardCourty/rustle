@@ -191,3 +191,38 @@ workloads, invisible sur le p50.** Aucune raison de la désactiver.
    calibré au max ici (contrainte assumée : pas de multi-worker) ; la
    contrainte "4 GB / 2 cores" de la box de dev n'est plus le limiteur
    une fois sur le VPS.
+
+## M10.4 (retour à tokio, ré-application des gains vérifiés) — 2026-09-29, seed 2004113323
+
+**Décision** : la passe M11 (FSM epoll sans tokio) a été conservée sous tag `m11.1-fsm`
+et la ligne de production est revenue au tokio (`m10.3-tokio`). Les données ont départagé :
+CPU/requête tokio ≈ FSM (46,5 vs 47 µs) mais le tokio tient le meilleur rps sur le chemin
+HTTP (1kb 14,8k vs 11,5k), son rail splice body fonctionne, et l'architecture
+hand-rolled coûtait ~800 lignes de concurrence maison + 4 bugs sérieux trouvés en une
+seule session (spin silencieux sans syscall, budget fixe comparé à un compteur, etc.).
+Le profil syscall du conteneur (image debug strace) confirme que **M10.3 est déjà au
+plancher de son architecture : ~2 recvfrom + 2 sendto par requête, epoll_ctl ≈ 0**.
+
+**M10.4 = tag M10.3 +** :
+1. `err_kinds` dans le générateur (taxonomie eof-head/bad-status-\<code\>/eof-body/bad-head/io/connect,
+   publiée dans la métrique — l'outil qui a départagé chaque bug de la passe M11).
+2. `writev` upstream : head + body-prefix en **un** syscall (`write_vectored` + boucle
+   d'avancement ; le check pipelined-body est passé avant l'écriture = plus d'écriture
+   partielle). Neutre sur les GET (fast path 1 write déjà), gains réels sur uploads.
+3. `BENCH_ONLY=<test>` : validation/ré-exécution d'une étape isolée de la matrice
+   (une étape fautive se rejoue seule, pas toute la matrice).
+4. `bench/tools/local-upstream-http11.py` : upstream local HTTP/1.1 keep-alive — a débusqué
+   le piège de mesure (un upstream HTTP/1.0 reconnecte légitimement à chaque requête ;
+   le profil syscall du « chemin chaud » mesurait en fait le chemin fresh-connect).
+
+**Matrice M10.4 vs baseline fraîche du tag vs matrice figée M10.3** (seed 2004113323) :
+1kb 14 693 (+3,4 %) · 10kb 13 792 (+4,0 %) · 1mb 2 597 (−5,2 %) · 10mb 360 (+2,3 %) ·
+short 4 750 (+39 %, baseline basse : retour au niveau figé 4 896) · flood 19 Gbps (−1,9 %) ·
+holds ±8 % (variance connue). Tous err_kinds vides. **Le writev est neutre sur la matrice
+comme prédit (GET = fast path) et correct pour les uploads.**
+
+**Caveats conservés** : ×9.5 sur le 1kb vs 3proxy (delayed-ACK, tcpdump-vérifié),
+variance hold bimodale (ci-dessus).
+
+**Backlog suivant** : port du relay chunked bufferisé (M10.3 lit le framing octet par
+octet, ~1 syscall/octet — hors matrice, réel hors-bench), profilage du VPS, PGO.
