@@ -46,6 +46,9 @@ impl Default for DnsConfig {
 pub struct ServerConfig {
     pub listen: String,
     pub workers: usize,
+    /// Admin/health listener (GET /health -> 200, no auth). Bind to
+    /// 127.0.0.1 on a public VPS. Empty string disables it.
+    pub admin_listen: String,
 }
 
 impl Default for ServerConfig {
@@ -53,6 +56,7 @@ impl Default for ServerConfig {
         Self {
             listen: "0.0.0.0:8080".to_string(),
             workers: 1,
+            admin_listen: "127.0.0.1:8181".to_string(),
         }
     }
 }
