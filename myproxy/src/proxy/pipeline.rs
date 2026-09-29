@@ -37,7 +37,7 @@ pub(crate) const RESP_413: &[u8] =
 pub(super) async fn http(
     client: &mut TcpStream,
     cfg: &Config,
-    buf: &mut Vec<u8>,
+    buf: &mut [u8],
     head: &RequestHead,
     target: &Target,
     dns: &DnsCache,
@@ -72,7 +72,7 @@ pub(super) async fn http(
     let mut attempt = 0;
     let (mut up, _from_pool, mut rhead) = loop {
         attempt += 1;
-        let (mut up, from_pool) = match pool.take(&key) {
+        let (mut up, from_pool) = match pool.take(key) {
             Some(s) => (s, true),
             None => match connect_upstream(host_str, port, connect, dns, key).await {
                 Ok(s) => (s, false),
@@ -103,23 +103,16 @@ pub(super) async fn http(
         let replayable = idempotent
             && head.content_length.unwrap_or(0) as usize == buf.len().saturating_sub(head.raw_len);
 
-        let mut body_rejected = false;
-        if !forward_request(
-            client,
-            &mut up,
-            buf,
-            head,
-            origin_span,
+        let mut ctx = UpWriteCtx {
             idle,
-            cfg.http.max_request_body_bytes,
-            &mut body_rejected,
+            max_request_body: cfg.http.max_request_body_bytes,
+            body_rejected: false,
             rewrite_buf,
-        )
-        .await
-        {
+        };
+        if !forward_request(client, &mut up, buf, head, origin_span, &mut ctx).await {
             // Body over budget: answer 413 and drop (the client may still
             // be uploading — the close aborts it, like nginx does).
-            if body_rejected {
+            if ctx.body_rejected {
                 let _ = client.write_all(RESP_413).await;
             }
             return false;
@@ -268,7 +261,7 @@ pub(super) async fn http(
         return false; // close: truncated stream is the honest signal
     }
     if rhead.keep_alive && !over_read {
-        pool.put(&key, up);
+        pool.put(key, up);
     }
     !(head.close || head.version_minor == 0)
 }
@@ -277,16 +270,24 @@ pub(super) async fn http(
 /// Returns false when the client connection must be dropped. Sets
 /// `*body_rejected` when the configured request-body budget was exceeded
 /// (the caller answers 413 instead of relaying).
+/// Per-connection config + scratch for the upstream write path (one place
+/// to pass instead of five loose arguments).
+struct UpWriteCtx<'a> {
+    idle: Duration,
+    max_request_body: u64,
+    /// Set when the declared request-body budget was exceeded (caller
+    /// answers 413).
+    body_rejected: bool,
+    rewrite_buf: &'a mut Vec<u8>,
+}
+
 async fn forward_request(
     client: &mut TcpStream,
     up: &mut TcpStream,
     buf: &[u8],
     head: &RequestHead,
     origin: Span,
-    idle: Duration,
-    max_request_body: u64,
-    body_rejected: &mut bool,
-    rewrite_buf: &mut Vec<u8>,
+    ctx: &mut UpWriteCtx<'_>,
 ) -> bool {
     let content_length = head.content_length.unwrap_or(0);
 
@@ -294,13 +295,13 @@ async fn forward_request(
     // forwarded (the rewritten head is dropped too). No Content-Length in
     // V1 means no streaming request body — so the declared size is the
     // only way a body can exceed the budget.
-    if max_request_body > 0 && content_length > max_request_body {
-        *body_rejected = true;
+    if ctx.max_request_body > 0 && content_length > ctx.max_request_body {
+        ctx.body_rejected = true;
         return false;
     }
 
     crate::http::rewrite_head_into(
-        rewrite_buf,
+        ctx.rewrite_buf,
         &buf[..head.raw_len],
         head.method.slice(buf),
         origin.slice(buf),
@@ -313,23 +314,26 @@ async fn forward_request(
     if body.is_empty() {
         // Fast path (GET/HEAD, the keep-alive hot path): one write, no
         // iovec bookkeeping.
-        if timeout(idle, up.write_all(rewrite_buf)).await.is_err() {
+        if timeout(ctx.idle, up.write_all(ctx.rewrite_buf))
+            .await
+            .is_err()
+        {
             return false;
         }
     } else {
         // Head + pipelined body prefix in ONE syscall (writev) instead of
         // two sequential write_all calls. Rare partial writes advance the
         // cursor and retry.
-        let total = rewrite_buf.len() + body.len();
+        let total = ctx.rewrite_buf.len() + body.len();
         let mut written = 0usize;
         loop {
-            let (first, second): (&[u8], &[u8]) = if written >= rewrite_buf.len() {
-                (&body[written - rewrite_buf.len()..], &[])
+            let (first, second): (&[u8], &[u8]) = if written >= ctx.rewrite_buf.len() {
+                (&body[written - ctx.rewrite_buf.len()..], &[])
             } else {
-                (&rewrite_buf[written..], body)
+                (&ctx.rewrite_buf[written..], body)
             };
             let iovecs = [std::io::IoSlice::new(first), std::io::IoSlice::new(second)];
-            match timeout(idle, up.write_vectored(&iovecs)).await {
+            match timeout(ctx.idle, up.write_vectored(&iovecs)).await {
                 Ok(Ok(n)) if n > 0 => {
                     written += n;
                     if written >= total {
@@ -347,7 +351,7 @@ async fn forward_request(
         let mut limited = (&mut *client).take(remaining);
         // Inactivity-bounded (idle resets on progress): slow uploads no
         // longer die at the absolute cap.
-        let _ = crate::relay::copy_limited(&mut limited, up, None, idle).await;
+        let _ = crate::relay::copy_limited(&mut limited, up, None, ctx.idle).await;
     }
     true
 }
@@ -379,7 +383,7 @@ pub(super) async fn connect_upstream(
         // Resolve once and cache: without this, every CONNECT to a hostname
         // pays a getaddrinfo in the 512-thread blocking pool (measured:
         // bursts of CONNECTs overflow it and blow the connect timeout).
-        let addrs = match dns.get(&key) {
+        let addrs = match dns.get(key) {
             Some(a) => a,
             None => match timeout(connect, tokio::net::lookup_host((host, port))).await {
                 Ok(Ok(iter)) => {

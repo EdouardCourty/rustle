@@ -45,7 +45,6 @@ pub(crate) async fn run_hold(
         let proxy = proxy.to_string();
         let api_key = api_key.to_string();
         let target = target.to_string();
-        let deadline = deadline;
         let opened = opened.clone();
         let failed = failed.clone();
         let lats = lats.clone();

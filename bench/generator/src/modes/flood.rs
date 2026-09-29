@@ -35,7 +35,6 @@ pub(crate) async fn run_flood(
         let proxy = proxy.to_string();
         let api_key = api_key.to_string();
         let target = target.to_string();
-        let deadline = deadline;
         let total_bytes = total_bytes.clone();
         let errors = errors.clone();
         let est_lats = est_lats.clone();

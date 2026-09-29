@@ -46,8 +46,7 @@ pub(super) async fn response(
     pipes: &mut Option<super::PipePair>,
     idle: std::time::Duration,
 ) -> u64 {
-    let mut buf: Vec<u8> = Vec::new();
-    buf.reserve(RELAY_BUF0);
+    let mut buf: Vec<u8> = Vec::with_capacity(RELAY_BUF0);
     let mut timer = IdleTimer::new(idle);
     let mut total: u64 = 0;
     loop {
@@ -117,8 +116,7 @@ pub async fn copy_limited<R>(
 where
     R: tokio::io::AsyncRead + Unpin,
 {
-    let mut buf: Vec<u8> = Vec::new();
-    buf.reserve(RELAY_BUF0);
+    let mut buf: Vec<u8> = Vec::with_capacity(RELAY_BUF0);
     let mut timer = IdleTimer::new(idle);
     let mut total: u64 = 0;
     loop {
@@ -157,8 +155,7 @@ where
     R: tokio::io::AsyncRead + Unpin,
     W: tokio::io::AsyncWrite + Unpin,
 {
-    let mut buf: Vec<u8> = Vec::new();
-    buf.reserve(RELAY_BUF0); // virtual only: untouched pages cost no RSS
+    let mut buf: Vec<u8> = Vec::with_capacity(RELAY_BUF0); // virtual only: untouched pages cost no RSS
     let mut written: u64 = 0;
     loop {
         buf.clear(); // logical len 0, keep the reserved capacity

@@ -61,9 +61,7 @@ impl PipePair {
     /// Sized pipe pair, or `None` when the kernel refuses (the caller
     /// keeps the adaptive engine — performance loss only).
     pub fn new() -> Option<Self> {
-        let Some(p) = sized_pipe() else {
-            return None;
-        };
+        let p = sized_pipe()?;
         Some(Self {
             r: PipeFd(p[0]),
             w: PipeFd(p[1]),
@@ -193,10 +191,7 @@ async fn dir(
     let src_fd = src.get_ref().as_raw_fd();
     let dst_fd = dst.get_ref().as_raw_fd();
     let mut moved: u64 = 0;
-    let mut left: u64 = match limit {
-        Some(l) => l,
-        None => u64::MAX,
-    };
+    let mut left: u64 = limit.unwrap_or(u64::MAX);
 
     'outer: loop {
         if left == 0 {

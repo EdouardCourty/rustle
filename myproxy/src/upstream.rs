@@ -72,10 +72,7 @@ impl UpstreamPool {
         // even when the key is already present.
         let idle = match pool.by_origin.get_mut(origin) {
             Some(idle) => idle,
-            None => pool
-                .by_origin
-                .entry(origin.to_string())
-                .or_insert_with(VecDeque::new),
+            None => pool.by_origin.entry(origin.to_string()).or_default(),
         };
         if idle.len() >= max_idle_per_origin {
             return; // origin full: drop

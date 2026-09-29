@@ -427,7 +427,7 @@ mod tests {
     fn parse_read_head_spans() {
         // End-to-end: parse a real head, then slice through the buffer.
         let raw = b"GET http://upstream:8000/1kb HTTP/1.1\r\nProxy-Authorization: Basic abc\r\nHost: upstream:8000\r\nConnection: close\r\n\r\nbody";
-        let mut buf = raw.to_vec();
+        let buf = raw.to_vec();
         let mut headers = [httparse::EMPTY_HEADER; MAX_HEADERS];
         let mut req = httparse::Request::new(&mut headers);
         let len = match req.parse(&buf).unwrap() {
@@ -438,7 +438,7 @@ mod tests {
         assert_eq!(head.method.slice(&buf), b"GET");
         assert_eq!(head.path.slice(&buf), b"http://upstream:8000/1kb");
         assert_eq!(head.raw_len, raw.len() - 4); // body = "body"
-        assert_eq!(head.close, true);
+        assert!(head.close);
         let auth = head.auth.unwrap();
         assert_eq!(auth.slice(&buf), b"Basic abc");
         let host = head.host.unwrap();

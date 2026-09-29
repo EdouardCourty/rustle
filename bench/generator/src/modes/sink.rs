@@ -49,11 +49,7 @@ pub(crate) async fn run_sink(listen: &str) -> ! {
             // Take a buffer from the pool (or allocate a fresh one).
             let mut buf = {
                 let mut p = pool.lock().await;
-                p.pop_front().unwrap_or_else(|| {
-                    let mut v = Vec::new();
-                    v.reserve(8192);
-                    v
-                })
+                p.pop_front().unwrap_or_else(|| Vec::with_capacity(8192))
             };
             while let Ok(n) = s.read_buf(&mut buf).await {
                 if n == 0 {

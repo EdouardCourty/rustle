@@ -22,7 +22,7 @@ pub(crate) fn warmup_of(cmd: &crate::Cmd) -> Option<crate::Cmd> {
             conns: *conns,
             // Time-budgeted warmup: a fifth of the measured budget, at
             // least 2 s. Count-based: a quarter of the requests.
-            duration: duration.map(|d| d.min(5).max(2)),
+            duration: duration.map(|d| d.clamp(2, 5)),
             requests: requests.map(|r| (r / 4).max(100)),
             no_keepalive: *no_keepalive,
         }),

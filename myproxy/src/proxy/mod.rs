@@ -106,7 +106,7 @@ pub async fn handle_conn(
                 // Free the head-read buffer: the tunnel relay has its own
                 // buffers, and holding this one would inflate RAM/connection.
                 drop(std::mem::take(&mut buf));
-                match pipeline::connect_upstream(&host_owned, port, connect, &dns, &*origin_key)
+                match pipeline::connect_upstream(&host_owned, port, connect, &dns, &origin_key)
                     .await
                 {
                     Ok(mut up) => {
