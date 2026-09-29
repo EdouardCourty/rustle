@@ -43,5 +43,3 @@ max_idle_per_origin = 32
 # (declared) or a truncated stream + close (unknown length).
 max_request_body_bytes = 0
 max_response_body_bytes = 0
-max_request_body_bytes = 0
-max_response_body_bytes = 0
