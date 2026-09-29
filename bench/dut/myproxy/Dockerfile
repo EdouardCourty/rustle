@@ -2,6 +2,10 @@ FROM rust:1-slim AS build
 WORKDIR /build
 # ALLOCATOR build arg: "" (glibc default) | --features jemalloc | --features mimalloc
 ARG ALLOCATOR
+# M10.3: native codegen — the image is built on the deployment box (bench
+# rule: build where you run). Enables the ISA extensions of that CPU
+# (AVX2/BMI on this class); rebuild on older hardware.
+ENV RUSTFLAGS="-C target-cpu=native"
 COPY Cargo.toml ./
 COPY myproxy ./myproxy
 COPY bench/generator ./bench/generator

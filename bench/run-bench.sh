@@ -45,6 +45,12 @@ echo "# $PROXY auth=$AUTH repeat=$REPEAT $(date)" | tee -a "$out/results.txt"
 # CPU ticks (utime+stime, CLK_TCK=100) and RSS in MB of the proxy process.
 cpu_ticks() { docker compose exec -T proxy cat /proc/1/stat | awk '{print $14+$15}'; }
 rss_mb() { docker compose exec -T proxy cat /proc/1/statm | awk '{printf "%.1f", $2*4096/1048576}'; }
+# Same, summed over all upstream processes (nginx master+workers): the
+# harness-side cost per test is the ceiling nobody sees.
+up_ticks() {
+    docker compose exec -T upstream sh -c \
+        'cat /proc/[0-9]*/stat 2>/dev/null | awk "{s+=\$14+\$15} END{print s+0}"'
+}
 
 run_test() {
     local name="$1"; shift
@@ -52,11 +58,13 @@ run_test() {
     echo "### $name"
     docker compose restart proxy >/dev/null  # fresh state + fresh CPU counters
     sleep 0.5
-    local tick0 tick1 median cpu_s_per_run
+    local tick0 tick1 median cpu_s_per_run up0 up1 up_cpu_s_per_run
     tick0=$(cpu_ticks)
+    up0=$(up_ticks)
     docker compose --profile generator run --rm -T generator \
         --repeat "$REPEAT" "$@" | tee /dev/stderr | grep '^RESULT median' > /tmp/opencode/median.txt
     tick1=$(cpu_ticks)
+    up1=$(up_ticks)
     median=$(cat /tmp/opencode/median.txt)
     if [ -z "$median" ]; then
         echo "!! no RESULT median line for $name" | tee -a "$out/results.txt"
@@ -65,7 +73,9 @@ run_test() {
     # CPU seconds attributable to one measured run (warmup amortized over REPEAT).
     cpu_s_per_run=$(awk -v a="$tick1" -v b="$tick0" -v n="$REPEAT" \
         'BEGIN{printf "%.3f", (a-b)/100/n}')
-    echo "$median cpu_s_per_run=$cpu_s_per_run rss_mb=$(rss_mb)" | tee -a "$out/results.txt"
+    up_cpu_s_per_run=$(awk -v a="$up1" -v b="$up0" -v n="$REPEAT" \
+        'BEGIN{printf "%.2f", (a-b)/100/n}')
+    echo "$median cpu_s_per_run=$cpu_s_per_run up_cpu_s_per_run=$up_cpu_s_per_run rss_mb=$(rss_mb)" | tee -a "$out/results.txt"
 }
 
 # Hold with optional 2-replica split (single client exhausts ephemeral ports).
@@ -124,7 +134,9 @@ if [ -n "${BENCH_SEED:-}" ]; then SEED="$BENCH_SEED"; else SEED=$RANDOM$RANDOM; 
 echo "seed=$SEED" | tee -a "$out/results.txt"
 
 declare -a TESTS=(
-    "run_test http-1kb http http://upstream:8000/1kb --conns 16 --duration 15"
+    # 1 KB keep-alive: conns raised 16->64 (M10.2-C). At 16 conns the
+    # ceiling was the harness' own RTT (conns/latency), not the proxy.
+    "run_test http-1kb http http://upstream:8000/1kb --conns 64 --duration 15"
     "run_test http-10kb http http://upstream:8000/10kb --conns 16 --duration 15"
     "run_test http-1mb http http://upstream:8000/1mb --conns 16 --duration 15"
     "run_test http-10mb http http://upstream:8000/10mb --conns 8 --duration 15"

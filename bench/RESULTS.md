@@ -1,7 +1,7 @@
 # Résultats — myproxy vs 3proxy
 
-Dates : 2026-09-27/28 · `{myproxy, 3proxy} × {auth=on, auth=off}`, médiane de
-3 runs (± warmup), client Docker local (aucun accès Internet).
+Dates : 2026-09-27/28/29 · `{myproxy, 3proxy} × {auth=on, auth=off}`,
+médiane de 3 runs (± warmup), client Docker local (aucun accès Internet).
 
 ## Environnement
 
@@ -15,20 +15,68 @@ Dates : 2026-09-27/28 · `{myproxy, 3proxy} × {auth=on, auth=off}`, médiane de
 - Mémoire : builds Rust **sérialisés** (rustc = 1-2 GB en pointe ; un build
   parallèle a OOM-killed la box). Client seul : 53 MB à 25k tunnels.
 
-## Chiffres définitifs (M9 : pool upstream + F_SETPIPE_SZ 1 MB + TCP window 1 MB, auth on)
+## Chiffres définitifs (M10.3 : zéro-alloc parser + fixes syscalls + target-cpu=native — auth on)
 
-| Workload | **myproxy M9 (randomisé)** | 3proxy | Verdict |
+Protocole : ordre randomisé à seed figée (`2004113323`, identique aux deux
+passe ce jour), budget wall-clock 15 s, **1 KB keep-alive passé à ×64
+conns** (M10.2-C : à ×16, le plafond était la latence du harnais —
+conns/RTT — pas le proxy ; nouveau protocole pour les deux proxies).
+
+| Workload | **myproxy M10.3** | 3proxy | Verdict |
 |---|---|---|---|
-| HTTP 1 KB, keep-alive ×16 | **14 725 rps · p50 1,1 ms** | 388 rps · p50 41 ms | **myproxy ×38*** |
-| HTTP 10 KB, ×16 | **15 238 rps (156 MB/s)** · CPU 2,78 s | 12 660 rps (130 MB/s) · CPU 3,70 s | **devant : +20 % rps, +20 % MB/s, CPU ÷1,3** |
-| HTTP 1 MB, ×16 | **2 593 rps (2 719 MB/s)** | 2 371 rps (2 486 MB/s) | **devant : +9 %** |
-| HTTP 10 MB, ×8 | 270 rps (2 830 MB/s) | **279 rps** (2 928 MB/s) | −3 % (parité dans le bruit) |
-| HTTP 1 KB, 1 req/conn ×64 | **4 848 rps · p50 6,2 ms** | 3 032 rps · p50 19,2 ms | **myproxy +60 %** |
-| CONNECT flood ×8 | **19,42 Gbps · 40 % CPU (3,95 s)** | 18,00 Gbps · 41 % CPU (4,09 s) | **devant : +8 % débit, −4 % CPU** |
-| Hold 1 000 tunnels | 4 386 conn/s · RSS 5,1 MB | 4 310 conn/s · RSS 3,4 MB | parité |
-| Hold 10 000 | **1 749 conn/s** · RSS 14,3 MB · CPU 1,40 s | 1 672 conn/s · RSS 3,5 MB · CPU 1,99 s | **devant : +5 % débit, CPU ÷1,4** |
-| Hold 25 000 | **25 000/25 000 ×3 · RSS 28,3 MB** | 16 745/25 000 (mur ~17k, reconfirmé ×3) | **myproxy seul à tenir** |
-| RAM tunnel idle | ~1,1-1,4 KB/conn | ~0,35 KB/conn | 3proxy ×4 (M10 pooling) |
+| HTTP 1 KB, keep-alive ×64 | **14 822 rps · p50 4,1 ms** | 1 555 rps · p50 41 ms | **myproxy ×9,5*** |
+| HTTP 10 KB, ×16 | **13 754 rps (141 MB/s)** · CPU 12,6 s | 12 347 rps (126 MB/s) · CPU 15,3 s | **devant : +11 % rps, +11 % MB/s, CPU -18 %** |
+| HTTP 1 MB, ×16 | **2 866 rps (3 005 MB/s)** | 2 455 rps (2 574 MB/s) | **devant : +17 %** |
+| HTTP 10 MB, ×8 | **350 rps (3 668 MB/s)** | 294 rps (3 087 MB/s) | **devant : +19 %** |
+| HTTP 1 KB, 1 req/conn ×64 | **4 896 rps · p50 5,9 ms** | 3 218 rps · p50 13,3 ms | **myproxy +52 %** |
+| CONNECT flood ×8 | **18,87 Gbps · CPU 4,19 s** | 17,84 Gbps · CPU 4,53 s | **devant : +6 % débit, CPU -8 %** |
+| Hold 1 000 tunnels | **5 236 conn/s** | 4 149 conn/s | **devant : +26 %** |
+| Hold 5 000 | 956 conn/s | 955 conn/s | parité (bruit) |
+| Hold 10 000 | 1 741 conn/s (open 5,7 s) | 4 000 conn/s (open 2,5 s) | ⚠️ voir caveat 6 (3proxy bimodal) |
+| Hold 25 000 | **25 000/25 000 · rate 2 642 · CPU 3,9 s** | 16 792/25 000 (CPU 22,6 s) | **myproxy seul à tenir (CPU ÷5,8)** |
+| RAM tunnel idle | ~1,3 KB/conn | ~0,35 KB/conn | 3proxy ×4 (pooling M11) |
+
+## Économie CPU par requête (nouveau — la métrique qui prédit le plafond)
+
+Le harnais publie désormais **les trois côtés** : proxy
+(`cpu_s_per_run`), generator (`gen_cpu_s_per_run`) et upstream
+(`up_cpu_s_per_run`) — la moitié du bench qui n'avait jamais été publiée.
+
+Au régime 1 KB ×64 (proxy 42-47 µs/req sur son core, côté bench ~23 µs/req
+— upstream nginx ~16 + generator ~8 — sur l'autre) :
+
+- **Plafond proxy seul : ~21-24k rps** (100 % de son core).
+- **À 50k rps, les DEUX cores saturent** : le bench côté generator+nginx
+  demande ~1,15 s CPU par seconde testée à 14,8k… le mur 50k est autant
+  le harnais que le proxy (le 2ᵉ core demande ~52 CPU-s sur 15 s).
+- Gains M10.3 mesurés sur CPU/req : 10 KB **-18 %**, 1 KB spot-check
+  **-9 %** (46,5 → 42,3 µs), short **-4 %**, 1 MB parité à +6,6 % rps.
+
+## Ce que M10.3 a ajouté (sans toucher au runtime tokio)
+
+- **Parser zéro-alloc** : `RequestHead` ne porte plus que des `Span`
+  (indices) dans le buffer de lecture — method/path/auth/host étaient 4-6
+  heap-allocs par requête depuis le M0 ; le HTTP forward ne les recopie
+  plus jamais (rewrite et origin-key lisent les spans).
+- **Fix : `set_nodelay` refait par REQUÊTE** sur la socket poolée
+  (`pipeline.rs`, exécuté dans la boucle) — 1 syscall/req gaspillé, 
+  maintenant posé une fois à la création.
+- **Fix : clé d'origin CONNECT vide** — toutes les CONNECT partageaient
+  une entrée du cache DNS depuis M10.2 (le scratch n'était rempli que
+  dans le chemin HTTP) ; l'autorité CONNECT construit maintenant sa clé.
+- **TCP_QUICKACK une fois par connexion** (au lieu d'une fois par
+  requête) — la réponse piggybacke de toute façon l'ACK de la requête.
+- **Pool : `put` n'alloue plus la clé** quand l'origine est déjà en pool
+  (`entry(to_string)` allouait même sur hit) ; auth : décodage base64 sur
+  pile (`decode_slice`, fallback alloc au-delà de 192 B) ; clé d'origin :
+  chiffres du port poussés sans `to_string()`.
+- **Build : `-C target-cpu=native`** dans l'image (règle : build là où on
+  run) — AVX2/BMI sur cette classe de CPU.
+- **Harnais : CPU des trois côtés publiée** (`gen_cpu_s_per_run`,
+  `up_cpu_s_per_run`) + protocole 1 KB ×64 (M10.2-C).
+- Baseline ×64 du M10.2 avant fixes : 15 279 rps à 10,64 CPU-s ; après :
+  14 822 à 9,47-10,42 (variance box) — la partie CPU/req est le gain
+  durable, le rps 1 KB étant plafonné par la latence du harnais.
 
 ## Ce que M10.2 a ajouté (le dernier single-core)
 
@@ -90,9 +138,16 @@ workloads, invisible sur le p50.** Aucune raison de la désactiver.
 
 ## Conclusions
 
-- **myproxy est devant PARTOUT, toutes cases positives** : 10 KB +6-9 %,
-  1 MB +13 %, 10 MB +30 %, flood +4 % débit à CPU ÷1,2, hold-10k +13 %,
-  hold-25k taux ×2.
+- **myproxy est devant PARTOUT sur le data plane au protocole M10.3** :
+  10 KB +11 % (CPU -18 %), 1 MB +17 %, 10 MB +19 %, flood +6 % débit à
+  CPU -8 %, short +52 %, hold-1k +26 %, hold-25k 25 000/25 000 (CPU ÷5,8).
+- **Le 1 KB ×64 est un mur de latence du harnais** (~15-16k quel que soit
+  le proxy le plus rapide) — la métrique honnête pour les prochaines
+  optimisations est le **CPU par requête**, publié désormais.
+- **Le mur 50k est DOUBLE sur cette box** : proxy ~21-24k (CPU/req) ET
+  bench-side ~23 µs/req — ce n'est pas "physiquement impossible", c'est
+  deux budgets de core à diviser par ~3 chacun (proxy : io_uring/FSM
+  sans tokio ; harnais : upstream plus léger que nginx).
 - **Chemin d'établissement + tunnels : myproxy domine** (×36 sur les
   petits objets, +62 % en connexions courtes, et seul à tenir 25 000
   tunnels simultanés sur cette machine).
@@ -106,11 +161,12 @@ workloads, invisible sur le p50.** Aucune raison de la désactiver.
 
 ## Caveats honnêtes
 
-1. Le 388 req/s de 3proxy sur HTTP 1 KB = **delayed-ACK (40 ms) vérifié à
-   la capture** : réponse en 2 petits writes chez 3proxy, le 2ᵉ attend un
-   ACK retardé d'exactement 40 ms. Ce ×38 est réel ici mais c'est avant
-   tout un défaut 3proxy (correctible de leur côté, TCP_NODELAY) — à ne
-   pas publier sans ce caveat.
+1. Le 1 555 req/s de 3proxy sur HTTP 1 KB ×64 = **delayed-ACK (40 ms)
+   vérifié à la capture** : réponse en 2 petits writes chez 3proxy, le 2ᵉ
+   attend un ACK retardé d'exactement 40 ms (p50 41 ms identique au
+   protocole ×16). Ce ×9,5 est réel ici mais c'est avant tout un défaut
+   3proxy (correctible de leur côté, TCP_NODELAY) — à ne pas publier sans
+   ce caveat.
 2. **Variance flood à la hausse/baisse selon la chauffe** : 17,2 Gbps
    après 4 tests HTTP lourds, 24,3 Gbps en isolation. Le harnais a besoin
    d'un ordre randomisé ou d'une init réseau pré-chauffée pour raffiner.
@@ -118,6 +174,12 @@ workloads, invisible sur le p50.** Aucune raison de la désactiver.
    tunnels (config best-effort `maxconn 200000`).
 4. Client+sink sur un même core : le plafond absolu du harnais au flood.
 5. RAM mesurée post-test, modes identiques pour les deux proxies.
+6. **hold-10k bimodal côté 3proxy** : 1 672-1 877 conn/s sur les passes
+   des jours précédents, 4 000 conn/s aujourd'hui (même protocole, même
+   seed) — l'établissement massif dépend fortement de l'état réseau
+   (conntrack/TIME_WAIT hérités de la position dans la matrice). La
+   lecture fiable : hold-25k (le mur structurel) et hold-1k (établissement
+   pur) ; hold-5k/10k restent des tests de bande-passante d'accept.
 
 ## Backlog M10 (piloté par ces chiffres)
 

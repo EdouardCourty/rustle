@@ -17,6 +17,26 @@ fn rss_pages() -> f64 {
         .unwrap_or(-1.0)
 }
 
+/// utime+stime of this process, in CPU ticks (CLK_TCK=100, same
+/// convention as the harness' proxy sampler). The generator/upstream/sink
+/// CPU is the half of the benchmark nobody published — and at high rps it
+/// can be the real ceiling, not the proxy under test.
+fn cpu_ticks() -> u64 {
+    std::fs::read_to_string("/proc/self/stat")
+        .ok()
+        .and_then(|s| {
+            // comm may contain spaces and parens — parse after the last ')'.
+            let after = s.rsplit_once(')')?.1;
+            let mut it = after.split_whitespace();
+            // Fields after ')': state(3), ppid(4) … utime(14) is the 12th
+            // item here, stime(15) the 13th.
+            let utime: u64 = it.nth(11)?.parse().ok()?;
+            let stime: u64 = it.next()?.parse().ok()?;
+            Some(utime + stime)
+        })
+        .unwrap_or(0)
+}
+
 #[derive(Parser)]
 #[command(
     name = "bench-client",
@@ -125,6 +145,9 @@ async fn amain() {
                 let _ = modes::run_once(&cli, &w).await;
             }
         }
+        // Generator CPU over the measured runs only (warmup excluded),
+        // attributed per run like the proxy's cpu_s_per_run.
+        let gen_ticks0 = cpu_ticks();
         let mut runs = Vec::new();
         for k in 1..=cli.repeat {
             let m = modes::run_once(&cli, &cli.cmd).await;
@@ -134,13 +157,17 @@ async fn amain() {
             );
             runs.push(m);
         }
+        let gen_ticks1 = cpu_ticks();
+        let gen_cpu_per_run =
+            gen_ticks1.saturating_sub(gen_ticks0) as f64 / (100.0 * cli.repeat.max(1) as f64);
         // … and again after the runs: the retained footprint (tasks, buffers
         // kept by the allocator) is the load the client puts on the box.
         let own_rss_end = rss_pages();
         println!(
             "{}",
             median_metrics(runs).line(&format!(
-                "median own_rss_mb={own_rss_start:.1} own_rss_end={own_rss_end:.1}"
+                "median own_rss_mb={own_rss_start:.1} own_rss_end={own_rss_end:.1} \
+                 gen_cpu_s_per_run={gen_cpu_per_run:.2}"
             ))
         );
     }
