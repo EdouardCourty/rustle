@@ -32,13 +32,30 @@ impl Authenticator {
             return false;
         }
         let b64 = value[6..].trim_ascii();
+        // M10.3: decode into a stack buffer — no per-request allocation in
+        // the hot path. The capacity estimate (`len/4*3`) is an upper bound
+        // of the decoded size (padding only shrinks it), so the decode
+        // cannot overflow the scratch. Only absurdly long tokens take the
+        // allocating fallback.
+        const MAX_DECODED: usize = 192;
+        if b64.len() / 4 * 3 <= MAX_DECODED {
+            let mut scratch = [0u8; MAX_DECODED];
+            return match B64.decode_slice(b64, &mut scratch) {
+                Ok(n) => self.match_key(&scratch[..n]),
+                Err(_) => false,
+            };
+        }
         let Ok(decoded) = B64.decode(b64) else {
             return false;
         };
-        // Key is the part after the first ':' (or the whole value).
+        self.match_key(&decoded)
+    }
+
+    /// Key is the part after the first ':' (or the whole value).
+    fn match_key(&self, decoded: &[u8]) -> bool {
         let key = match decoded.iter().position(|&b| b == b':') {
             Some(i) => &decoded[i + 1..],
-            None => &decoded[..],
+            None => decoded,
         };
         self.keys.iter().any(|k| bool::from(k.ct_eq(key)))
     }

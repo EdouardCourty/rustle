@@ -16,31 +16,52 @@ pub enum HeadError {
     Invalid,
 }
 
+/// A byte range inside the buffer a head was parsed from. Plain indices —
+/// `RequestHead` owns no allocation and no borrow; consumers slice through
+/// the buffer (`span.slice(buf)`). M10.3: zero-alloc parsing (method, path,
+/// auth and host used to be heap Strings — 4-6 mallocs per request gone).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl Span {
+    #[inline]
+    pub fn slice<'a>(&self, buf: &'a [u8]) -> &'a [u8] {
+        &buf[self.start..self.end]
+    }
+
+    #[inline]
+    #[cfg_attr(not(test), allow(dead_code))] // used by the classify tests
+    pub fn is_empty(&self) -> bool {
+        self.start >= self.end
+    }
+}
+
 /// A parsed HTTP request head. `raw_len` is the number of bytes of the head
 /// in the buffer it was parsed from; everything after is treated as body
-/// bytes.
+/// bytes. Every text field is a [`Span`] into that same buffer.
 pub struct RequestHead {
     pub raw_len: usize,
-    pub method: String,
-    pub path: String,
+    pub method: Span,
+    pub path: Span,
     pub version_minor: u8,
-    pub auth: Option<Vec<u8>>,
-    pub host: Option<String>,
+    pub auth: Option<Span>,
+    pub host: Option<Span>,
     pub content_length: Option<u64>,
     pub close: bool,
 }
 
 /// The proxy target derived from a head: CONNECT `host:port` -> raw tunnel,
-/// or origin-form HTTP request to the upstream authority.
+/// or origin-form HTTP request to the upstream authority. Host/origin are
+/// spans into the buffer the head was parsed from.
 pub enum Target {
     /// CONNECT host:port -> TCP tunnel.
-    Connect { host: String, port: u16 },
-    /// Plain HTTP request to host:port, rewritten request line kept in `origin`.
-    Http {
-        host: String,
-        port: u16,
-        origin: String,
-    },
+    Connect { host: Span, port: u16 },
+    /// Plain HTTP request to host:port, rewritten request line kept in `origin`
+    /// (empty span = no path in the absolute form; rewrite emits "/").
+    Http { host: Span, port: u16, origin: Span },
 }
 
 /// Reads one request head from `sock` into `buf` (clearing it first).
@@ -53,11 +74,13 @@ pub async fn read_head(
 ) -> Result<Option<RequestHead>, HeadError> {
     buf.clear();
     loop {
-        let parsed = {
+        // Zero-borrow parse: spans are computed inside this block from the
+        // very buffer; the returned head owns plain indices only.
+        let parsed: Option<RequestHead> = {
             let mut headers = [httparse::EMPTY_HEADER; MAX_HEADERS];
             let mut req = httparse::Request::new(&mut headers);
             match req.parse(buf) {
-                Ok(httparse::Status::Complete(len)) => Some(RequestHead::from(&req, len)),
+                Ok(httparse::Status::Complete(len)) => Some(RequestHead::from(&req, len, buf)),
                 Ok(httparse::Status::Partial) => None,
                 Err(_) => return Err(HeadError::Invalid),
             }
@@ -80,7 +103,7 @@ pub async fn read_head(
 }
 
 impl RequestHead {
-    fn from(req: &httparse::Request, len: usize) -> Self {
+    fn from(req: &httparse::Request, len: usize, buf: &[u8]) -> Self {
         let mut auth = None;
         let mut host = None;
         let mut content_length = None;
@@ -88,11 +111,11 @@ impl RequestHead {
         for h in req.headers.iter() {
             if h.name.eq_ignore_ascii_case("proxy-authorization") {
                 if auth.is_none() {
-                    auth = Some(h.value.to_vec());
+                    auth = Some(span_of(buf, h.value));
                 }
             } else if h.name.eq_ignore_ascii_case("host") {
                 if host.is_none() {
-                    host = Some(String::from_utf8_lossy(h.value).into_owned());
+                    host = Some(span_of(buf, h.value));
                 }
             } else if h.name.eq_ignore_ascii_case("content-length") {
                 if content_length.is_none() {
@@ -106,14 +129,34 @@ impl RequestHead {
         }
         RequestHead {
             raw_len: len,
-            method: req.method.unwrap_or("").to_string(),
-            path: req.path.unwrap_or("").to_string(),
+            method: span_of(buf, req.method.unwrap_or("").as_bytes()),
+            path: span_of(buf, req.path.unwrap_or("").as_bytes()),
             version_minor: req.version.unwrap_or(1),
             auth,
             host,
             content_length,
             close,
         }
+    }
+}
+
+/// Byte range of `s` inside `buf` (httparse returns zero-copy slices into
+/// the parsed buffer; we recover their offsets).
+///
+/// SAFETY: `s` always points inside `buf`'s allocation — it is a subslice
+/// httparse produced from this very buffer — so `offset_from` stays within
+/// the same allocation. Empty strings (httparse's static fallbacks) are
+/// short-circuited: two pointers from different allocations would make
+/// `offset_from` meaningless.
+fn span_of(buf: &[u8], s: &[u8]) -> Span {
+    if s.is_empty() {
+        return Span { start: 0, end: 0 };
+    }
+    let start = unsafe { s.as_ptr().offset_from(buf.as_ptr()) } as usize;
+    debug_assert!(start + s.len() <= buf.len());
+    Span {
+        start,
+        end: start + s.len(),
     }
 }
 
@@ -125,61 +168,96 @@ fn contains_token(value: &[u8], token: &str) -> bool {
 
 /// Routes a parsed head: CONNECT -> tunnel target; absolute-form or
 /// Host-header form -> origin-form HTTP target.
-pub fn classify(head: &RequestHead) -> Result<Target, &'static str> {
-    if head.method.eq_ignore_ascii_case("connect") {
-        let (host, port) = parse_authority(&head.path)?;
+pub fn classify(head: &RequestHead, buf: &[u8]) -> Result<Target, &'static str> {
+    let path = head.path.slice(buf);
+    if head.method.slice(buf).eq_ignore_ascii_case(b"connect") {
+        let (host, port) = parse_authority(buf, head.path)?;
         Ok(Target::Connect {
             host,
             port: port.unwrap_or(443),
         })
-    } else if let Some(rest) = head.path.strip_prefix("http://") {
-        let slash = rest.find('/').unwrap_or(rest.len());
-        let (host, port) = parse_authority(&rest[..slash])?;
-        let origin = if slash == rest.len() {
-            "/".to_string()
-        } else {
-            rest[slash..].to_string()
+    } else if let Some(rest) = strip_prefix_bytes(path, b"http://") {
+        let slash = rest.iter().position(|&b| b == b'/').unwrap_or(rest.len());
+        let (host, port) = parse_authority(
+            buf,
+            Span {
+                start: head.path.start + 7,
+                end: head.path.start + 7 + slash,
+            },
+        )?;
+        let origin = Span {
+            start: head.path.start + 7 + slash,
+            end: head.path.end,
         };
         Ok(Target::Http {
             host,
             port: port.unwrap_or(80),
             origin,
         })
-    } else if head.path.starts_with('/') {
-        let (host, port) = match &head.host {
-            Some(h) => parse_authority(h)?,
-            None => return Err("missing Host header"),
-        };
+    } else if path.first() == Some(&b'/') {
+        let hs = head.host.ok_or("missing Host header")?;
+        let (host, port) = parse_authority(buf, hs)?;
         Ok(Target::Http {
             host,
             port: port.unwrap_or(80),
-            origin: head.path.clone(),
+            origin: head.path,
         })
     } else {
         Err("unsupported request target")
     }
 }
 
-/// Parses `host:port`, `[v6]:port` or bare host/IPv6. Returns `(host, port)`.
-fn parse_authority(a: &str) -> Result<(String, Option<u16>), &'static str> {
-    if let Some(rest) = a.strip_prefix('[') {
-        let close = rest.find(']').ok_or("bad ipv6 authority")?;
-        let host = rest[..close].to_string();
-        let port = match rest[close + 1..].strip_prefix(':') {
-            Some(p) => Some(p.parse().map_err(|_| "bad port")?),
-            None => None,
+/// `strip_prefix` on raw bytes; returns the remaining subslice.
+fn strip_prefix_bytes<'a>(s: &'a [u8], prefix: &[u8]) -> Option<&'a [u8]> {
+    if s.starts_with(prefix) {
+        Some(&s[prefix.len()..])
+    } else {
+        None
+    }
+}
+
+/// Parses `host:port`, `[v6]:port` or bare host/IPv6. Returns `(host, port)`
+/// as a sub-span of `a` (offsets are absolute into `buf`).
+fn parse_authority(buf: &[u8], a: Span) -> Result<(Span, Option<u16>), &'static str> {
+    let s = a.slice(buf);
+    if s.first() == Some(&b'[') {
+        let close = s
+            .iter()
+            .position(|&b| b == b']')
+            .ok_or("bad ipv6 authority")?;
+        // Content inside the brackets: s[1..close] (close = ']' index).
+        let host = Span {
+            start: a.start + 1,
+            end: a.start + close,
+        };
+        let rest = &s[close + 1..];
+        let port = match rest.first() {
+            Some(b':') => Some(
+                std::str::from_utf8(&rest[1..])
+                    .map_err(|_| "bad port")?
+                    .parse()
+                    .map_err(|_| "bad port")?,
+            ),
+            _ => None,
         };
         Ok((host, port))
-    } else if a.matches(':').count() >= 2 {
+    } else if s.iter().filter(|&&b| b == b':').count() >= 2 {
         // Bare IPv6 without port.
-        Ok((a.to_string(), None))
+        Ok((a, None))
     } else {
-        match a.rfind(':') {
-            Some(i) => Ok((
-                a[..i].to_string(),
-                Some(a[i + 1..].parse().map_err(|_| "bad port")?),
-            )),
-            None => Ok((a.to_string(), None)),
+        match s.iter().rposition(|&b| b == b':') {
+            Some(i) => {
+                let host = Span {
+                    start: a.start,
+                    end: a.start + i,
+                };
+                let port = std::str::from_utf8(&s[i + 1..])
+                    .map_err(|_| "bad port")?
+                    .parse()
+                    .map_err(|_| "bad port")?;
+                Ok((host, Some(port)))
+            }
+            None => Ok((a, None)),
         }
     }
 }
@@ -188,13 +266,19 @@ fn parse_authority(a: &str) -> Result<(String, Option<u16>), &'static str> {
 /// upstream, dropping proxy-specific headers and forcing `Connection:
 /// keep-alive` (the pool decides per-response whether the connection ends
 /// up reused or dropped). Zero-alloc: writes into a connection-owned
-/// scratch buffer cleared then reused across keep-alive requests.
-pub fn rewrite_head_into(out: &mut Vec<u8>, head_raw: &[u8], method: &str, origin: &str) {
+/// scratch buffer cleared then reused across keep-alive requests. `method`
+/// and `origin` are raw spans/slices from the head's buffer; an empty
+/// origin (absolute form without a path) is emitted as "/".
+pub fn rewrite_head_into(out: &mut Vec<u8>, head_raw: &[u8], method: &[u8], origin: &[u8]) {
     out.clear();
     out.reserve(head_raw.len() + 64);
-    out.extend_from_slice(method.as_bytes());
+    out.extend_from_slice(method);
     out.push(b' ');
-    out.extend_from_slice(origin.as_bytes());
+    if origin.is_empty() {
+        out.push(b'/');
+    } else {
+        out.extend_from_slice(origin);
+    }
     out.extend_from_slice(b" HTTP/1.1\r\n");
 
     let rest = match head_raw.iter().position(|&b| b == b'\n') {
@@ -228,21 +312,38 @@ pub fn rewrite_head_into(out: &mut Vec<u8>, head_raw: &[u8], method: &str, origi
 mod tests {
     use super::*;
 
-    #[test]
-    fn classify_connect() {
-        let head = RequestHead {
+    /// Builds a head whose spans point into `buf` (offsets must be computed
+    /// by hand in the tests — same contract the parser fulfils).
+    fn head(
+        method: (usize, usize),
+        path: (usize, usize),
+        host: Option<(usize, usize)>,
+    ) -> RequestHead {
+        RequestHead {
             raw_len: 0,
-            method: "CONNECT".into(),
-            path: "example.com:443".into(),
+            method: Span {
+                start: method.0,
+                end: method.1,
+            },
+            path: Span {
+                start: path.0,
+                end: path.1,
+            },
             version_minor: 1,
             auth: None,
-            host: Some("example.com:443".into()),
+            host: host.map(|(s, e)| Span { start: s, end: e }),
             content_length: None,
             close: false,
-        };
-        match classify(&head).unwrap() {
+        }
+    }
+
+    #[test]
+    fn classify_connect() {
+        let buf = b"CONNECT example.com:443";
+        let h = head((0, 7), (8, 23), None);
+        match classify(&h, buf).unwrap() {
             Target::Connect { host, port } => {
-                assert_eq!(host, "example.com");
+                assert_eq!(host.slice(buf), b"example.com");
                 assert_eq!(port, 443);
             }
             _ => panic!("expected Connect"),
@@ -251,17 +352,9 @@ mod tests {
 
     #[test]
     fn classify_connect_default_port() {
-        let head = RequestHead {
-            raw_len: 0,
-            method: "CONNECT".into(),
-            path: "example.com".into(),
-            version_minor: 1,
-            auth: None,
-            host: Some("example.com".into()),
-            content_length: None,
-            close: false,
-        };
-        match classify(&head).unwrap() {
+        let buf = b"CONNECT example.com";
+        let h = head((0, 7), (8, 19), None);
+        match classify(&h, buf).unwrap() {
             Target::Connect { port, .. } => assert_eq!(port, 443),
             _ => panic!("expected Connect"),
         }
@@ -269,31 +362,96 @@ mod tests {
 
     #[test]
     fn classify_absolute_form() {
-        let head = RequestHead {
-            raw_len: 0,
-            method: "GET".into(),
-            path: "http://upstream:8000/1kb?x=1".into(),
-            version_minor: 1,
-            auth: None,
-            host: Some("upstream:8000".into()),
-            content_length: None,
-            close: false,
-        };
-        match classify(&head).unwrap() {
+        let buf = b"GET http://upstream:8000/1kb?x=1";
+        let h = head((0, 3), (4, 32), None);
+        match classify(&h, buf).unwrap() {
             Target::Http { host, port, origin } => {
-                assert_eq!(host, "upstream");
+                assert_eq!(host.slice(buf), b"upstream");
                 assert_eq!(port, 8000);
-                assert_eq!(origin, "/1kb?x=1");
+                assert_eq!(origin.slice(buf), b"/1kb?x=1");
             }
             _ => panic!("expected Http"),
         }
     }
 
     #[test]
+    fn classify_absolute_form_no_path() {
+        let buf = b"GET http://upstream:8000";
+        let h = head((0, 3), (4, 24), None);
+        match classify(&h, buf).unwrap() {
+            Target::Http { origin, .. } => assert!(origin.is_empty()),
+            _ => panic!("expected Http"),
+        }
+    }
+
+    #[test]
+    fn classify_host_header_form() {
+        // path span (4..8) + host value span (25..38) inside the raw head.
+        let buf = b"GET /1kb HTTP/1.1\r\nHost: upstream:8000";
+        let h = head((0, 3), (4, 8), Some((25, 38)));
+        match classify(&h, buf).unwrap() {
+            Target::Http { host, port, origin } => {
+                assert_eq!(host.slice(buf), b"upstream");
+                assert_eq!(port, 8000);
+                assert_eq!(origin.slice(buf), b"/1kb");
+            }
+            _ => panic!("expected Http"),
+        }
+    }
+
+    #[test]
+    fn classify_ipv6_authority() {
+        // Bare IPv6 without port.
+        let buf = b"GET http://2001:db8::1/";
+        let h = head((0, 3), (4, 22), None);
+        match classify(&h, buf).unwrap() {
+            Target::Http { host, port, .. } => {
+                assert_eq!(host.slice(buf), b"2001:db8::1");
+                assert_eq!(port, 80);
+            }
+            _ => panic!("expected Http"),
+        }
+        // Bracketed IPv6 with port (CONNECT form).
+        let buf = b"CONNECT [2001:db8::1]:8443";
+        let h = head((0, 7), (8, 26), None);
+        match classify(&h, buf).unwrap() {
+            Target::Connect { host, port } => {
+                assert_eq!(host.slice(buf), b"2001:db8::1");
+                assert_eq!(port, 8443);
+            }
+            _ => panic!("expected Connect"),
+        }
+    }
+
+    #[test]
+    fn parse_read_head_spans() {
+        // End-to-end: parse a real head, then slice through the buffer.
+        let raw = b"GET http://upstream:8000/1kb HTTP/1.1\r\nProxy-Authorization: Basic abc\r\nHost: upstream:8000\r\nConnection: close\r\n\r\nbody";
+        let mut buf = raw.to_vec();
+        let mut headers = [httparse::EMPTY_HEADER; MAX_HEADERS];
+        let mut req = httparse::Request::new(&mut headers);
+        let len = match req.parse(&buf).unwrap() {
+            httparse::Status::Complete(len) => len,
+            _ => panic!("expected complete"),
+        };
+        let head = RequestHead::from(&req, len, &buf);
+        assert_eq!(head.method.slice(&buf), b"GET");
+        assert_eq!(head.path.slice(&buf), b"http://upstream:8000/1kb");
+        assert_eq!(head.raw_len, raw.len() - 4); // body = "body"
+        assert_eq!(head.close, true);
+        let auth = head.auth.unwrap();
+        assert_eq!(auth.slice(&buf), b"Basic abc");
+        let host = head.host.unwrap();
+        assert_eq!(host.slice(&buf), b"upstream:8000");
+        // Body bytes survive after the head.
+        assert_eq!(&buf[head.raw_len..], b"body");
+    }
+
+    #[test]
     fn rewrite_drops_proxy_headers() {
         let raw = b"GET http://upstream:8000/1kb HTTP/1.1\r\nHost: upstream:8000\r\nProxy-Authorization: Basic abc\r\nProxy-Connection: keep-alive\r\nAccept: */*\r\n\r\n";
         let mut out = Vec::new();
-        rewrite_head_into(&mut out, raw, "GET", "/1kb");
+        rewrite_head_into(&mut out, raw, b"GET", b"/1kb");
         let out = String::from_utf8_lossy(&out);
         assert!(out.starts_with("GET /1kb HTTP/1.1\r\n"));
         assert!(out.contains("Host: upstream:8000"));
@@ -301,5 +459,14 @@ mod tests {
         assert!(!out.contains("Proxy-Authorization"));
         assert!(!out.contains("Proxy-Connection"));
         assert!(out.ends_with("Connection: keep-alive\r\n\r\n"));
+    }
+
+    #[test]
+    fn rewrite_empty_origin_is_root() {
+        let raw = b"GET http://upstream:8000 HTTP/1.1\r\n\r\n";
+        let mut out = Vec::new();
+        rewrite_head_into(&mut out, raw, b"GET", b"");
+        let out = String::from_utf8_lossy(&out);
+        assert!(out.starts_with("GET / HTTP/1.1\r\n"));
     }
 }

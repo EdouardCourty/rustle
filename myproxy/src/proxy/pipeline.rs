@@ -11,7 +11,7 @@ use tokio::time::timeout;
 
 use crate::config::Config;
 use crate::dns::DnsCache;
-use crate::http::{read_response_head, HeadError, RequestHead, RespError};
+use crate::http::{read_response_head, HeadError, RequestHead, RespError, Span, Target};
 use crate::relay;
 use crate::relay::PipePair;
 use crate::upstream::UpstreamPool;
@@ -36,12 +36,10 @@ pub(crate) const RESP_413: &[u8] =
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn http(
     client: &mut TcpStream,
-    host: &str,
-    port: u16,
-    origin: &str,
     cfg: &Config,
     buf: &mut Vec<u8>,
     head: &RequestHead,
+    target: &Target,
     dns: &DnsCache,
     pool: &UpstreamPool,
     pipes: &mut Option<PipePair>,
@@ -54,10 +52,18 @@ pub(super) async fn http(
     let idle = cfg.timeouts.idle;
     let connect = cfg.timeouts.connect;
     let max_head = cfg.limits.max_header_bytes;
+    // M10.3: host/origin are spans into `buf`; the origin key is still
+    // rebuilt per request into the connection-owned scratch (port digits
+    // appended without allocating).
+    let (host_span, port, origin_span) = match target {
+        Target::Http { host, port, origin } => (*host, *port, *origin),
+        _ => return false,
+    };
+    let host_str = std::str::from_utf8(host_span.slice(buf)).unwrap_or("");
     origin_key.clear();
-    origin_key.push_str(host);
+    origin_key.push_str(&String::from_utf8_lossy(host_span.slice(buf)));
     origin_key.push(':');
-    origin_key.push_str(&port.to_string());
+    push_u16(origin_key, port);
     let key: &str = origin_key;
 
     // Upstream connection: pooled reuse when possible, fresh otherwise. A
@@ -68,7 +74,7 @@ pub(super) async fn http(
         attempt += 1;
         let (mut up, from_pool) = match pool.take(&key) {
             Some(s) => (s, true),
-            None => match connect_upstream(host, port, connect, dns, key).await {
+            None => match connect_upstream(host_str, port, connect, dns, key).await {
                 Ok(s) => (s, false),
                 Err(UpstreamError::Timeout) => {
                     let _ = client.write_all(RESP_504).await;
@@ -81,14 +87,19 @@ pub(super) async fn http(
                 }
             },
         };
-        let _ = up.set_nodelay(true);
+        // NODELAY is set once when the socket is fresh; pooled sockets keep
+        // theirs (one saved syscall per request in the hot path).
+        if !from_pool {
+            let _ = up.set_nodelay(true);
+        }
 
         // B7: a retry is only safe when the request was forwarded from the
         // already-buffered bytes (no client body still being drained) and
         // the method is idempotent — otherwise a retry could re-execute a
         // POST or resend a head without its body.
+        let method = head.method.slice(buf);
         let idempotent =
-            head.method.eq_ignore_ascii_case("GET") || head.method.eq_ignore_ascii_case("HEAD");
+            method.eq_ignore_ascii_case(b"GET") || method.eq_ignore_ascii_case(b"HEAD");
         let replayable = idempotent
             && head.content_length.unwrap_or(0) as usize == buf.len().saturating_sub(head.raw_len);
 
@@ -98,7 +109,7 @@ pub(super) async fn http(
             &mut up,
             buf,
             head,
-            origin,
+            origin_span,
             idle,
             cfg.http.max_request_body_bytes,
             &mut body_rejected,
@@ -168,7 +179,7 @@ pub(super) async fn http(
     // Body end: Content-Length, zero for HEAD/204/304 (B5: case-insensitive
     // and chunked must not override a declared zero body), chunked framing,
     // or unknown (then: relay until EOF, no pooling).
-    let zero_body = rhead.no_body_status || head.method.eq_ignore_ascii_case("HEAD");
+    let zero_body = rhead.no_body_status || head.method.slice(buf).eq_ignore_ascii_case(b"HEAD");
     let body_left = if zero_body {
         Some(0)
     } else {
@@ -271,7 +282,7 @@ async fn forward_request(
     up: &mut TcpStream,
     buf: &[u8],
     head: &RequestHead,
-    origin: &str,
+    origin: Span,
     idle: Duration,
     max_request_body: u64,
     body_rejected: &mut bool,
@@ -288,7 +299,12 @@ async fn forward_request(
         return false;
     }
 
-    crate::http::rewrite_head_into(rewrite_buf, &buf[..head.raw_len], &head.method, origin);
+    crate::http::rewrite_head_into(
+        rewrite_buf,
+        &buf[..head.raw_len],
+        head.method.slice(buf),
+        origin.slice(buf),
+    );
     if timeout(idle, up.write_all(rewrite_buf)).await.is_err() {
         return false;
     }
@@ -373,6 +389,26 @@ pub(super) async fn connect_upstream(
 /// response->proxy leg benefits as much as the proxy->client one).
 fn widen_buffers(sock: &TcpStream) {
     crate::server::widen_buffers(sock);
+}
+
+/// Appends `v`'s decimal digits without allocating (the origin key is a
+/// connection-owned scratch; `port.to_string()` cost one malloc per
+/// request in the keep-alive hot path).
+pub(super) fn push_u16(s: &mut String, v: u16) {
+    let mut digits = [0u8; 5];
+    let mut n = 0;
+    let mut p = v;
+    loop {
+        digits[n] = b'0' + (p % 10) as u8;
+        n += 1;
+        p /= 10;
+        if p == 0 {
+            break;
+        }
+    }
+    for i in (0..n).rev() {
+        s.push(digits[i] as char);
+    }
 }
 
 /// Try each address in order until one connects (sequential, same as

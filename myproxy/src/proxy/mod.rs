@@ -54,6 +54,10 @@ pub async fn handle_conn(
     let mut resp_buf: Vec<u8> = Vec::new();
     let mut rewrite_buf: Vec<u8> = Vec::new();
     let mut origin_key: String = String::new();
+    // B: TCP_QUICKACK once per connection — the kernel re-arms it per
+    // segment; per-request setsockopts were pure syscall overhead in the
+    // keep-alive hot path (M10.3).
+    client.set_quickack(true).ok();
     loop {
         let head = match read_head(&mut client, &mut buf, max_head, idle).await {
             Ok(Some(h)) => h,
@@ -72,18 +76,13 @@ pub async fn handle_conn(
             }
         };
 
-        // B: TCP_QUICKACK once per request after reading the head — asks
-        // the kernel to ACK the client's request immediately instead of
-        // delaying up to 40 ms, which removes the delayed-ACK stall on the
-        // request/response boundary. Cheap (one setsockopt per request).
-        client.set_quickack(true).ok();
-
-        if !auth.check(head.auth.as_deref()) {
+        // M10.3: auth is a span into `buf` — sliced per check, zero alloc.
+        if !auth.check(head.auth.map(|s| s.slice(&buf))) {
             let _ = client.write_all(RESP_407).await;
             return;
         }
 
-        let target = match classify(&head) {
+        let target = match classify(&head, &buf) {
             Ok(t) => t,
             Err(_) => {
                 let _ = client.write_all(RESP_400).await;
@@ -93,13 +92,23 @@ pub async fn handle_conn(
 
         match target {
             Target::Connect { host, port } => {
+                // M10.3 fix: build the origin key from the CONNECT
+                // authority — it used to stay empty, so every CONNECT
+                // shared a single DNS cache entry.
+                origin_key.clear();
+                origin_key.push_str(&String::from_utf8_lossy(host.slice(&buf)));
+                origin_key.push(':');
+                pipeline::push_u16(&mut origin_key, port);
                 // Preserve any early data the client sent after the CONNECT
                 // head (spec-violating but seen in the wild).
                 let early = buf[head.raw_len..].to_vec();
+                let host_owned = String::from_utf8_lossy(host.slice(&buf)).into_owned();
                 // Free the head-read buffer: the tunnel relay has its own
                 // buffers, and holding this one would inflate RAM/connection.
                 drop(std::mem::take(&mut buf));
-                match pipeline::connect_upstream(&host, port, connect, &dns, &*origin_key).await {
+                match pipeline::connect_upstream(&host_owned, port, connect, &dns, &*origin_key)
+                    .await
+                {
                     Ok(mut up) => {
                         let _ = up.set_nodelay(true);
                         if client.write_all(RESP_200_CONNECT).await.is_err() {
@@ -127,15 +136,13 @@ pub async fn handle_conn(
                 }
                 return;
             }
-            Target::Http { host, port, origin } => {
+            Target::Http { .. } => {
                 let keep_going = pipeline::http(
                     &mut client,
-                    &host,
-                    port,
-                    &origin,
                     &cfg,
                     &mut buf,
                     &head,
+                    &target,
                     &dns,
                     &pool,
                     &mut resp_pipes,

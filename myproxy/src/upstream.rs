@@ -67,10 +67,16 @@ impl UpstreamPool {
             return; // full: drop the socket (close)
         }
         let max_idle_per_origin = pool.max_idle_per_origin;
-        let idle = pool
-            .by_origin
-            .entry(origin.to_string())
-            .or_insert_with(VecDeque::new);
+        // Fast path first: an origin already pooled (the keep-alive hot
+        // path) must not pay a key allocation — `entry` allocates its key
+        // even when the key is already present.
+        let idle = match pool.by_origin.get_mut(origin) {
+            Some(idle) => idle,
+            None => pool
+                .by_origin
+                .entry(origin.to_string())
+                .or_insert_with(VecDeque::new),
+        };
         if idle.len() >= max_idle_per_origin {
             return; // origin full: drop
         }
