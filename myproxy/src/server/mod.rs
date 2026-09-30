@@ -1,13 +1,24 @@
-//! TCP acceptor: connection accounting, backpressure and dispatch to the
-//! proxy pipeline. One acceptor loop, one task per client connection.
+//! TCP acceptor: shards, connection accounting, backpressure and dispatch
+//! to the proxy pipeline.
+//!
+//! Shared-nothing multi-core: `workers` shards, each an OS thread running
+//! its own `current_thread` runtime, its own `SO_REUSEPORT` listener (the
+//! kernel spreads incoming connections) and its own upstream pool. A
+//! connection lives and dies on the shard that accepted it — no
+//! cross-thread wakeups, no work stealing, no pool socket migrating between
+//! reactors. Only cold or read-only state is shared: config, auth keys, DNS
+//! cache, and the global connection counters.
 
+use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
 use std::sync::Arc;
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use anyhow::Context;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Semaphore;
+use tokio::sync::watch;
 
 use crate::auth::Authenticator;
 use crate::config::Config;
@@ -21,6 +32,9 @@ use crate::upstream::UpstreamPool;
 /// every proxied socket. Kernel memory is allocated on demand (skb) — an
 /// idle connection pays nothing.
 const SOCK_BUF_BYTES: libc::c_int = 1024 * 1024;
+
+/// Blocking-pool budget (getaddrinfo) split across shards.
+const BLOCKING_THREADS_TOTAL: usize = 512;
 
 /// Widen SO_SNDBUF/SO_RCVBUF on a socket (best effort, silent).
 pub(crate) fn widen_buffers(sock: &TcpStream) {
@@ -45,42 +59,182 @@ pub(crate) fn widen_buffers(sock: &TcpStream) {
     }
 }
 
-/// Accept loop: enforce `max_connections` (semaphore, reject 503 above),
-/// spawn one task per connection.
-/// On SIGTERM/SIGINT: stop accepting and drain in-flight connections
-/// (bounded to 5 s) — deploys no longer cut active clients.
-pub async fn run(cfg: Arc<Config>) -> anyhow::Result<()> {
-    let listener = bind(&cfg.server.listen)
-        .await
-        .context(format!("binding {}", cfg.server.listen))?;
+/// Process-wide state, shared by every shard.
+struct Shared {
+    cfg: Arc<Config>,
+    auth: Arc<Authenticator>,
+    dns: Arc<DnsCache>,
+    /// Live client connections, all shards (enforces `max_connections`).
+    active: AtomicUsize,
+    /// High-water mark of `active` since the last heap trim.
+    peak: AtomicUsize,
+    /// Connections accepted per shard (balance check, logged at shutdown).
+    accepted: Vec<AtomicU64>,
+}
+
+/// A running server: one thread per shard.
+pub struct Server {
+    addr: SocketAddr,
+    shared: Arc<Shared>,
+    shutdown: watch::Sender<bool>,
+    shards: Vec<JoinHandle<anyhow::Result<()>>>,
+}
+
+/// Number of shards for `workers` (0 = one per available CPU).
+fn shard_count(workers: usize) -> usize {
+    if workers > 0 {
+        return workers;
+    }
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+}
+
+/// Binds every shard's listener, then starts the shards. Binding happens
+/// here, synchronously, so errors surface before any thread starts and an
+/// ephemeral port (`:0`) resolved by the first listener is shared by all.
+pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
+    let n = shard_count(cfg.server.workers);
+    let listen: SocketAddr = cfg
+        .server
+        .listen
+        .parse()
+        .with_context(|| format!("invalid listen address: {}", cfg.server.listen))?;
+    let reuse_port = n > 1;
+    let first = bind(listen, reuse_port).with_context(|| format!("binding {listen}"))?;
+    let addr = first.local_addr()?;
+    let mut listeners = vec![first];
+    for _ in 1..n {
+        listeners.push(bind(addr, true).with_context(|| format!("binding {addr}"))?);
+    }
+    let admin = if cfg.server.admin_listen.is_empty() {
+        None
+    } else {
+        let a: SocketAddr = cfg.server.admin_listen.parse().with_context(|| {
+            format!("invalid admin address: {}", cfg.server.admin_listen)
+        })?;
+        Some(bind(a, false).with_context(|| format!("binding admin {a}"))?)
+    };
+    let cpus = if cfg.server.pin_cores {
+        allowed_cpus()
+    } else {
+        Vec::new()
+    };
+
+    let shared = Arc::new(Shared {
+        auth: Arc::new(Authenticator::new(&cfg.auth.api_keys)),
+        dns: Arc::new(DnsCache::new(cfg.dns.ttl, cfg.dns.max_entries)),
+        active: AtomicUsize::new(0),
+        peak: AtomicUsize::new(0),
+        accepted: (0..n).map(|_| AtomicU64::new(0)).collect(),
+        cfg,
+    });
     tracing::info!(
-        addr = %cfg.server.listen,
-        workers = cfg.server.workers,
-        max_connections = cfg.limits.max_connections,
+        %addr,
+        shards = n,
+        pinned = !cpus.is_empty(),
+        max_connections = shared.cfg.limits.max_connections,
         "myproxy listening",
     );
 
-    if !cfg.server.admin_listen.is_empty() {
-        let admin = bind(&cfg.server.admin_listen)
-            .await
-            .context(format!("binding admin {}", cfg.server.admin_listen))?;
-        tracing::info!(addr = %cfg.server.admin_listen, "admin/health listening");
-        tokio::spawn(admin_loop(admin));
+    let (shutdown, rx) = watch::channel(false);
+    let mut admin = admin;
+    let mut shards = Vec::with_capacity(n);
+    for (id, listener) in listeners.into_iter().enumerate() {
+        let shared = shared.clone();
+        let rx = rx.clone();
+        let admin = if id == 0 { admin.take() } else { None };
+        let cpu = (!cpus.is_empty()).then(|| cpus[id % cpus.len()]);
+        let handle = std::thread::Builder::new()
+            .name(format!("myproxy-shard-{id}"))
+            .spawn(move || {
+                if let Some(cpu) = cpu {
+                    pin_to_cpu(cpu);
+                }
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    // Small tasks + a large accept fan-in: 128 KB/task stacks
+                    // instead of glibc/tokio defaults (2 MB reserve, ~12-20 KB
+                    // touched per tunnel just for handshakes).
+                    .thread_stack_size(128 * 1024)
+                    .max_blocking_threads((BLOCKING_THREADS_TOTAL / n).max(8))
+                    .build()?;
+                rt.block_on(run_shard(id, shared, listener, admin, rx))
+            })?;
+        shards.push(handle);
+    }
+    Ok(Server {
+        addr,
+        shared,
+        shutdown,
+        shards,
+    })
+}
+
+impl Server {
+    /// Proxy listen address (resolved port when configured with `:0`).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn local_addr(&self) -> SocketAddr {
+        self.addr
     }
 
-    let slots = Arc::new(Semaphore::new(cfg.limits.max_connections));
-    let auth = Arc::new(Authenticator::new(&cfg.auth.api_keys));
-    let dns = Arc::new(DnsCache::new(cfg.dns.ttl, cfg.dns.max_entries));
+    /// Stops accepting on every shard, lets in-flight connections drain
+    /// (5 s cap), and joins the shard threads.
+    pub fn shutdown_and_join(self) -> anyhow::Result<()> {
+        let _ = self.shutdown.send(true);
+        let mut result = Ok(());
+        for h in self.shards {
+            match h.join() {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => result = Err(e),
+                Err(_) => result = Err(anyhow::anyhow!("shard thread panicked")),
+            }
+        }
+        let per_shard: Vec<u64> = self.shared.accepted.iter().map(|a| a.load(Relaxed)).collect();
+        tracing::info!(
+            remaining = self.shared.active.load(Relaxed),
+            accepted = ?per_shard,
+            "shutdown complete"
+        );
+        result
+    }
+}
+
+/// Decrements the global connection count when the connection task ends
+/// (normal return or panic).
+struct ConnSlot(Arc<Shared>);
+
+impl Drop for ConnSlot {
+    fn drop(&mut self) {
+        self.0.active.fetch_sub(1, Relaxed);
+    }
+}
+
+/// One shard: accept loop, one task per connection, its own upstream pool.
+/// Shard 0 also serves the admin listener and the heap-trim task.
+async fn run_shard(
+    id: usize,
+    shared: Arc<Shared>,
+    listener: std::net::TcpListener,
+    admin: Option<std::net::TcpListener>,
+    mut shutdown: watch::Receiver<bool>,
+) -> anyhow::Result<()> {
+    let listener = TcpListener::from_std(listener)?;
+    if let Some(admin) = admin {
+        tokio::spawn(admin_loop(TcpListener::from_std(admin)?));
+    }
+    #[cfg(all(target_env = "gnu", not(any(feature = "jemalloc", feature = "mimalloc"))))]
+    if id == 0 {
+        tokio::spawn(trim_after_bursts(shared.clone()));
+    }
+
+    let cfg = shared.cfg.clone();
+    let max_connections = cfg.limits.max_connections;
     let pool = Arc::new(UpstreamPool::new(if cfg.http.upstream_keepalive {
         cfg.http.max_idle_per_origin
     } else {
         0
     }));
-    let active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    // High-water mark of `active` since the last heap trim.
-    let peak = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    #[cfg(all(target_env = "gnu", not(any(feature = "jemalloc", feature = "mimalloc"))))]
-    tokio::spawn(trim_after_bursts(active.clone(), peak.clone()));
 
     loop {
         let (sock, peer) = tokio::select! {
@@ -94,71 +248,88 @@ pub async fn run(cfg: Arc<Config>) -> anyhow::Result<()> {
                     continue;
                 }
             },
-            _ = shutdown_signal() => {
-                tracing::info!("shutdown signal: draining active connections");
-                break;
-            }
+            _ = shutdown.changed() => break,
         };
 
-        let Ok(permit) = slots.clone().try_acquire_owned() else {
+        let now = shared.active.fetch_add(1, Relaxed) + 1;
+        if now > max_connections {
+            shared.active.fetch_sub(1, Relaxed);
             tracing::warn!(?peer, "max_connections reached, rejecting");
             reject(sock);
             continue;
-        };
+        }
+        shared.peak.fetch_max(now, Relaxed);
+        shared.accepted[id].fetch_add(1, Relaxed);
 
         // TCP_NODELAY and the 1 MB buffers are inherited from the listener
         // (set once in `bind`): no per-connection setsockopt.
-
+        let slot = ConnSlot(shared.clone());
         let cfg = cfg.clone();
-        let auth = auth.clone();
-        let dns = dns.clone();
+        let auth = shared.auth.clone();
+        let dns = shared.dns.clone();
         let pool = pool.clone();
-        let active2 = active.clone();
         tokio::spawn(async move {
-            let _permit = permit;
+            let _slot = slot;
             proxy::handle_conn(sock, cfg, auth, dns, pool).await;
-            active2.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         });
-        let now = active.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-        peak.fetch_max(now, std::sync::atomic::Ordering::Relaxed);
     }
 
     // Graceful drain: let in-flight connections finish (capped to 5 s —
-    // beyond that a deploy is more important than a stuck client).
+    // beyond that a deploy is more important than a stuck client). The
+    // counter is global: every shard waits for the whole process.
+    drop(listener);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    while active.load(std::sync::atomic::Ordering::Relaxed) > 0
-        && tokio::time::Instant::now() < deadline
-    {
-        tokio::time::sleep(Duration::from_millis(100)).await;
+    while shared.active.load(Relaxed) > 0 && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    tracing::info!(
-        remaining = active.load(std::sync::atomic::Ordering::Relaxed),
-        "shutdown complete"
-    );
     Ok(())
 }
 
-/// Hands freed heap back to the OS after a connection burst. On the
-/// single-threaded runtime every allocation lives in glibc's main arena,
+/// Hands freed heap back to the OS after a connection burst. On a
+/// single-threaded runtime every allocation lives in one glibc arena,
 /// whose top is only trimmed when contiguous: the free holes left by a
 /// 25k-tunnel burst kept RSS at its peak (125 MB) once the tunnels were
-/// gone. Checked every few seconds; trims only when the live connection
-/// count fell to under half of the high-water mark since the last trim.
+/// gone. Checked every few seconds; trims (all arenas) only when the live
+/// connection count fell to under half of the high-water mark since the
+/// last trim.
 #[cfg(all(target_env = "gnu", not(any(feature = "jemalloc", feature = "mimalloc"))))]
-async fn trim_after_bursts(
-    active: Arc<std::sync::atomic::AtomicUsize>,
-    peak: Arc<std::sync::atomic::AtomicUsize>,
-) {
-    use std::sync::atomic::Ordering::Relaxed;
+async fn trim_after_bursts(shared: Arc<Shared>) {
     const MIN_PEAK: usize = 1024;
     let mut tick = tokio::time::interval(Duration::from_secs(5));
     loop {
         tick.tick().await;
-        let now = active.load(Relaxed);
-        if peak.load(Relaxed) >= MIN_PEAK && now * 2 < peak.load(Relaxed) {
+        let now = shared.active.load(Relaxed);
+        let peak = shared.peak.load(Relaxed);
+        if peak >= MIN_PEAK && now * 2 < peak {
             // SAFETY: plain libc call, no pointers involved.
             unsafe { libc::malloc_trim(0) };
-            peak.store(now, Relaxed);
+            shared.peak.store(now, Relaxed);
+        }
+    }
+}
+
+/// CPUs this process may run on (honours Docker's cpuset), in order.
+fn allowed_cpus() -> Vec<usize> {
+    // SAFETY: cpu_set_t is plain data; sched_getaffinity fills it.
+    unsafe {
+        let mut set: libc::cpu_set_t = std::mem::zeroed();
+        if libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut set) != 0 {
+            return Vec::new();
+        }
+        (0..libc::CPU_SETSIZE as usize)
+            .filter(|&c| libc::CPU_ISSET(c, &set))
+            .collect()
+    }
+}
+
+/// Pins the calling thread to `cpu` (best effort).
+fn pin_to_cpu(cpu: usize) {
+    // SAFETY: cpu_set_t is plain data; tid 0 = calling thread.
+    unsafe {
+        let mut set: libc::cpu_set_t = std::mem::zeroed();
+        libc::CPU_SET(cpu, &mut set);
+        if libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &set) != 0 {
+            tracing::warn!(cpu, "sched_setaffinity failed");
         }
     }
 }
@@ -209,7 +380,7 @@ async fn admin_loop(listener: TcpListener) {
 }
 
 /// Resolves on SIGTERM or SIGINT.
-async fn shutdown_signal() {
+pub async fn shutdown_signal() {
     use tokio::signal::unix::{signal, SignalKind};
     let mut term = signal(SignalKind::terminate()).expect("SIGTERM handler");
     let mut int = signal(SignalKind::interrupt()).expect("SIGINT handler");
@@ -230,13 +401,14 @@ fn reject(mut sock: TcpStream) {
 
 /// Bind with a large accept backlog. Tokio/mio's default backlog is 1024,
 /// which drops SYNs under connection bursts (benchmark: hold >= 5k showed
-/// SYN retransmission latencies of 1s/3s/7s).
-async fn bind(listen: &str) -> anyhow::Result<TcpListener> {
-    let addr: std::net::SocketAddr = listen
-        .parse()
-        .with_context(|| format!("invalid listen address: {listen}"))?;
+/// SYN retransmission latencies of 1s/3s/7s). `reuse_port`: one listener
+/// per shard on the same address, the kernel balances between them.
+fn bind(addr: SocketAddr, reuse_port: bool) -> anyhow::Result<std::net::TcpListener> {
     let socket = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
     socket.set_reuse_address(true)?;
+    if reuse_port {
+        socket.set_reuse_port(true)?;
+    }
     // Inherited by every accepted socket (Linux clones the listener's
     // options): no setsockopt per connection. SO_RCVBUF before listen()
     // also sizes the window scale advertised in the SYN-ACK.
@@ -247,19 +419,20 @@ async fn bind(listen: &str) -> anyhow::Result<TcpListener> {
     // Capped by net.core.somaxconn (65535 in the benchmark harness).
     socket.listen(65535)?;
     socket.set_nonblocking(true)?;
-    let std_listener: std::net::TcpListener = socket.into();
-    Ok(TcpListener::from_std(std_listener)?)
+    Ok(socket.into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     /// The per-connection setsockopts were dropped on the promise that
     /// accepted sockets inherit them from the listener: keep it checked.
     #[tokio::test]
     async fn accepted_socket_inherits_listener_options() {
-        let ln = bind("127.0.0.1:0").await.unwrap();
+        let ln = TcpListener::from_std(bind("127.0.0.1:0".parse().unwrap(), false).unwrap())
+            .unwrap();
         let addr = ln.local_addr().unwrap();
         let _c = TcpStream::connect(addr).await.unwrap();
         let (s, _) = ln.accept().await.unwrap();
@@ -267,5 +440,60 @@ mod tests {
         let s = socket2::SockRef::from(&s);
         assert!(s.send_buffer_size().unwrap() >= SOCK_BUF_BYTES as usize);
         assert!(s.recv_buffer_size().unwrap() >= SOCK_BUF_BYTES as usize);
+    }
+
+    fn test_config(workers: usize, max_connections: usize) -> Arc<Config> {
+        let mut cfg = Config::default();
+        cfg.server.listen = "127.0.0.1:0".to_string();
+        cfg.server.admin_listen = String::new();
+        cfg.server.workers = workers;
+        cfg.limits.max_connections = max_connections;
+        Arc::new(cfg)
+    }
+
+    /// Sends a request the proxy answers without an upstream (400) and
+    /// returns the status line.
+    async fn roundtrip(addr: SocketAddr, raw: &[u8]) -> String {
+        let mut c = TcpStream::connect(addr).await.unwrap();
+        c.write_all(raw).await.unwrap();
+        let mut out = Vec::new();
+        c.read_to_end(&mut out).await.unwrap();
+        String::from_utf8_lossy(&out).lines().next().unwrap_or("").to_string()
+    }
+
+    #[tokio::test]
+    async fn shards_share_the_port_and_split_the_load() {
+        let srv = start(test_config(2, 1000)).unwrap();
+        let addr = srv.local_addr();
+        for _ in 0..64 {
+            let status = roundtrip(addr, b"garbage\r\n\r\n").await;
+            assert!(status.starts_with("HTTP/1.1 400"), "{status}");
+        }
+        let per_shard: Vec<u64> = srv.shared.accepted.iter().map(|a| a.load(Relaxed)).collect();
+        assert_eq!(per_shard.iter().sum::<u64>(), 64);
+        assert!(per_shard.iter().all(|&n| n > 0), "unbalanced: {per_shard:?}");
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn max_connections_is_global_across_shards() {
+        let srv = start(test_config(2, 2)).unwrap();
+        let addr = srv.local_addr();
+        // Two idle connections hold both slots (on whichever shards).
+        let _a = TcpStream::connect(addr).await.unwrap();
+        let _b = TcpStream::connect(addr).await.unwrap();
+        while srv.shared.active.load(Relaxed) < 2 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let status = roundtrip(addr, b"").await;
+        assert!(status.starts_with("HTTP/1.1 503"), "{status}");
+        drop((_a, _b));
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
     }
 }

@@ -13,9 +13,9 @@ Makefile              build test fmt clippy images up down smoke bench bench-off
 myproxy/              le proxy (~2850 lignes)
   config.toml.example
   src/
-    main.rs           runtime tokio multi_thread(workers), tracing (RUST_LOG), config = argv[1] (défaut config.toml)
+    main.rs           tracing (RUST_LOG), config = argv[1] (défaut config.toml), server::start puis attente SIGTERM/SIGINT
     config/mod.rs     TOML → structs (humantime pour les durées)
-    server/mod.rs     bind (socket2, listen 65535), accept loop, Semaphore(max_connections), admin /health, shutdown gracieux 5 s
+    server/mod.rs     shards (thread + runtime current_thread + listener SO_REUSEPORT + pool), compteur global max_connections, admin /health, trim, shutdown gracieux 5 s
     proxy/mod.rs      handle_conn : FSM par connexion (read_head → auth → classify → CONNECT | HTTP)
     proxy/pipeline.rs http() : forward_request, retry, 1xx, framing de body, pooling amont
     http/request.rs   RequestHead = Spans dans le buffer (parse zéro-alloc), classify, parse_authority
@@ -40,7 +40,7 @@ bench/
 
 ## Architecture (ce qu'il faut savoir)
 
-- **Threading** : `workers=1` (défaut) → runtime `current_thread` (acceptor + connexions sur un thread) ; `workers>1` → `multi_thread`. 1 accept loop, 1 `tokio::spawn` par connexion. NODELAY + buffers 1 MB posés sur le listener (hérités par les sockets acceptées). `malloc_trim` après les rafales (glibc). Pas de SO_REUSEPORT, pas de runtime par core. Pool amont et cache DNS = `Arc<Mutex<..>>` globaux.
+- **Threading** : shared-nothing. `workers` = N shards (0 = un par CPU) : chacun un thread OS, un runtime `current_thread`, un listener `SO_REUSEPORT` sur le même port (le noyau répartit), son pool amont. Une connexion reste sur son shard. Partagé : `Config`, `Authenticator`, `DnsCache` (Mutex, froid), compteurs atomiques (`active` = max_connections global, `peak`, `accepted` par shard loggé au shutdown). `pin_cores` optionnel. Shard 0 : admin + `malloc_trim` après rafales. NODELAY + buffers 1 MB posés sur le listener (hérités). Le main attend le signal puis `shutdown_and_join`.
 - **CONNECT** : clé `host:port` → DNS → connect → `200` → early bytes → `relay::bidirectional` (2 PipePair splice, half-close via `shutdown(SHUT_WR)`).
 - **HTTP** : clé d'origine → `pool.take` ou connect → `forward_request` (réécriture du head dans `rewrite_buf`, `write_all` 1 syscall si sans body, `write_vectored` head+prefix sinon) → `read_response_head` (httparse, 64 headers) → body selon framing (CL borné / chunked / EOF) → remise au pool si complet + keep-alive.
 - **Retry** sur socket poolée périmée : GET/HEAD avec body entièrement bufferisé uniquement.
@@ -52,7 +52,8 @@ bench/
 | Clé | Défaut |
 |---|---|
 | `server.listen` | `0.0.0.0:8080` (SocketAddr littéral) |
-| `server.workers` | 1 |
+| `server.workers` / `pin_cores` | 1 (0 = un shard par CPU) / false |
+| pool amont | limites **par shard** |
 | `server.admin_listen` | `127.0.0.1:8181` (`""` = off, `GET /health` seulement) |
 | `auth.api_keys` | `[]` → **auth off = open relay** |
 | `limits.max_connections` / `max_header_bytes` | 10000 / 65536 |
