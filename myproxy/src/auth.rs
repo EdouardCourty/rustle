@@ -57,7 +57,25 @@ impl Authenticator {
             Some(i) => &decoded[i + 1..],
             None => decoded,
         };
-        self.keys.iter().any(|k| bool::from(k.ct_eq(key)))
+        self.match_key_raw(key)
+    }
+
+    /// SOCKS5 username/password auth: the password is the API key.
+    pub fn check_key(&self, key: &[u8]) -> bool {
+        !self.enabled || self.match_key_raw(key)
+    }
+
+    /// Every key is compared (no short-circuit): the timing does not
+    /// reveal which key matched.
+    fn match_key_raw(&self, key: &[u8]) -> bool {
+        self.keys
+            .iter()
+            .fold(subtle::Choice::from(0), |acc, k| acc | k.ct_eq(key))
+            .into()
+    }
+
+    pub fn enabled(&self) -> bool {
+        self.enabled
     }
 }
 

@@ -11,16 +11,18 @@ use tokio::time::timeout;
 
 use crate::config::Config;
 use crate::dns::DnsCache;
+use crate::policy::DestPolicy;
 use crate::http::{read_response_head, HeadError, RequestHead, RespError, Span, Target};
 use crate::relay;
 use crate::relay::PipePair;
 use crate::stream::ClientStream;
-use crate::upstream::UpstreamPool;
 
 use super::{RESP_502, RESP_504};
 
 pub(crate) enum UpstreamError {
     Timeout,
+    /// Refused by the destination policy (port or address).
+    Forbidden,
     Other(std::io::Error),
 }
 
@@ -37,12 +39,10 @@ pub(crate) const RESP_413: &[u8] =
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn http<C: ClientStream>(
     client: &mut C,
-    cfg: &Config,
+    svc: &super::Services,
     buf: &mut [u8],
     head: &RequestHead,
     target: &Target,
-    dns: &DnsCache,
-    pool: &UpstreamPool,
     pipes: &mut Option<PipePair>,
     // Connection-owned scratches: zero alloc in the hot path — reused
     // across keep-alive requests, dropped with the connection.
@@ -50,6 +50,8 @@ pub(super) async fn http<C: ClientStream>(
     rewrite_buf: &mut Vec<u8>,
     origin_key: &mut String,
 ) -> bool {
+    let cfg: &Config = &svc.cfg;
+    let pool = &svc.pool;
     let idle = cfg.timeouts.idle;
     let connect = cfg.timeouts.connect;
     let max_head = cfg.limits.max_header_bytes;
@@ -75,8 +77,12 @@ pub(super) async fn http<C: ClientStream>(
         attempt += 1;
         let (mut up, from_pool) = match pool.take(key) {
             Some(s) => (s, true),
-            None => match connect_upstream(host_str, port, connect, dns, key).await {
+            None => match connect_upstream(host_str, port, connect, &svc.dns, key, &svc.dest).await {
                 Ok(s) => (s, false),
+                Err(UpstreamError::Forbidden) => {
+                    super::reply(client, super::RESP_403).await;
+                    return false;
+                }
                 Err(UpstreamError::Timeout) => {
                     super::reply(client, RESP_504).await;
                     return false;
@@ -377,10 +383,17 @@ pub(super) async fn connect_upstream(
     connect: Duration,
     dns: &DnsCache,
     key: &str,
+    dest: &DestPolicy,
 ) -> Result<TcpStream, UpstreamError> {
+    if !dest.port_allowed(port) {
+        return Err(UpstreamError::Forbidden);
+    }
     if let Ok(ip) = host.parse::<std::net::IpAddr>() {
         // Fast path: numeric IP target, skip the blocking DNS pool entirely.
         let addr = std::net::SocketAddr::from((ip, port));
+        if !dest.addr_allowed(addr) {
+            return Err(UpstreamError::Forbidden);
+        }
         match timeout(connect, TcpStream::connect(addr)).await {
             Ok(Ok(s)) => {
                 widen_buffers(&s);
@@ -411,7 +424,12 @@ pub(super) async fn connect_upstream(
                 Err(_) => return Err(UpstreamError::Timeout),
             },
         };
-        match timeout(connect, connect_first(&addrs)).await {
+        // Policy on the resolved addresses (a public name pointing at a
+        // private address is refused too): disallowed ones are skipped.
+        if !addrs.iter().any(|&a| dest.addr_allowed(a)) {
+            return Err(UpstreamError::Forbidden);
+        }
+        match timeout(connect, connect_first(&addrs, dest)).await {
             Ok(Ok(s)) => {
                 widen_buffers(&s);
                 Ok(s)
@@ -450,9 +468,12 @@ pub(super) fn push_u16(s: &mut String, v: u16) {
 
 /// Try each address in order until one connects (sequential, same as
 /// tokio's `TcpStream::connect((host, port))` behavior).
-async fn connect_first(addrs: &[std::net::SocketAddr]) -> std::io::Result<TcpStream> {
+async fn connect_first(
+    addrs: &[std::net::SocketAddr],
+    dest: &DestPolicy,
+) -> std::io::Result<TcpStream> {
     let mut last = None;
-    for &addr in addrs {
+    for &addr in addrs.iter().filter(|&&a| dest.addr_allowed(a)) {
         match TcpStream::connect(addr).await {
             Ok(s) => return Ok(s),
             Err(e) => last = Some(e),

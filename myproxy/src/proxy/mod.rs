@@ -5,9 +5,12 @@
 
 mod h2;
 mod pipeline;
+mod socks5;
 
 pub use h2::handle_h2;
+pub use socks5::handle_socks5;
 
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -21,11 +24,26 @@ use crate::dns::DnsCache;
 use crate::http::{classify, read_head, HeadError, Target};
 use crate::relay;
 use crate::stream::ClientStream;
+use crate::policy::{AuthLimiter, DestPolicy};
 use crate::upstream::UpstreamPool;
 
 use pipeline::UpstreamError;
 
+/// What a connection needs, one `Arc` per shard (one refcount bump per
+/// connection): the upstream pool is the shard's own, the rest is shared
+/// process-wide.
+pub struct Services {
+    pub cfg: Arc<Config>,
+    pub auth: Arc<Authenticator>,
+    pub dns: Arc<DnsCache>,
+    pub dest: Arc<DestPolicy>,
+    pub limiter: Arc<AuthLimiter>,
+    pub pool: UpstreamPool,
+}
+
 const RESP_407: &[u8] = b"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"myproxy\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+const RESP_403: &[u8] =
+    b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 const RESP_400: &[u8] =
     b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 const RESP_431: &[u8] = b"HTTP/1.1 431 Request Header Fields Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
@@ -40,15 +58,9 @@ async fn reply<C: ClientStream>(client: &mut C, resp: &[u8]) {
     let _ = relay::write_flush(client, resp).await;
 }
 
-pub async fn handle_conn<C: ClientStream>(
-    mut client: C,
-    cfg: Arc<Config>,
-    auth: Arc<Authenticator>,
-    dns: Arc<DnsCache>,
-    pool: Arc<UpstreamPool>,
-) {
-    let idle = cfg.timeouts.idle;
-    match serve(&mut client, &cfg, &auth, &dns, &pool).await {
+pub async fn handle_conn<C: ClientStream>(mut client: C, peer: IpAddr, svc: Arc<Services>) {
+    let idle = svc.cfg.timeouts.idle;
+    match serve(&mut client, peer, &svc).await {
         // Tunnel: relay both directions until one side closes.
         // Inactivity-bounded internally (no absolute cap).
         Some(up) => match relay::bidirectional(client, up, idle).await {
@@ -71,12 +83,12 @@ pub async fn handle_conn<C: ClientStream>(
 /// be closed.
 async fn serve<C: ClientStream>(
     client: &mut C,
-    cfg: &Config,
-    auth: &Authenticator,
-    dns: &DnsCache,
-    pool: &UpstreamPool,
+    peer: IpAddr,
+    svc: &Services,
 ) -> Option<TcpStream> {
+    let cfg: &Config = &svc.cfg;
     let idle = cfg.timeouts.idle;
+    let head_timeout = cfg.timeouts.request_head;
     let connect = cfg.timeouts.connect;
     let max_head = cfg.limits.max_header_bytes;
 
@@ -101,7 +113,7 @@ async fn serve<C: ClientStream>(
         tcp.set_quickack(true).ok();
     }
     loop {
-        let head = match read_head(client, &mut buf, max_head, idle).await {
+        let head = match read_head(client, &mut buf, max_head, idle, head_timeout).await {
             Ok(Some(h)) => h,
             Ok(None) => return None,
             Err(HeadError::Io(e)) => {
@@ -119,7 +131,12 @@ async fn serve<C: ClientStream>(
         };
 
         // Proxy-Authorization checked on every request (keep-alive safe).
-        if !auth.check(head.auth.map(|s| s.slice(&buf))) {
+        if !svc.auth.check(head.auth.map(|s| s.slice(&buf))) {
+            // Wrong credentials count towards a ban; none at all is the
+            // normal first challenge of a browser.
+            if head.auth.is_some() {
+                svc.limiter.fail(peer);
+            }
             reply(client, RESP_407).await;
             return None;
         }
@@ -152,8 +169,9 @@ async fn serve<C: ClientStream>(
                     &host_owned,
                     port,
                     connect,
-                    dns,
+                    &svc.dns,
                     &origin_key,
+                    &svc.dest,
                 )
                 .await
                 {
@@ -171,6 +189,10 @@ async fn serve<C: ClientStream>(
                         reply(client, RESP_504).await;
                         None
                     }
+                    Err(UpstreamError::Forbidden) => {
+                        reply(client, RESP_403).await;
+                        None
+                    }
                     Err(UpstreamError::Other(e)) => {
                         tracing::debug!(error = %e, "upstream connect failed");
                         reply(client, RESP_502).await;
@@ -181,12 +203,10 @@ async fn serve<C: ClientStream>(
             Target::Http { .. } => {
                 let keep_going = pipeline::http(
                     client,
-                    cfg,
+                    svc,
                     &mut buf,
                     &head,
                     &target,
-                    dns,
-                    pool,
                     &mut resp_pipes,
                     &mut resp_buf,
                     &mut rewrite_buf,

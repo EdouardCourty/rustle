@@ -2,6 +2,7 @@ mod auth;
 mod config;
 mod dns;
 mod http;
+mod policy;
 mod proxy;
 mod relay;
 mod server;

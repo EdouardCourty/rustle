@@ -17,6 +17,12 @@ api_keys = [
     "secret1",
     "secret2",
 ]
+# Wrong keys tolerated per client IP within failure_window, then the IP is
+# banned for ban_duration (connections closed at accept). 0 disables.
+# Requests without credentials (the browser's first 407) never count.
+max_failures = 5
+failure_window = "1m"
+ban_duration = "15m"
 
 [limits]
 max_connections = 10000
@@ -25,6 +31,9 @@ max_header_bytes = 65536
 [timeouts]
 connect = "5s"
 idle = "60s"
+# Total time to receive a request head (from its first byte) or a SOCKS5
+# handshake: a client trickling bytes (slowloris) cannot hold a slot.
+request_head = "10s"
 
 [dns]
 # TTL of positive cache entries (0s disables). All resolved addresses are
@@ -54,3 +63,20 @@ key = "/etc/myproxy/key.pem"
 handshake_timeout = "10s"
 # Offer HTTP/2 through ALPN (CONNECT and plain requests as h2 streams).
 http2 = true
+
+[filter]
+# Refuse non-public destinations: loopback, private networks, link-local
+# (incl. cloud metadata 169.254.169.254), CGNAT, multicast, reserved, IPv6
+# ULA/link-local. Checked on the resolved address (a public name pointing
+# at a private IP is refused too). Set false to reach your LAN.
+block_private = true
+# Extra refused networks.
+deny = []
+# Allowed destination ports for CONNECT, HTTP and SOCKS5 (empty = all).
+# allowed_ports = [80, 443]
+allowed_ports = []
+
+[socks5]
+# SOCKS5 listener (CONNECT only). Password = one of the api_keys, username
+# ignored; no auth when api_keys is empty. Empty disables it.
+listen = ""

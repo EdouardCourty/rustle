@@ -69,7 +69,17 @@ curl --proxy https://127.0.0.1:8443 --proxy-insecure -U bench:secret1 http://exa
 curl --proxy https://127.0.0.1:8443 --proxy-insecure --proxy-http2 -U bench:secret1 https://example.com
 ```
 
+SOCKS5 (section `[socks5]`, mot de passe = clé API) :
+
+```sh
+curl --socks5-hostname u:secret1@127.0.0.1:1080 https://example.com
+```
+
 Multi-core : `[server] workers = N` (0 = un shard par CPU, `SO_REUSEPORT`).
+Sécurité (proxy personnel) : destinations privées refusées par défaut
+(`[filter] block_private`), ports autorisés (`allowed_ports`), ban des IP
+après N mauvaises clés (`[auth] max_failures`), deadline totale sur le
+head (`timeouts.request_head`).
 
 ## Tests
 
