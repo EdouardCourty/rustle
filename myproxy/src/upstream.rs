@@ -91,6 +91,7 @@ mod tests {
         let ln = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let _c = std::net::TcpStream::connect(ln.local_addr().unwrap()).unwrap();
         let (s, _) = ln.accept().unwrap();
+        s.set_nonblocking(true).unwrap(); // tokio refuses blocking fds
         TcpStream::from_std(s).unwrap()
     }
 

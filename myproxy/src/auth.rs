@@ -32,7 +32,7 @@ impl Authenticator {
             return false;
         }
         let b64 = value[6..].trim_ascii();
-        // M10.3: decode into a stack buffer — no per-request allocation in
+        // Decode into a stack buffer — no per-request allocation in
         // the hot path. The capacity estimate (`len/4*3`) is an upper bound
         // of the decoded size (padding only shrinks it), so the decode
         // cannot overflow the scratch. Only absurdly long tokens take the

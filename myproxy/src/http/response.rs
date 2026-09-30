@@ -10,8 +10,11 @@ use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
-use super::request::HeadError;
+use super::request::{contains_token, HeadError};
 use super::MAX_HEADERS;
+
+/// Upstream read window while waiting for a response head (see the loop).
+const RESP_READ: usize = 16 * 1024;
 
 pub struct ResponseHead {
     /// Bytes of the head inside the buffer it was parsed from; the rest of
@@ -72,17 +75,11 @@ pub async fn read_response_head(
                         content_length = Some(v);
                     }
                 } else if h.name.eq_ignore_ascii_case("connection")
-                    && h.value
-                        .to_ascii_lowercase()
-                        .windows(5)
-                        .any(|w| w == b"close")
+                    && contains_token(h.value, "close")
                 {
                     close = true;
                 } else if h.name.eq_ignore_ascii_case("transfer-encoding")
-                    && h.value
-                        .to_ascii_lowercase()
-                        .windows(7)
-                        .any(|w| w == b"chunked")
+                    && contains_token(h.value, "chunked")
                 {
                     chunked = true;
                 }
@@ -107,7 +104,12 @@ pub async fn read_response_head(
         if buf.len() >= max_bytes {
             return Err(RespError::Head(HeadError::TooLarge));
         }
-        buf.reserve(2048);
+        // Read window: `buf` is the connection's scratch, so its capacity
+        // persists — a 2 KB window split a 10 KB response into two
+        // read+write rounds; 16 KB takes head + small bodies in one.
+        if buf.capacity() - buf.len() < 2048 {
+            buf.reserve(RESP_READ);
+        }
         let n = match timeout(idle, sock.read_buf(buf)).await {
             Ok(Ok(n)) => n,
             Ok(Err(e)) => return Err(RespError::Head(HeadError::Io(e))),

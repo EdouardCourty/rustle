@@ -136,3 +136,22 @@ impl Config {
         Ok(cfg)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The shipped examples must stay loadable (a duplicated table once
+    /// slipped into config.toml.example).
+    #[test]
+    fn shipped_configs_parse() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        for p in [
+            "config.toml.example",
+            "../bench/dut/myproxy/myproxy-on.toml",
+            "../bench/dut/myproxy/myproxy-off.toml",
+        ] {
+            Config::load(&root.join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
+        }
+    }
+}

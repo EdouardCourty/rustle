@@ -4,6 +4,7 @@
 # Usage:
 #   ./run-bench.sh [myproxy|3proxy] [on|off]
 #   REPEAT=5 ./run-bench.sh myproxy on     # more repetitions
+#   ALLOCATOR="--features mimalloc" ./run-bench.sh myproxy on   # allocator A/B
 #
 # Each client invocation does its own warmup + REPEAT measured runs and
 # prints one "RESULT median ..." line. This script additionally samples the
@@ -30,7 +31,7 @@ echo "==> cpu pinning: proxy=$PROXY_CPU generator/upstream/sink=$BENCH_CPU (avai
 echo "==> building images (serialized: rustc peaks ~1-2 GB transiently)"
 docker compose build generator >/dev/null
 docker compose build upstream >/dev/null
-docker build -q -t "$PROXY_IMAGE" -f "dut/$PROXY/Dockerfile" .. >/dev/null
+docker build -q -t "$PROXY_IMAGE" ${ALLOCATOR:+--build-arg ALLOCATOR="$ALLOCATOR"} -f "dut/$PROXY/Dockerfile" .. >/dev/null
 
 echo "==> starting stack (proxy=$PROXY auth=$AUTH repeat=$REPEAT)"
 docker compose up -d upstream sink proxy >/dev/null
@@ -45,6 +46,9 @@ echo "# $PROXY auth=$AUTH repeat=$REPEAT $(date)" | tee -a "$out/results.txt"
 # CPU ticks (utime+stime, CLK_TCK=100) and RSS in MB of the proxy process.
 cpu_ticks() { docker compose exec -T proxy cat /proc/1/stat | awk '{print $14+$15}'; }
 rss_mb() { docker compose exec -T proxy cat /proc/1/statm | awk '{printf "%.1f", $2*4096/1048576}'; }
+# Peak RSS of the test (VmHWM; the proxy restarts before each test). rss_mb
+# is sampled after the load ended = memory still held, not the live cost.
+peak_rss_mb() { docker compose exec -T proxy grep VmHWM /proc/1/status | awk '{printf "%.1f", $2/1024}'; }
 # Same, summed over all upstream processes (nginx master+workers): the
 # harness-side cost per test is the ceiling nobody sees.
 up_ticks() {
@@ -62,10 +66,10 @@ run_test() {
     tick0=$(cpu_ticks)
     up0=$(up_ticks)
     docker compose --profile generator run --rm -T generator \
-        --repeat "$REPEAT" "$@" | tee /dev/stderr | grep '^RESULT median' > /tmp/opencode/median.txt
+        --repeat "$REPEAT" "$@" | tee /dev/stderr | grep '^RESULT median' > "$out/.median.txt"
     tick1=$(cpu_ticks)
     up1=$(up_ticks)
-    median=$(cat /tmp/opencode/median.txt)
+    median=$(cat "$out/.median.txt")
     if [ -z "$median" ]; then
         echo "!! no RESULT median line for $name" | tee -a "$out/results.txt"
         return
@@ -75,7 +79,7 @@ run_test() {
         'BEGIN{printf "%.3f", (a-b)/100/n}')
     up_cpu_s_per_run=$(awk -v a="$up1" -v b="$up0" -v n="$REPEAT" \
         'BEGIN{printf "%.2f", (a-b)/100/n}')
-    echo "$median cpu_s_per_run=$cpu_s_per_run up_cpu_s_per_run=$up_cpu_s_per_run rss_mb=$(rss_mb)" | tee -a "$out/results.txt"
+    echo "$median cpu_s_per_run=$cpu_s_per_run up_cpu_s_per_run=$up_cpu_s_per_run rss_mb=$(rss_mb) peak_rss_mb=$(peak_rss_mb)" | tee -a "$out/results.txt"
 }
 
 # Hold with optional 2-replica split (single client exhausts ephemeral ports).
@@ -115,7 +119,7 @@ run_hold() {
     local rate cpu_s_per_run
     rate=$(awk -v o="$opened" -v e="$maxelapsed" 'BEGIN{printf "%.0f", o/e}')
     cpu_s_per_run=$(awk -v a="$tick1" -v b="$tick0" 'BEGIN{printf "%.3f", (a-b)/100}')
-    echo "RESULT median mode=hold conns=$conns replicas=2 opened=$opened failed=$failed rate=$rate elapsed_s=$maxelapsed cpu_s_per_run=$cpu_s_per_run rss_mb=$(rss_mb)" | tee -a "$out/results.txt"
+    echo "RESULT median mode=hold conns=$conns replicas=2 opened=$opened failed=$failed rate=$rate elapsed_s=$maxelapsed cpu_s_per_run=$cpu_s_per_run rss_mb=$(rss_mb) peak_rss_mb=$(peak_rss_mb)" | tee -a "$out/results.txt"
 }
 
 # --- Warmup réseau (avant toute mesure): montée des conntrack, caches
@@ -151,7 +155,6 @@ declare -a TESTS=(
 # a failed step is re-run alone instead of the whole matrix).
 if [[ -n "${BENCH_ONLY:-}" ]]; then
     TESTS=()
-    for t in "${shuffled-init:-}"; do :; done # no-op keeps shopt sane
     declare -a TESTS_ALL=(
         "run_test http-1kb http http://upstream:8000/1kb --conns 64 --duration 15"
         "run_test http-10kb http http://upstream:8000/10kb --conns 16 --duration 15"

@@ -18,7 +18,7 @@ help: ## afficher les cibles
 build: ## compiler les deux binaires (release)
 	cargo build --release
 
-test: ## tests unitaires (14)
+test: ## tests unitaires
 	cargo test --release
 
 fmt: ## formatter tout le code
