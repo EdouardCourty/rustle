@@ -28,10 +28,11 @@ myproxy/              le proxy (~2850 lignes)
     dns.rs            cache positif, TTL, Mutex<HashMap>
     upstream.rs       pool keep-alive par origine (LIFO)
 bench/
-  run-bench.sh <myproxy|3proxy> <on|off>   harnais complet
+  run-bench.sh <proxy> <on|off>            matrice (proxy = myproxy|3proxy|squid|gost|tinyproxy)
+  run-scaling.sh                           courbe multi-core (PROXIES, NCPUS, AUTH) — VPS
   env.sh, docker-compose.yml               cpuset : proxy sur PROXY_CPU, le reste sur BENCH_CPU
   generator/                               crate bench-client (http | flood | hold | sink)
-  dut/{myproxy,3proxy}/                    Dockerfiles + configs on/off (+ Dockerfile.debug = strace)
+  dut/<proxy>/                             Dockerfiles + configs on/off (user bench / clé secret1, port 8080) ; WORKERS lu à l'entrypoint (myproxy, squid) ; myproxy/Dockerfile.debug = strace
   upstream/                                nginx (objets 1kb/10kb/1mb/10mb)
   tools/local-upstream-http11.py           upstream HTTP/1.1 keep-alive local (up11.py)
   RESULTS.md                               synthèse publiée, historique des milestones
@@ -80,7 +81,9 @@ Features optionnelles : `jemalloc`, `mimalloc` (exclusives ; défaut = malloc gl
 
 - Seed de référence **`2004113323`**. Ordre des tests mélangé (LCG), proxy redémarré avant chaque test. Bruit ±3–5 % : en dessous, pas de conclusion.
 - Tests : http-1kb (64 conns), http-10kb (16), http-1mb (16), http-10mb (8), http-1kb-short (sans keep-alive), flood-8, hold 1k/5k/10k/25k.
-- Sortie : lignes `RESULT median ...` (rps, mbps, p50, errors, `err_kinds`, CPU proxy/generator/upstream, `rss_mb` = résiduel après le test, `peak_rss_mb` = VmHWM = coût réel).
+- Sortie : lignes `RESULT median ...` (rps, mbps, p50, errors, `err_kinds`, `reconnects`, CPU proxy/generator/upstream, `rss_mb` = résiduel après le test, `peak_rss_mb` = VmHWM = coût réel). CPU proxy = cgroup du conteneur, RSS = somme des processus (DUT multi-process comme Squid SMP inclus).
+- Multi-core : `PROXY_NCPU=<n>` (n premiers CPU au proxy, le reste au harnais) ou `PROXY_CPU`/`BENCH_CPU` explicites ; `WORKERS=<n>` ; `GEN_THREADS` = threads du générateur (à dimensionner sur BENCH_CPU). En-tête de results.txt = paramètres du run.
+- Générateur : honore `Connection: close`/HTTP/1.0 (reconnexion) et rejoue une fois un GET sur connexion réutilisée fermée avant tout octet (RFC 9112 §9.3.1) → `reconnects` (Tinyproxy : 1 par requête, il ferme sans l'annoncer).
 - Métrique à suivre : **CPU proxy par requête** (`cpu_s_per_run / (rps × durée)`), le débit étant plafonné par le harnais. Bruit entre deux matrices identiques : jusqu'à ±7 % CPU, ±15 % sur flood.
 - Répartition mesurée (1kb) : user ≈ 9 µs/req, sys ≈ 35 µs/req. Syscalls au plancher. Profil : image `dut/myproxy/Dockerfile.debug` (strace). Pas de perf sur la box (paranoid=4).
 - `ALLOCATOR="--features mimalloc" ./run-bench.sh …` pour un A/B allocateur (retesté : neutre). **`err_kinds` doit être vide.**
