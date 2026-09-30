@@ -45,7 +45,11 @@ impl Default for DnsConfig {
 #[serde(default)]
 pub struct ServerConfig {
     pub listen: String,
+    /// Shards: one thread + `current_thread` runtime + SO_REUSEPORT
+    /// listener + upstream pool each. 0 = one per available CPU.
     pub workers: usize,
+    /// Pin shard i to the i-th CPU of the process affinity (cpuset-aware).
+    pub pin_cores: bool,
     /// Admin/health listener (GET /health -> 200, no auth). Bind to
     /// 127.0.0.1 on a public VPS. Empty string disables it.
     pub admin_listen: String,
@@ -56,6 +60,7 @@ impl Default for ServerConfig {
         Self {
             listen: "0.0.0.0:8080".to_string(),
             workers: 1,
+            pin_cores: false,
             admin_listen: "127.0.0.1:8181".to_string(),
         }
     }

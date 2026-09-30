@@ -38,24 +38,13 @@ fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|| "config.toml".to_string());
     let cfg = Arc::new(Config::load(Path::new(&config_path)).context("loading config")?);
 
-    // One worker = `current_thread`: acceptor and connection tasks share
-    // the thread driving `block_on` (a 1-worker multi_thread runtime puts
-    // the acceptor on the main thread and wakes the worker cross-thread
-    // for every connection — two threads fighting for one pinned core).
-    let mut builder = if cfg.server.workers <= 1 {
-        tokio::runtime::Builder::new_current_thread()
-    } else {
-        let mut b = tokio::runtime::Builder::new_multi_thread();
-        b.worker_threads(cfg.server.workers);
-        b
-    };
-    let rt = builder
+    let srv = server::start(cfg)?;
+    // The main thread only waits for SIGTERM/SIGINT (tiny runtime, no I/O
+    // of its own), then stops and joins the shards.
+    tokio::runtime::Builder::new_current_thread()
         .enable_all()
-        // Small tasks + a large accept fan-in: 128 KB/task stacks instead of
-        // glibc/tokio defaults (2 MB reserve, ~12-20 KB touched per tunnel
-        // just for handshakes). Cuts RSS/tunnel by an order of magnitude.
-        .thread_stack_size(128 * 1024)
-        .build()?;
-
-    rt.block_on(server::run(cfg))
+        .build()?
+        .block_on(server::shutdown_signal());
+    tracing::info!("shutdown signal: draining active connections");
+    srv.shutdown_and_join()
 }

@@ -11,9 +11,9 @@ httparse = "1.9"
 humantime = "2"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
-socket2 = "0.5"
+socket2 = { version = "0.5", features = ["all"] }
 subtle = "2"
-tokio = { version = "1", features = ["net", "io-util", "rt-multi-thread", "time", "sync", "macros", "signal"] }
+tokio = { version = "1", features = ["net", "io-util", "rt", "time", "sync", "macros", "signal"] }
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

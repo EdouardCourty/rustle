@@ -1,7 +1,11 @@
 [server]
 listen = "0.0.0.0:8080"
-# V1 runs a single worker thread. Multi-worker scaling is a later milestone.
+# Shards: each is one thread with its own runtime, SO_REUSEPORT listener
+# and upstream pool (the kernel spreads connections). 0 = one per CPU.
+# Pool limits below apply per shard.
 workers = 1
+# Pin shard i to the i-th CPU allowed to the process (cpuset-aware).
+pin_cores = false
 
 [auth]
 # API keys accepted as Basic auth passwords: Proxy-Authorization: Basic <base64(user:key)>.
