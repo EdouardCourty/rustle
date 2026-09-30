@@ -87,8 +87,8 @@ pub async fn bidirectional(
     #[cfg(target_os = "linux")]
     {
         match splice::bidirectional(client, up, idle).await {
-            Ok(res) => return Ok(res),
-            Err((client, up)) => return adaptive::bidirectional(client, up, idle).await,
+            Ok(res) => Ok(res),
+            Err((client, up)) => adaptive::bidirectional(client, up, idle).await,
         }
     }
     #[cfg(not(target_os = "linux"))]
@@ -132,7 +132,7 @@ mod tests {
         let b_cli = tokio::net::TcpStream::connect(addr).await.unwrap();
         let (b_srv, _) = ln.accept().await.unwrap();
 
-        let (mut a_r, mut a_w) = a_cli.into_split();
+        let (_a_r, mut a_w) = a_cli.into_split();
         let (mut b_r, mut b_w) = b_cli.into_split();
 
         let relay = tokio::spawn(bidirectional(

@@ -118,7 +118,7 @@ pub async fn chunked(
             Some(Ok(_)) => {}
             _ => return Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe)),
         }
-        if crlf != [b'\r', b'\n'] {
+        if crlf != *b"\r\n" {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "bad chunk terminator",

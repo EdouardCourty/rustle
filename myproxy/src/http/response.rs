@@ -71,22 +71,20 @@ pub async fn read_response_head(
                     {
                         content_length = Some(v);
                     }
-                } else if h.name.eq_ignore_ascii_case("connection") {
-                    if h.value
+                } else if h.name.eq_ignore_ascii_case("connection")
+                    && h.value
                         .to_ascii_lowercase()
                         .windows(5)
                         .any(|w| w == b"close")
-                    {
-                        close = true;
-                    }
-                } else if h.name.eq_ignore_ascii_case("transfer-encoding") {
-                    if h.value
+                {
+                    close = true;
+                } else if h.name.eq_ignore_ascii_case("transfer-encoding")
+                    && h.value
                         .to_ascii_lowercase()
                         .windows(7)
                         .any(|w| w == b"chunked")
-                    {
-                        chunked = true;
-                    }
+                {
+                    chunked = true;
                 }
             }
             let status = resp.code.unwrap_or(0);
