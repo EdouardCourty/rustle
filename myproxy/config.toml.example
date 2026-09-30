@@ -6,6 +6,9 @@ listen = "0.0.0.0:8080"
 workers = 1
 # Pin shard i to the i-th CPU allowed to the process (cpuset-aware).
 pin_cores = false
+# Admin/health listener (GET /health -> 200, no auth). Bind 127.0.0.1 on
+# a public VPS. Empty string disables it.
+admin_listen = "127.0.0.1:8181"
 
 [auth]
 # API keys accepted as Basic auth passwords: Proxy-Authorization: Basic <base64(user:key)>.
@@ -40,6 +43,14 @@ max_idle_per_origin = 32
 # (declared) or a truncated stream + close (unknown length).
 max_request_body_bytes = 0
 max_response_body_bytes = 0
-# Admin/health listener (GET /health -> 200, no auth). Bind 127.0.0.1 on
-# a public VPS. Empty string disables it.
-admin_listen = "127.0.0.1:8181"
+
+[tls]
+# HTTPS proxy listener (TLS between client and proxy), next to the plain
+# one; empty disables it. Browsers use it via PAC "HTTPS host:port";
+# curl via --proxy https://host:port (add --proxy-http2 for HTTP/2).
+listen = ""
+cert = "/etc/myproxy/cert.pem"
+key = "/etc/myproxy/key.pem"
+handshake_timeout = "10s"
+# Offer HTTP/2 through ALPN (CONNECT and plain requests as h2 streams).
+http2 = true

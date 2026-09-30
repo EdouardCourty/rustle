@@ -7,6 +7,8 @@
 #   ./run-scaling.sh                                  # defaults below
 #   PROXIES="myproxy squid" NCPUS="1 2 4 8" AUTH=on ./run-scaling.sh
 #   BENCH_ONLY=http-1kb ./run-scaling.sh              # one step per point
+#   PROXY_TLS=1 ./run-scaling.sh                      # HTTPS proxy
+#   PROXY_H2=1 ./run-scaling.sh                       # HTTP/2 proxy (TLS, ALPN h2)
 #
 # Each point is a regular run-bench.sh run (results/<proxy>/auth-<a>/<ts>/,
 # header line records workers/proxy_cpu/bench_cpu/gen_threads); the index of
@@ -25,7 +27,7 @@ total=$(awk -F',' '{ n=0; for (i=1;i<=NF;i++) { split($i,a,"-");
         || grep Cpus_allowed_list /proc/self/status | awk '{print $2}')")
 index="results/scaling-$(date +%Y%m%d-%H%M%S).txt"
 mkdir -p results
-echo "# scaling proxies=[$PROXIES] ncpus=[$NCPUS] auth=$AUTH seed=$BENCH_SEED cpus=$total" | tee "$index"
+echo "# scaling proxies=[$PROXIES] ncpus=[$NCPUS] auth=$AUTH tls=${PROXY_TLS:-0} h2=${PROXY_H2:-0} seed=$BENCH_SEED cpus=$total" | tee "$index"
 
 for n in $NCPUS; do
     if (( n >= total )); then
@@ -33,6 +35,13 @@ for n in $NCPUS; do
         continue
     fi
     for p in $PROXIES; do
+        if [[ "${PROXY_H2:-0}" == 1 ]] && ! grep -q '^# bench-ports:.*h2=' "dut/$p/Dockerfile"; then
+            echo "skip $p: no HTTP/2 proxy listener" | tee -a "$index"
+            continue
+        elif [[ "${PROXY_TLS:-0}" == 1 ]] && ! grep -q '^# bench-ports:.*tls=' "dut/$p/Dockerfile"; then
+            echo "skip $p: no HTTPS proxy listener" | tee -a "$index"
+            continue
+        fi
         echo "==> $p n=$n"
         # Fresh env per point (env.sh caches its split in the process).
         env -u _BENCH_ENV_LOADED -u PROXY_CPU -u BENCH_CPU \

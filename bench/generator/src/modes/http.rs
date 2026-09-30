@@ -8,10 +8,16 @@ use std::time::Instant;
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 use tokio::task::JoinSet;
 
-use crate::connect::{parse_url, resolve_once};
+use crate::connect::{connect_proxy, h2_connect, h2_enabled, parse_url, resolve_once, ProxyStream};
+
+/// One client connection: HTTP/1.1 byte stream, or an HTTP/2 connection
+/// (requests sent one at a time, like the HTTP/1.1 keep-alive client).
+enum Conn {
+    H1(ProxyStream),
+    H2(h2::client::SendRequest<bytes::Bytes>),
+}
 use crate::metrics::{pcts_ms, Metrics};
 
 #[allow(clippy::too_many_arguments)]
@@ -51,7 +57,7 @@ pub(crate) async fn run_http(
         let lats = lats.clone();
         let kinds = kinds.clone();
         set.spawn(async move {
-            let mut conn: Option<TcpStream> = None;
+            let mut conn: Option<Conn> = None;
             loop {
                 let i = counter.fetch_add(1, Ordering::Relaxed);
                 // Stop on the count budget or the time budget (whichever
@@ -79,9 +85,13 @@ pub(crate) async fn run_http(
                 loop {
                     let reused = conn.is_some();
                     if conn.is_none() {
-                        match TcpStream::connect(&proxy).await {
+                        let dialed = if h2_enabled() {
+                            h2_connect(&proxy).await.map(Conn::H2)
+                        } else {
+                            connect_proxy(&proxy).await.map(Conn::H1)
+                        };
+                        match dialed {
                             Ok(s) => {
-                                let _ = s.set_nodelay(true);
                                 conn = Some(s);
                             }
                             Err(_) => {
@@ -92,8 +102,13 @@ pub(crate) async fn run_http(
                         }
                     }
                     let t0 = *t0.get_or_insert_with(Instant::now);
-                    let stream = conn.as_mut().unwrap();
-                    match http_get(stream, &host, port, &path, &api_key, !no_keepalive).await {
+                    let res = match conn.as_mut().unwrap() {
+                        Conn::H1(stream) => {
+                            http_get(stream, &host, port, &path, &api_key, !no_keepalive).await
+                        }
+                        Conn::H2(send) => h2_get(send, &host, port, &path, &api_key).await,
+                    };
+                    match res {
                         Ok((body_bytes, reusable)) => {
                             lats.lock().unwrap().push(t0.elapsed().as_secs_f64());
                             bytes.fetch_add(body_bytes, Ordering::Relaxed);
@@ -182,7 +197,7 @@ pub(crate) async fn run_http(
 
 /// One GET through the proxy. Returns the response body size on success.
 async fn http_get(
-    stream: &mut TcpStream,
+    stream: &mut ProxyStream,
     host: &str,
     port: u16,
     path: &str,
@@ -195,6 +210,7 @@ async fn http_get(
         "GET http://{host}:{port}{path} HTTP/1.1\r\nHost: {host}:{port}\r\nProxy-Authorization: Basic {auth}\r\nConnection: {ka}\r\n\r\n"
     );
     stream.write_all(req.as_bytes()).await?;
+    stream.flush().await?;
 
     let mut buf = Vec::with_capacity(2048);
     let (head_len, content_length, reusable) = loop {
@@ -261,4 +277,32 @@ async fn http_get(
         got += n as u64;
     }
     Ok((content_length, reusable))
+}
+
+/// One GET as an HTTP/2 stream. Same result contract as [`http_get`].
+async fn h2_get(
+    send: &mut h2::client::SendRequest<bytes::Bytes>,
+    host: &str,
+    port: u16,
+    path: &str,
+    api_key: &str,
+) -> anyhow::Result<(u64, bool)> {
+    let auth = B64.encode(format!("bench:{api_key}"));
+    let req = http::Request::get(format!("http://{host}:{port}{path}"))
+        .header("proxy-authorization", format!("Basic {auth}"))
+        .body(())?;
+    let mut ready = send.clone().ready().await?;
+    let (resp, _) = ready.send_request(req, true)?;
+    let resp = resp.await?;
+    if resp.status() != 200 {
+        anyhow::bail!("HTTP status {}", resp.status().as_u16());
+    }
+    let mut body = resp.into_body();
+    let mut got: u64 = 0;
+    while let Some(chunk) = body.data().await {
+        let chunk = chunk?;
+        let _ = body.flow_control().release_capacity(chunk.len());
+        got += chunk.len() as u64;
+    }
+    Ok((got, true))
 }

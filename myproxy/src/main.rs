@@ -5,6 +5,8 @@ mod http;
 mod proxy;
 mod relay;
 mod server;
+mod stream;
+mod tls;
 mod upstream;
 
 // Global allocator selection (compile-time feature; glibc by default).

@@ -12,7 +12,7 @@ where
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub server: ServerConfig,
     pub auth: AuthConfig,
@@ -20,10 +20,39 @@ pub struct Config {
     pub timeouts: TimeoutsConfig,
     pub dns: DnsConfig,
     pub http: HttpConfig,
+    pub tls: TlsConfig,
+}
+
+/// HTTPS proxy listener (TLS between client and proxy), next to the plain
+/// one. Disabled while `listen` is empty.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TlsConfig {
+    pub listen: String,
+    /// PEM certificate chain and private key.
+    pub cert: String,
+    pub key: String,
+    /// Cap on the TLS handshake (a stalled handshake holds a slot).
+    #[serde(deserialize_with = "de_duration")]
+    pub handshake_timeout: Duration,
+    /// Offer HTTP/2 through ALPN (clients that do not ask keep HTTP/1.1).
+    pub http2: bool,
+}
+
+impl Default for TlsConfig {
+    fn default() -> Self {
+        Self {
+            listen: String::new(),
+            cert: String::new(),
+            key: String::new(),
+            handshake_timeout: Duration::from_secs(10),
+            http2: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct DnsConfig {
     /// TTL of positive cache entries. 0 disables caching.
     #[serde(deserialize_with = "de_duration")]
@@ -42,7 +71,7 @@ impl Default for DnsConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ServerConfig {
     pub listen: String,
     /// Shards: one thread + `current_thread` runtime + SO_REUSEPORT
@@ -67,13 +96,13 @@ impl Default for ServerConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct AuthConfig {
     pub api_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct LimitsConfig {
     pub max_connections: usize,
     pub max_header_bytes: usize,
@@ -89,7 +118,7 @@ impl Default for LimitsConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct TimeoutsConfig {
     #[serde(deserialize_with = "de_duration")]
     pub connect: Duration,
@@ -107,7 +136,7 @@ impl Default for TimeoutsConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct HttpConfig {
     /// Reuse idle upstream connections across requests (profiled: the
     /// per-request connect/close chain dominated the HTTP bulk gap).

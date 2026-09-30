@@ -4,7 +4,6 @@
 use std::time::Duration;
 
 use tokio::io::AsyncReadExt;
-use tokio::net::TcpStream;
 use tokio::time::timeout;
 
 use super::MAX_HEADERS;
@@ -66,8 +65,8 @@ pub enum Target {
 
 /// Reads one request head from `sock` into `buf` (clearing it first).
 /// Returns `None` on clean EOF before any byte of a request.
-pub async fn read_head(
-    sock: &mut TcpStream,
+pub async fn read_head<S: tokio::io::AsyncRead + Unpin>(
+    sock: &mut S,
     buf: &mut Vec<u8>,
     max_bytes: usize,
     idle: Duration,
@@ -154,7 +153,9 @@ fn parse_content_length(v: &[u8]) -> Option<u64> {
     if v.is_empty() || v.len() > 19 || !v.iter().all(u8::is_ascii_digit) {
         return None;
     }
-    v.iter().try_fold(0u64, |acc, &d| acc.checked_mul(10)?.checked_add((d - b'0') as u64))
+    v.iter().try_fold(0u64, |acc, &d| {
+        acc.checked_mul(10)?.checked_add((d - b'0') as u64)
+    })
 }
 
 /// Byte range of `s` inside `buf` (httparse returns zero-copy slices into

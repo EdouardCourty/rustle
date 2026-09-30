@@ -10,13 +10,16 @@ Langue : commentaires, commits, README et RESULTS.md en **français** ; identifi
 ```
 Cargo.toml            workspace (myproxy + bench/generator), [profile.release] lto=fat, codegen-units=1 (partagé par les 2 binaires)
 Makefile              build test fmt clippy images up down smoke bench bench-off bench-3proxy bench-all latest clean
-myproxy/              le proxy (~2850 lignes)
+myproxy/              le proxy
   config.toml.example
   src/
     main.rs           tracing (RUST_LOG), config = argv[1] (défaut config.toml), server::start puis attente SIGTERM/SIGINT
     config/mod.rs     TOML → structs (humantime pour les durées)
-    server/mod.rs     shards (thread + runtime current_thread + listener SO_REUSEPORT + pool), compteur global max_connections, admin /health, trim, shutdown gracieux 5 s
-    proxy/mod.rs      handle_conn : FSM par connexion (read_head → auth → classify → CONNECT | HTTP)
+    server/mod.rs     shards (thread + runtime current_thread + listeners SO_REUSEPORT clair + TLS + pool), handshake TLS puis dispatch h2/h1 selon ALPN, compteur global max_connections, admin /health, trim, shutdown gracieux 5 s
+    stream.rs         trait ClientStream (TcpStream | TlsStream) : tcp()/into_tcp() = chemins splice/QUICKACK, TLS = copie user-space
+    tls.rs            rustls (ring) : cert/clé PEM, ALPN h2 + http/1.1
+    proxy/mod.rs      handle_conn<C: ClientStream> : boucle keep-alive serve() (read_head → auth → classify → CONNECT | HTTP), tunnel monté après
+    proxy/h2.rs       HTTP/2 (ALPN h2) : 1 tâche/stream ; CONNECT = tunnel h2 ↔ TCP (flow control) ; autres méthodes → HTTP/1.1 via le pool, chunked décodé
     proxy/pipeline.rs http() : forward_request, retry, 1xx, framing de body, pooling amont
     http/request.rs   RequestHead = Spans dans le buffer (parse zéro-alloc), classify, parse_authority
     http/response.rs  parse head réponse, keep_alive, framing
@@ -29,10 +32,10 @@ myproxy/              le proxy (~2850 lignes)
     upstream.rs       pool keep-alive par origine (LIFO)
 bench/
   run-bench.sh <proxy> <on|off>            matrice (proxy = myproxy|3proxy|squid|gost|tinyproxy)
-  run-scaling.sh                           courbe multi-core (PROXIES, NCPUS, AUTH) — VPS
+  run-scaling.sh                           courbe multi-core (PROXIES, NCPUS, AUTH, PROXY_TLS, PROXY_H2) — VPS
   env.sh, docker-compose.yml               cpuset : proxy sur PROXY_CPU, le reste sur BENCH_CPU
   generator/                               crate bench-client (http | flood | hold | sink)
-  dut/<proxy>/                             Dockerfiles + configs on/off (user bench / clé secret1, port 8080) ; WORKERS lu à l'entrypoint (myproxy, squid) ; myproxy/Dockerfile.debug = strace
+  dut/<proxy>/                             Dockerfiles + configs on/off (user bench / clé secret1, port 8080) ; ligne `# bench-ports: tls=<p> h2=<p>` = modes supportés (cert ECDSA P-256 auto-signé généré au build) ; WORKERS lu à l'entrypoint (myproxy, squid) ; myproxy/Dockerfile.debug = strace
   upstream/                                nginx (objets 1kb/10kb/1mb/10mb)
   tools/local-upstream-http11.py           upstream HTTP/1.1 keep-alive local (up11.py)
   RESULTS.md                               synthèse publiée, historique des milestones
@@ -42,6 +45,7 @@ bench/
 ## Architecture (ce qu'il faut savoir)
 
 - **Threading** : shared-nothing. `workers` = N shards (0 = un par CPU) : chacun un thread OS, un runtime `current_thread`, un listener `SO_REUSEPORT` sur le même port (le noyau répartit), son pool amont. Une connexion reste sur son shard. Partagé : `Config`, `Authenticator`, `DnsCache` (Mutex, froid), compteurs atomiques (`active` = max_connections global, `peak`, `accepted` par shard loggé au shutdown). `pin_cores` optionnel. Shard 0 : admin + `malloc_trim` après rafales. NODELAY + buffers 1 MB posés sur le listener (hérités). Le main attend le signal puis `shutdown_and_join`.
+- **Transports client** : port clair (HTTP/1.1, splice) et port TLS optionnel (`[tls]`) : HTTP/1.1 via le même pipeline générique (`ClientStream`, monomorphisé : le chemin clair est compilé à l'identique) ou HTTP/2 si l'ALPN négocie `h2`. En TLS : pas de splice (le socket porte des records), `flush()` à chaque fin d'écriture (rustls peut garder du chiffré en buffer), `close_notify` en fin de connexion. Côté upstream : toujours TCP clair HTTP/1.1.
 - **CONNECT** : clé `host:port` → DNS → connect → `200` → early bytes → `relay::bidirectional` (2 PipePair splice, half-close via `shutdown(SHUT_WR)`).
 - **HTTP** : clé d'origine → `pool.take` ou connect → `forward_request` (réécriture du head dans `rewrite_buf`, `write_all` 1 syscall si sans body, `write_vectored` head+prefix sinon) → `read_response_head` (httparse, 64 headers) → body selon framing (CL borné / chunked / EOF) → remise au pool si complet + keep-alive.
 - **Retry** sur socket poolée périmée : GET/HEAD avec body entièrement bufferisé uniquement.
@@ -62,8 +66,10 @@ bench/
 | `dns.ttl` / `max_entries` | 60s (0 = off) / 4096 |
 | `http.upstream_keepalive` / `max_idle_per_origin` | true / 32 (cap global 1024 en dur) |
 | `http.max_request_body_bytes` / `max_response_body_bytes` | 0 = illimité |
+| `tls.listen` / `cert` / `key` | `""` (off) / PEM |
+| `tls.handshake_timeout` / `http2` | 10s / true (ALPN h2) |
 
-Pas de `deny_unknown_fields` : une faute de frappe est ignorée silencieusement.
+`deny_unknown_fields` sur toutes les sections : une clé inconnue ou mal placée fait échouer le chargement.
 
 ## Commandes
 
@@ -82,6 +88,7 @@ Features optionnelles : `jemalloc`, `mimalloc` (exclusives ; défaut = malloc gl
 - Seed de référence **`2004113323`**. Ordre des tests mélangé (LCG), proxy redémarré avant chaque test. Bruit ±3–5 % : en dessous, pas de conclusion.
 - Tests : http-1kb (64 conns), http-10kb (16), http-1mb (16), http-10mb (8), http-1kb-short (sans keep-alive), flood-8, hold 1k/5k/10k/25k.
 - Sortie : lignes `RESULT median ...` (rps, mbps, p50, errors, `err_kinds`, `reconnects`, CPU proxy/generator/upstream, `rss_mb` = résiduel après le test, `peak_rss_mb` = VmHWM = coût réel). CPU proxy = cgroup du conteneur, RSS = somme des processus (DUT multi-process comme Squid SMP inclus).
+- Transports : `PROXY_TLS=1` (HTTPS proxy) / `PROXY_H2=1` (HTTP/2 via TLS) → résultats sous `results/<proxy>-tls|-h2/`. TLS : myproxy, Squid, gost. h2 : myproxy, gost (3proxy/Tinyproxy : clair seulement). Générateur : `--proxy-tls`, `--proxy-h2` (1 connexion h2 par conn, requêtes séquentielles ; CONNECT = 1 stream sur sa propre connexion), certificat non vérifié mais signatures du handshake vérifiées.
 - Multi-core : `PROXY_NCPU=<n>` (n premiers CPU au proxy, le reste au harnais) ou `PROXY_CPU`/`BENCH_CPU` explicites ; `WORKERS=<n>` ; `GEN_THREADS` = threads du générateur (à dimensionner sur BENCH_CPU). En-tête de results.txt = paramètres du run.
 - Générateur : honore `Connection: close`/HTTP/1.0 (reconnexion) et rejoue une fois un GET sur connexion réutilisée fermée avant tout octet (RFC 9112 §9.3.1) → `reconnects` (Tinyproxy : 1 par requête, il ferme sans l'annoncer).
 - Métrique à suivre : **CPU proxy par requête** (`cpu_s_per_run / (rps × durée)`), le débit étant plafonné par le harnais. Bruit entre deux matrices identiques : jusqu'à ±7 % CPU, ±15 % sur flood.
@@ -139,4 +146,4 @@ Features optionnelles : `jemalloc`, `mimalloc` (exclusives ; défaut = malloc gl
 
 **Qualité**
 - Tests d'intégration (forward HTTP, chunked, retry du pool, budgets, splice HTTP) — aujourd'hui couverts uniquement par le bench.
-- CI (build + test + clippy + fmt). `deny_unknown_fields`. Shims morts : `_unused` dans `pipeline.rs`. `Mutex::lock().unwrap()` → poison = panic.
+- CI (build + test + clippy + fmt). Shims morts : `_unused` dans `pipeline.rs`. `Mutex::lock().unwrap()` → poison = panic.

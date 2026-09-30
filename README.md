@@ -62,6 +62,15 @@ Test rapide :
 curl -x http://127.0.0.1:8080 -U bench:secret1 http://example.com
 ```
 
+Proxy HTTPS / HTTP/2 (section `[tls]` renseignée, ex. `listen = "0.0.0.0:8443"`) :
+
+```sh
+curl --proxy https://127.0.0.1:8443 --proxy-insecure -U bench:secret1 http://example.com
+curl --proxy https://127.0.0.1:8443 --proxy-insecure --proxy-http2 -U bench:secret1 https://example.com
+```
+
+Multi-core : `[server] workers = N` (0 = un shard par CPU, `SO_REUSEPORT`).
+
 ## Tests
 
 ```sh
@@ -90,9 +99,17 @@ make bench P=myproxy A=off R=5
 make bench-all                # les 4 matrices en séquence (~1 h)
 ```
 
-Variables : `P` = proxy testé (`myproxy`|`3proxy`), `A` = auth (`on`|`off`),
-`R` = répétitions (défaut 3, médiane calculée).
+Variables : `P` = proxy testé (`myproxy`|`3proxy`|`squid`|`gost`|`tinyproxy`),
+`A` = auth (`on`|`off`), `R` = répétitions (défaut 3, médiane calculée).
 
-Résultats bruts dans `bench/results/<proxy>/auth-<on|off>/<timestamp>/results.txt`.
+Transports et multi-core (variables d'environnement de `bench/run-bench.sh`) :
+
+```sh
+PROXY_TLS=1 ./bench/run-bench.sh myproxy on    # proxy HTTPS (myproxy, squid, gost)
+PROXY_H2=1  ./bench/run-bench.sh gost on       # HTTP/2 (myproxy, gost)
+NCPUS="1 2 4 8" make bench-scaling             # courbe multi-core (VPS)
+```
+
+Résultats bruts dans `bench/results/<proxy>[-tls|-h2]/auth-<on|off>/<timestamp>/results.txt`.
 Comparatif complet (M5→M10, delayed-ACK 3proxy vérifié à la capture) :
 `bench/RESULTS.md`.

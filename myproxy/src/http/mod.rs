@@ -6,7 +6,7 @@ pub mod request;
 pub mod response;
 
 pub use request::{classify, read_head, rewrite_head_into, HeadError, RequestHead, Span, Target};
-pub use response::{read_response_head, RespError};
+pub use response::{read_response_head, RespError, ResponseHead};
 
 /// Parser header-array capacity (proxy clients are small; 64 is generous).
 pub(crate) const MAX_HEADERS: usize = 64;

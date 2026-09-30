@@ -11,10 +11,9 @@
 //! the parser starts exactly at the body. Large chunk data bypasses the
 //! staging (adaptive relay straight from the socket).
 
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
-use super::adaptive::copy_limited;
+use super::adaptive::{copy_limited, write_flush};
 use super::IdleTimer;
 
 /// Minimum staging capacity (refill size).
@@ -41,9 +40,9 @@ fn invalid(msg: &'static str) -> std::io::Error {
 
 /// Staging over `up`: `buf[pos..]` is unparsed, `buf[flushed..pos]` is
 /// parsed but not yet forwarded to the client.
-struct Staged<'a, R> {
+struct Staged<'a, R, W> {
     up: &'a mut R,
-    client: &'a mut TcpStream,
+    client: &'a mut W,
     buf: &'a mut Vec<u8>,
     pos: usize,
     flushed: usize,
@@ -51,13 +50,13 @@ struct Staged<'a, R> {
     idle: std::time::Duration,
 }
 
-impl<R: AsyncRead + Unpin> Staged<'_, R> {
+impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Staged<'_, R, W> {
     /// Forwards the parsed-but-pending bytes.
     async fn flush(&mut self) -> std::io::Result<()> {
         if self.pos > self.flushed {
             match self
                 .timer
-                .park(self.client.write_all(&self.buf[self.flushed..self.pos]))
+                .park(write_flush(self.client, &self.buf[self.flushed..self.pos]))
                 .await
             {
                 Some(Ok(_)) => self.timer.reset(),
@@ -93,7 +92,11 @@ impl<R: AsyncRead + Unpin> Staged<'_, R> {
     }
 
     /// Consumes one line (through `\n`); returns its range in `buf`.
-    async fn line(&mut self, cap: usize, too_long: &'static str) -> std::io::Result<(usize, usize)> {
+    async fn line(
+        &mut self,
+        cap: usize,
+        too_long: &'static str,
+    ) -> std::io::Result<(usize, usize)> {
         let mut start = self.pos;
         let mut scan = self.pos;
         loop {
@@ -125,7 +128,7 @@ impl<R: AsyncRead + Unpin> Staged<'_, R> {
 }
 
 /// Strict chunk-size parse: 1..=16 hex digits, then `;ext`, `\r` or `\n`.
-fn chunk_size(line: &[u8]) -> Option<u64> {
+pub(crate) fn chunk_size(line: &[u8]) -> Option<u64> {
     let end = line
         .iter()
         .position(|&b| b == b';' || b == b'\r' || b == b'\n' || b == b' ' || b == b'\t')?;
@@ -145,9 +148,9 @@ fn chunk_size(line: &[u8]) -> Option<u64> {
 /// (along with the response head); `stage` is reused as staging. `budget`
 /// caps the DATA bytes (0 = unlimited): exceeding it is an error (caller
 /// closes — a truncated stream is the honest signal).
-pub async fn chunked<R: AsyncRead + Unpin>(
+pub async fn chunked<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     up: &mut R,
-    client: &mut TcpStream,
+    client: &mut W,
     stage: &mut Vec<u8>,
     start: usize,
     budget: u64,
@@ -226,7 +229,8 @@ pub async fn chunked<R: AsyncRead + Unpin>(
 mod tests {
     use super::*;
     use std::time::Duration;
-    use tokio::net::TcpListener;
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::{TcpListener, TcpStream};
 
     /// Runs the relay over `wire` (delivered as `prefix` + socket reads of
     /// at most `seg` bytes); returns (result, bytes the client received).
@@ -257,7 +261,15 @@ mod tests {
         let mut stage = b"HTTP/1.1 200 OK\r\n\r\n".to_vec();
         let start = stage.len();
         stage.extend_from_slice(prefix);
-        let res = chunked(&mut up_r, &mut client, &mut stage, start, budget, Duration::from_secs(2)).await;
+        let res = chunked(
+            &mut up_r,
+            &mut client,
+            &mut stage,
+            start,
+            budget,
+            Duration::from_secs(2),
+        )
+        .await;
         drop(client);
         (res, reader.await.unwrap())
     }

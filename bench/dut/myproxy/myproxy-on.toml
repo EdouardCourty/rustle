@@ -23,3 +23,8 @@ max_idle_per_origin = 32
 # Body budget (bytes) test: 1 KB upstream objects pass, 1 MB is rejected.
 max_request_body_bytes = 0
 max_response_body_bytes = 0
+
+[tls]
+listen = "0.0.0.0:8443"
+cert = "/etc/myproxy/cert.pem"
+key = "/etc/myproxy/key.pem"
