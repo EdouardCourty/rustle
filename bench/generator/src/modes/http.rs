@@ -33,6 +33,7 @@ pub(crate) async fn run_http(
     let (host, port, _) = parse_url(&format!("http://{target}/"));
     let counter = Arc::new(AtomicU64::new(0));
     let errors = Arc::new(AtomicU64::new(0));
+    let reconnects = Arc::new(AtomicU64::new(0));
     let bytes = Arc::new(AtomicU64::new(0));
     let lats: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
 
@@ -45,6 +46,7 @@ pub(crate) async fn run_http(
         let path = path.clone();
         let counter = counter.clone();
         let errors = errors.clone();
+        let reconnects = reconnects.clone();
         let bytes = bytes.clone();
         let lats = lats.clone();
         let kinds = kinds.clone();
@@ -66,46 +68,68 @@ pub(crate) async fn run_http(
                 if no_keepalive {
                     conn = None;
                 }
-                if conn.is_none() {
-                    match TcpStream::connect(&proxy).await {
-                        Ok(s) => {
-                            let _ = s.set_nodelay(true);
-                            conn = Some(s);
+                // A reused connection closed before any response byte is
+                // the idle-close race every HTTP client handles by replaying
+                // an idempotent request once on a fresh connection (RFC 9112
+                // §9.3.1) — proxies that close silently after each response
+                // (Tinyproxy) are served the same way. Counted in
+                // `reconnects`; the latency includes the replay.
+                let mut replayed = false;
+                let mut t0: Option<Instant> = None;
+                loop {
+                    let reused = conn.is_some();
+                    if conn.is_none() {
+                        match TcpStream::connect(&proxy).await {
+                            Ok(s) => {
+                                let _ = s.set_nodelay(true);
+                                conn = Some(s);
+                            }
+                            Err(_) => {
+                                errors.fetch_add(1, Ordering::Relaxed);
+                                *kinds.lock().unwrap().entry("connect".into()).or_insert(0) += 1;
+                                break;
+                            }
+                        }
+                    }
+                    let t0 = *t0.get_or_insert_with(Instant::now);
+                    let stream = conn.as_mut().unwrap();
+                    match http_get(stream, &host, port, &path, &api_key, !no_keepalive).await {
+                        Ok((body_bytes, reusable)) => {
+                            lats.lock().unwrap().push(t0.elapsed().as_secs_f64());
+                            bytes.fetch_add(body_bytes, Ordering::Relaxed);
+                            if !reusable {
+                                // The proxy announced the close (Connection:
+                                // close / HTTP/1.0): reconnect, like any client.
+                                conn = None;
+                            }
                         }
                         Err(e) => {
+                            conn = None;
+                            let msg = format!("{e:#}");
+                            if reused && !replayed && msg.contains("EOF before response head") {
+                                replayed = true;
+                                reconnects.fetch_add(1, Ordering::Relaxed);
+                                continue;
+                            }
                             errors.fetch_add(1, Ordering::Relaxed);
-                            *kinds.lock().unwrap().entry("connect".into()).or_insert(0) += 1;
-                            let _ = e;
-                            continue;
+                            let cls: String = if msg.contains("EOF before response head") {
+                                "eof-head".into()
+                            } else if msg.contains("HTTP status") {
+                                // Keep the code: "bad-status-502" etc.
+                                let code: String =
+                                    msg.chars().filter(|c| c.is_ascii_digit()).collect();
+                                format!("bad-status-{code}")
+                            } else if msg.contains("EOF before body end") {
+                                "eof-body".into()
+                            } else if msg.contains("bad response") {
+                                "bad-head".into()
+                            } else {
+                                "io".into()
+                            };
+                            *kinds.lock().unwrap().entry(cls).or_insert(0) += 1;
                         }
                     }
-                }
-                let t0 = Instant::now();
-                let stream = conn.as_mut().unwrap();
-                match http_get(stream, &host, port, &path, &api_key, !no_keepalive).await {
-                    Ok(body_bytes) => {
-                        lats.lock().unwrap().push(t0.elapsed().as_secs_f64());
-                        bytes.fetch_add(body_bytes, Ordering::Relaxed);
-                    }
-                    Err(e) => {
-                        errors.fetch_add(1, Ordering::Relaxed);
-                        let msg = format!("{e:#}");
-                        let cls: String = if msg.contains("EOF before response head") {
-                            "eof-head".into()
-                        } else if msg.contains("HTTP status") {
-                            // Keep the code: "bad-status-502" etc.
-                            let code: String = msg.chars().filter(|c| c.is_ascii_digit()).collect();
-                            format!("bad-status-{code}")
-                        } else if msg.contains("EOF before body end") {
-                            "eof-body".into()
-                        } else if msg.contains("bad response") {
-                            "bad-head".into()
-                        } else {
-                            "io".into()
-                        };
-                        *kinds.lock().unwrap().entry(cls).or_insert(0) += 1;
-                        conn = None;
-                    }
+                    break;
                 }
             }
         });
@@ -151,6 +175,7 @@ pub(crate) async fn run_http(
             ("p95_ms", p95),
             ("p99_ms", p99),
             ("errors", errors.load(Ordering::Relaxed) as f64),
+            ("reconnects", reconnects.load(Ordering::Relaxed) as f64),
         ],
     }
 }
@@ -163,7 +188,7 @@ async fn http_get(
     path: &str,
     api_key: &str,
     keepalive: bool,
-) -> anyhow::Result<u64> {
+) -> anyhow::Result<(u64, bool)> {
     let auth = B64.encode(format!("bench:{api_key}"));
     let ka = if keepalive { "keep-alive" } else { "close" };
     let req = format!(
@@ -172,7 +197,7 @@ async fn http_get(
     stream.write_all(req.as_bytes()).await?;
 
     let mut buf = Vec::with_capacity(2048);
-    let (head_len, content_length) = loop {
+    let (head_len, content_length, reusable) = loop {
         buf.reserve(2048);
         let n = stream.read_buf(&mut buf).await?;
         if n == 0 {
@@ -184,14 +209,26 @@ async fn http_get(
             match resp.parse(&buf) {
                 Ok(httparse::Status::Complete(len)) => {
                     let mut cl = None;
+                    // HTTP/1.1 persists unless `close`; HTTP/1.0 only with
+                    // an explicit `keep-alive`.
+                    let mut reusable = resp.version == Some(1);
                     for h in resp.headers.iter() {
                         if h.name.eq_ignore_ascii_case("content-length") {
                             cl = std::str::from_utf8(h.value)
                                 .ok()
                                 .and_then(|s| s.trim().parse::<u64>().ok());
+                        } else if h.name.eq_ignore_ascii_case("connection")
+                            || h.name.eq_ignore_ascii_case("proxy-connection")
+                        {
+                            let v = String::from_utf8_lossy(h.value).to_ascii_lowercase();
+                            if v.contains("close") {
+                                reusable = false;
+                            } else if v.contains("keep-alive") {
+                                reusable = true;
+                            }
                         }
                     }
-                    Some((len, cl.unwrap_or(0)))
+                    Some((len, cl.unwrap_or(0), reusable && keepalive))
                 }
                 Ok(httparse::Status::Partial) => None,
                 Err(_) => anyhow::bail!("bad response"),
@@ -223,5 +260,5 @@ async fn http_get(
         }
         got += n as u64;
     }
-    Ok(content_length)
+    Ok((content_length, reusable))
 }

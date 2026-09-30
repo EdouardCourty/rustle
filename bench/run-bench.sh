@@ -19,6 +19,11 @@ cd "$(dirname "$0")"
 PROXY="${1:-myproxy}"
 AUTH="${2:-on}"
 REPEAT="${REPEAT:-3}"
+# Multi-core: WORKERS = shards/workers of the proxy (DUTs that support it),
+# PROXY_NCPU = CPUs given to the proxy (env.sh), GEN_THREADS = generator
+# runtime threads (size to BENCH_CPU or the generator saturates first).
+export WORKERS="${WORKERS:-1}"
+GEN_THREADS="${GEN_THREADS:-2}"
 HOLD_MAX_SINGLE=30000   # above this, split across 2 client replicas (ephemeral ports)
 
 export PROXY_IMAGE="${PROXY}:bench"
@@ -41,14 +46,19 @@ sleep 1
 out="results/${PROXY}/auth-${AUTH}/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$out"
 : > "$out/results.txt"
-echo "# $PROXY auth=$AUTH repeat=$REPEAT $(date)" | tee -a "$out/results.txt"
+echo "# $PROXY auth=$AUTH repeat=$REPEAT workers=$WORKERS proxy_cpu=$PROXY_CPU bench_cpu=$BENCH_CPU gen_threads=$GEN_THREADS $(date)" | tee -a "$out/results.txt"
 
-# CPU ticks (utime+stime, CLK_TCK=100) and RSS in MB of the proxy process.
-cpu_ticks() { docker compose exec -T proxy cat /proc/1/stat | awk '{print $14+$15}'; }
-rss_mb() { docker compose exec -T proxy cat /proc/1/statm | awk '{printf "%.1f", $2*4096/1048576}'; }
+# CPU ticks and RSS (MB) of the proxy under test.
+# Whole container (cgroup v2), not PID 1: multi-process DUTs (Squid SMP
+# workers) would otherwise hide their workers' CPU. Unit: 1/100 s.
+cpu_ticks() { docker compose exec -T proxy cat /sys/fs/cgroup/cpu.stat | awk '/^usage_usec/{printf "%d", $2/10000}'; }
+# Sum over the container's processes (same reason), minus the sh/cat of
+# this probe itself.
+_sum_status() { docker compose exec -T proxy sh -c "cat /proc/[0-9]*/status 2>/dev/null" | awk -v k="$1:" '$1=="Name:"{n=$2} $1==k && n!="sh" && n!="cat"{s+=$2} END{printf "%.1f", s/1024}'; }
+rss_mb() { _sum_status VmRSS; }
 # Peak RSS of the test (VmHWM; the proxy restarts before each test). rss_mb
 # is sampled after the load ended = memory still held, not the live cost.
-peak_rss_mb() { docker compose exec -T proxy grep VmHWM /proc/1/status | awk '{printf "%.1f", $2/1024}'; }
+peak_rss_mb() { _sum_status VmHWM; }
 # Same, summed over all upstream processes (nginx master+workers): the
 # harness-side cost per test is the ceiling nobody sees.
 up_ticks() {
@@ -66,7 +76,7 @@ run_test() {
     tick0=$(cpu_ticks)
     up0=$(up_ticks)
     docker compose --profile generator run --rm -T generator \
-        --repeat "$REPEAT" "$@" | tee /dev/stderr | grep '^RESULT median' > "$out/.median.txt"
+        --repeat "$REPEAT" --threads "$GEN_THREADS" "$@" | tee /dev/stderr | grep '^RESULT median' > "$out/.median.txt"
     tick1=$(cpu_ticks)
     up1=$(up_ticks)
     median=$(cat "$out/.median.txt")
@@ -98,7 +108,7 @@ run_hold() {
     tick0=$(cpu_ticks)
     for i in 1 2; do
         docker compose --profile generator run -d --name "holdrep-$i" \
-            generator --repeat 1 --no-warmup hold sink:9000 \
+            generator --repeat 1 --no-warmup --threads "$GEN_THREADS" hold sink:9000 \
             --conns "$half" --duration "$duration" --ramp 4096 >/dev/null
     done
     for i in 1 2; do docker wait "holdrep-$i" >/dev/null; done
