@@ -134,8 +134,20 @@ impl DestPolicy {
     /// Resolved address check, right before connect.
     #[inline]
     pub fn addr_allowed(&self, addr: SocketAddr) -> bool {
+        self.addr_verdict(addr).is_none()
+    }
+
+    /// Why `addr` is refused (`None` = allowed): "private" | "deny".
+    #[inline]
+    pub fn addr_verdict(&self, addr: SocketAddr) -> Option<&'static str> {
         let ip = addr.ip();
-        !(self.block_private && is_non_public(ip)) && !self.deny.iter().any(|c| c.contains(ip))
+        if self.block_private && is_non_public(ip) {
+            Some("private")
+        } else if self.deny.iter().any(|c| c.contains(ip)) {
+            Some("deny")
+        } else {
+            None
+        }
     }
 }
 

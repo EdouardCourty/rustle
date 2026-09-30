@@ -30,6 +30,7 @@ myproxy/              le proxy
     relay/splice.rs   pipe2 + splice, PipePair 1 MB, AsyncFd, dir() (fill-then-drain)
     relay/chunked.rs  relais chunked transparent (framing verbatim), dans les deux sens : réponses upstream→client et uploads client→upstream
     auth.rs           Basic auth, mot de passe ∈ api_keys (ct_eq sur toutes les clés, sans court-circuit), base64 sur pile
+    accesslog.rs      log d'accès : niveaux off/errors/all, lignes clé=valeur horodatées, canal borné try_send (jamais bloquant, drops comptés), thread writer (flush 200 ms, refus à l'accept agrégés 1/s, réouverture SIGHUP)
     policy.rs         DestPolicy (ports autorisés avant DNS, plages non publiques + deny CIDR sur l'adresse résolue) ; ClientPolicy (allowlist d'IP clientes, à l'accept) ; AuthLimiter (bans par IP après N mauvaises clés, sans verrou tant que personne n'échoue)
     dns.rs            cache positif, TTL, Mutex<HashMap>
     upstream.rs       pool keep-alive par origine (LIFO)
@@ -78,6 +79,7 @@ bench/
 | `timeouts.request_head` | 10s (total head / handshake SOCKS5, anti-slowloris) |
 | `filter.block_private` / `deny` / `allowed_ports` | **true** / [] / [] (vide = tous) — les configs de bench mettent false (réseau Docker privé) |
 | `socks5.listen` | `""` (off) |
+| `log.access` / `file` / `target` | errors / `""` (off) / host (ou url) — bench : off, `ACCESS_LOG=all` pour mesurer |
 
 `deny_unknown_fields` sur toutes les sections : une clé inconnue ou mal placée fait échouer le chargement.
 

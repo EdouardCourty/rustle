@@ -32,3 +32,8 @@ key = "/etc/myproxy/key.pem"
 [filter]
 # Bench: upstream/sink live on the private Docker network.
 block_private = false
+
+[log]
+# Bench: off; ACCESS_LOG=errors|all (run-bench.sh) measures its cost.
+access = "off"
+file = "/tmp/access.log"

@@ -18,6 +18,8 @@ pub type TlsClient = tokio_rustls::server::TlsStream<TcpStream>;
 pub trait ClientStream: AsyncRead + AsyncWrite + Unpin + Send + 'static {
     /// TLS session: needs close_notify on close, no zero-copy.
     const TLS: bool;
+    /// Transport name in the access log.
+    const VIA: &'static str;
 
     /// The TCP socket when it carries the application bytes as-is (plain
     /// TCP): enables splice and socket options.
@@ -31,6 +33,7 @@ pub trait ClientStream: AsyncRead + AsyncWrite + Unpin + Send + 'static {
 
 impl ClientStream for TcpStream {
     const TLS: bool = false;
+    const VIA: &'static str = "http1";
 
     #[inline]
     fn tcp(&mut self) -> Option<&mut TcpStream> {
@@ -45,6 +48,7 @@ impl ClientStream for TcpStream {
 
 impl ClientStream for TlsClient {
     const TLS: bool = true;
+    const VIA: &'static str = "tls";
 
     #[inline]
     fn tcp(&mut self) -> Option<&mut TcpStream> {

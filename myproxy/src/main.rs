@@ -1,3 +1,4 @@
+mod accesslog;
 mod auth;
 mod config;
 mod dns;
@@ -42,12 +43,25 @@ fn main() -> anyhow::Result<()> {
     let cfg = Arc::new(Config::load(Path::new(&config_path)).context("loading config")?);
 
     let srv = server::start(cfg)?;
-    // The main thread only waits for SIGTERM/SIGINT (tiny runtime, no I/O
-    // of its own), then stops and joins the shards.
+    // The main thread only waits for signals (tiny runtime, no I/O of its
+    // own): SIGHUP reopens the access log, SIGTERM/SIGINT stop and join
+    // the shards.
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?
-        .block_on(server::shutdown_signal());
+        .block_on(async {
+            use tokio::signal::unix::{signal, SignalKind};
+            let mut hup = signal(SignalKind::hangup()).expect("SIGHUP handler");
+            let stop = server::shutdown_signal();
+            tokio::pin!(stop);
+            loop {
+                tokio::select! {
+                    _ = &mut stop => break,
+                    // logrotate: rename the file, then `kill -HUP`.
+                    _ = hup.recv() => srv.reopen_logs(),
+                }
+            }
+        });
     tracing::info!("shutdown signal: draining active connections");
     srv.shutdown_and_join()
 }

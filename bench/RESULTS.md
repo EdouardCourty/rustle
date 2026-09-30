@@ -327,3 +327,16 @@ CPU/req, flood ×5,6 CPU/GB) — cible du kTLS (M13.3). En h2 : devant gost part
 
 **Caveats** : box 2 cores, loopback, un seed ; multi-core non mesuré ici (VPS : `run-scaling.sh`).
 Tunnels TLS : ~26 KB/tunnel chez myproxy (buffers rustls) contre ~5 KB en clair.
+
+## M16 — coût du log d'accès — 2026-09-30, seed 2004113323, auth on, 1 core
+
+| µs CPU proxy/req | log `off` | `all` v1 (1 réveil writer/ligne) | `all` batché (lot par shard) |
+|---|---|---|---|
+| 1 KB ×64 | 49,3 | 62,2 (+26 %) | **50,7 (+2,9 %)** |
+| 1 KB short | 90,0 | 110,2 (+22 %) | **91,0 (+1,1 %)** |
+| 10 KB / 1 MB / 10 MB / flood | — | +7 à +13 % | dans le bruit |
+
+La v1 envoyait chaque ligne au thread writer via le canal : un réveil (futex + changement de
+contexte sur le même core) par requête coûtait plus que tout le traitement user-space (~9 µs).
+Version retenue : lignes accumulées dans un buffer local au thread du shard (sans verrou), remises
+au writer par lots de 64 KB ou toutes les 200 ms. `off` : aucune régression vs M15.

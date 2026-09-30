@@ -86,3 +86,17 @@ allowed_ports = []
 # SOCKS). Password = one of the api_keys, username ignored; no auth when
 # api_keys is empty. Empty disables it.
 listen = ""
+
+[log]
+# Access log, written by its own thread (never blocks the proxy: when it
+# falls behind, lines are dropped and counted as event=dropped).
+# off | errors (refusals and failures: 403 policy, wrong key, ban, 4xx/5xx
+# from the proxy, truncated responses) | all (+ one line per request / h2
+# stream and one per tunnel when it closes).
+access = "errors"
+# Empty = no access log. logrotate: rename, then `kill -HUP <pid>`
+# (postrotate), or `copytruncate`.
+file = ""
+# host (host:port) | url (method + full URL of plain-HTTP requests).
+target = "host"
+

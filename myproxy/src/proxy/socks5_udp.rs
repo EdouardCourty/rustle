@@ -43,10 +43,32 @@ pub(super) async fn associate(mut ctl: TcpStream, peer: IpAddr, svc: &Services) 
     let mut down_buf = vec![0u8; HDR_MAX + DGRAM_MAX];
     let mut probe = [0u8; 1];
     let idle = svc.cfg.timeouts.idle;
+    let t0 = std::time::Instant::now();
+    // (bytes up, bytes down, datagrams) for the access log.
+    let mut stats = (0u64, 0u64, 0u64);
+    let end = |stats: (u64, u64, u64)| {
+        if svc.log.all() {
+            svc.log.emit(
+                svc.log
+                    .line()
+                    .kv("client", peer)
+                    .kv("via", "socks5")
+                    .kv("kind", "udp")
+                    .kv("target", "-")
+                    .kv("up", stats.0)
+                    .kv("down", stats.1)
+                    .kv("dgrams", stats.2)
+                    .kv("ms", t0.elapsed().as_millis()),
+            );
+        }
+    };
     loop {
         tokio::select! {
             // Control connection: EOF, error or any byte ends the association.
-            _ = ctl.read(&mut probe) => return Ok(()),
+            _ = ctl.read(&mut probe) => {
+                end(stats);
+                return Ok(());
+            }
             r = client_side.recv_from(&mut up_buf) => {
                 let (n, from) = r?;
                 if canonical(from.ip()) != peer || client_addr.is_some_and(|c| c != from) {
@@ -60,10 +82,12 @@ pub(super) async fn associate(mut ctl: TcpStream, peer: IpAddr, svc: &Services) 
                     continue;
                 };
                 let to = if dual { v6_mapped(dest) } else { dest };
-                if remote_side.send_to(&up_buf[off..n], to).await.is_ok()
-                    && sent_to.len() < MAX_PEERS
-                {
-                    sent_to.insert(dest);
+                if remote_side.send_to(&up_buf[off..n], to).await.is_ok() {
+                    stats.0 += (n - off) as u64;
+                    stats.2 += 1;
+                    if sent_to.len() < MAX_PEERS {
+                        sent_to.insert(dest);
+                    }
                 }
             }
             r = remote_side.recv_from(&mut down_buf[HDR_MAX..]) => {
@@ -74,9 +98,15 @@ pub(super) async fn associate(mut ctl: TcpStream, peer: IpAddr, svc: &Services) 
                     continue; // unsolicited: not a reply to this client
                 }
                 let start = write_header(&mut down_buf[..HDR_MAX], from);
-                let _ = client_side.send_to(&down_buf[start..HDR_MAX + n], client).await;
+                if client_side.send_to(&down_buf[start..HDR_MAX + n], client).await.is_ok() {
+                    stats.1 += n as u64;
+                    stats.2 += 1;
+                }
             }
-            _ = tokio::time::sleep(idle) => return Ok(()),
+            _ = tokio::time::sleep(idle) => {
+                end(stats);
+                return Ok(());
+            }
         }
     }
 }
