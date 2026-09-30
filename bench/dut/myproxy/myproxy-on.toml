@@ -28,3 +28,7 @@ max_response_body_bytes = 0
 listen = "0.0.0.0:8443"
 cert = "/etc/myproxy/cert.pem"
 key = "/etc/myproxy/key.pem"
+
+[filter]
+# Bench: upstream/sink live on the private Docker network.
+block_private = false

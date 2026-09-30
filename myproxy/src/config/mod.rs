@@ -21,6 +21,41 @@ pub struct Config {
     pub dns: DnsConfig,
     pub http: HttpConfig,
     pub tls: TlsConfig,
+    pub filter: FilterConfig,
+    pub socks5: Socks5Config,
+}
+
+/// Destination policy (see `policy`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct FilterConfig {
+    /// Refuse loopback, private, link-local (cloud metadata), CGNAT,
+    /// multicast, reserved and IPv6 ULA/link-local destinations — checked
+    /// on the resolved address.
+    pub block_private: bool,
+    /// Extra refused networks (CIDR).
+    pub deny: Vec<String>,
+    /// Destination ports allowed for CONNECT, HTTP and SOCKS5 (empty =
+    /// every port).
+    pub allowed_ports: Vec<u16>,
+}
+
+impl Default for FilterConfig {
+    fn default() -> Self {
+        Self {
+            block_private: true,
+            deny: Vec::new(),
+            allowed_ports: Vec::new(),
+        }
+    }
+}
+
+/// SOCKS5 listener (CONNECT only; the API key is the password).
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct Socks5Config {
+    /// Empty = disabled.
+    pub listen: String,
 }
 
 /// HTTPS proxy listener (TLS between client and proxy), next to the plain
@@ -95,10 +130,28 @@ impl Default for ServerConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AuthConfig {
     pub api_keys: Vec<String>,
+    /// Wrong keys tolerated per client IP within `failure_window` before a
+    /// ban (0 disables). Requests without credentials do not count.
+    pub max_failures: u32,
+    #[serde(deserialize_with = "de_duration")]
+    pub failure_window: Duration,
+    #[serde(deserialize_with = "de_duration")]
+    pub ban_duration: Duration,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            api_keys: Vec::new(),
+            max_failures: 5,
+            failure_window: Duration::from_secs(60),
+            ban_duration: Duration::from_secs(900),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -124,6 +177,10 @@ pub struct TimeoutsConfig {
     pub connect: Duration,
     #[serde(deserialize_with = "de_duration")]
     pub idle: Duration,
+    /// Total time to receive a request head (from its first byte) or a
+    /// SOCKS5 handshake: a client trickling bytes cannot hold a slot.
+    #[serde(deserialize_with = "de_duration")]
+    pub request_head: Duration,
 }
 
 impl Default for TimeoutsConfig {
@@ -131,6 +188,7 @@ impl Default for TimeoutsConfig {
         Self {
             connect: Duration::from_secs(5),
             idle: Duration::from_secs(60),
+            request_head: Duration::from_secs(10),
         }
     }
 }

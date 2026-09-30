@@ -12,6 +12,7 @@
 //! budgets, hop-by-hop headers dropped, stale pooled sockets retried once
 //! for bodiless requests.
 
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,13 +26,10 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 
 use super::pipeline::{self, UpstreamError};
-use crate::auth::Authenticator;
 use crate::config::Config;
-use crate::dns::DnsCache;
 use crate::http::{read_response_head, HeadError, RespError};
 use crate::relay::{chunk_size, IdleTimer};
 use crate::stream::TlsClient;
-use crate::upstream::UpstreamPool;
 
 /// Streams in flight per client connection.
 const MAX_CONCURRENT_STREAMS: u32 = 256;
@@ -67,11 +65,17 @@ const DROP_RESP: &[&str] = &[
     "upgrade",
 ];
 
+/// The shard's services plus the client address (auth failures).
 struct Ctx {
-    cfg: Arc<Config>,
-    auth: Arc<Authenticator>,
-    dns: Arc<DnsCache>,
-    pool: Arc<UpstreamPool>,
+    svc: Arc<super::Services>,
+    peer: IpAddr,
+}
+
+impl std::ops::Deref for Ctx {
+    type Target = super::Services;
+    fn deref(&self) -> &super::Services {
+        &self.svc
+    }
 }
 
 /// Decrements the connection's live-stream count when a stream task ends.
@@ -83,13 +87,8 @@ impl Drop for StreamSlot {
     }
 }
 
-pub async fn handle_h2(
-    client: TlsClient,
-    cfg: Arc<Config>,
-    auth: Arc<Authenticator>,
-    dns: Arc<DnsCache>,
-    pool: Arc<UpstreamPool>,
-) {
+pub async fn handle_h2(client: TlsClient, peer: IpAddr, svc: Arc<super::Services>) {
+    let cfg = svc.cfg.clone();
     let idle = cfg.timeouts.idle;
     let mut builder = h2::server::Builder::new();
     builder
@@ -107,12 +106,7 @@ pub async fn handle_h2(
         Ok(Ok(c)) => c,
         _ => return,
     };
-    let ctx = Arc::new(Ctx {
-        cfg,
-        auth,
-        dns,
-        pool,
-    });
+    let ctx = Arc::new(Ctx { svc, peer });
     let live = Arc::new(AtomicUsize::new(0));
     loop {
         tokio::select! {
@@ -166,6 +160,9 @@ async fn serve_stream(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResp
         .get(http::header::PROXY_AUTHORIZATION)
         .map(|v| v.as_bytes());
     if !ctx.auth.check(auth) {
+        if auth.is_some() {
+            ctx.limiter.fail(ctx.peer);
+        }
         reply(&mut respond, StatusCode::PROXY_AUTHENTICATION_REQUIRED);
         return;
     }
@@ -187,12 +184,13 @@ fn target(req: &Request<RecvStream>, default_port: u16) -> Option<(String, u16)>
 }
 
 async fn dial(ctx: &Ctx, host: &str, port: u16, key: &str) -> Result<TcpStream, StatusCode> {
-    match pipeline::connect_upstream(host, port, ctx.cfg.timeouts.connect, &ctx.dns, key).await {
+    match pipeline::connect_upstream(host, port, ctx.cfg.timeouts.connect, &ctx.dns, key, &ctx.dest).await {
         Ok(up) => {
             let _ = up.set_nodelay(true);
             Ok(up)
         }
         Err(UpstreamError::Timeout) => Err(StatusCode::GATEWAY_TIMEOUT),
+        Err(UpstreamError::Forbidden) => Err(StatusCode::FORBIDDEN),
         Err(UpstreamError::Other(e)) => {
             tracing::debug!(error = %e, "upstream connect failed");
             Err(StatusCode::BAD_GATEWAY)

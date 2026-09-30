@@ -23,6 +23,7 @@ use tokio::sync::watch;
 use crate::auth::Authenticator;
 use crate::config::Config;
 use crate::dns::DnsCache;
+use crate::policy::{AuthLimiter, DestPolicy};
 use crate::proxy;
 use crate::upstream::UpstreamPool;
 
@@ -64,6 +65,8 @@ struct Shared {
     cfg: Arc<Config>,
     auth: Arc<Authenticator>,
     dns: Arc<DnsCache>,
+    dest: Arc<DestPolicy>,
+    limiter: Arc<AuthLimiter>,
     /// HTTPS proxy listener's acceptor (None = plain only).
     tls: Option<tokio_rustls::TlsAcceptor>,
     /// Live client connections, all shards (enforces `max_connections`).
@@ -78,6 +81,7 @@ struct Shared {
 pub struct Server {
     addr: SocketAddr,
     tls_addr: Option<SocketAddr>,
+    socks_addr: Option<SocketAddr>,
     shared: Arc<Shared>,
     shutdown: watch::Sender<bool>,
     shards: Vec<JoinHandle<anyhow::Result<()>>>,
@@ -96,39 +100,54 @@ fn shard_count(workers: usize) -> usize {
 /// Binds every shard's listener, then starts the shards. Binding happens
 /// here, synchronously, so errors surface before any thread starts and an
 /// ephemeral port (`:0`) resolved by the first listener is shared by all.
+/// Binds one listener per shard on `listen` (SO_REUSEPORT when sharded;
+/// a `:0` port resolved by the first is shared by the others).
+fn bind_group(
+    listen: &str,
+    n: usize,
+    what: &str,
+) -> anyhow::Result<(SocketAddr, Vec<std::net::TcpListener>)> {
+    let a: SocketAddr = listen
+        .parse()
+        .with_context(|| format!("invalid {what} address: {listen}"))?;
+    let first = bind(a, n > 1).with_context(|| format!("binding {what} {a}"))?;
+    let addr = first.local_addr()?;
+    let mut v = vec![first];
+    for _ in 1..n {
+        v.push(bind(addr, true).with_context(|| format!("binding {what} {addr}"))?);
+    }
+    Ok((addr, v))
+}
+
+/// A shard's listeners.
+struct ShardListeners {
+    plain: std::net::TcpListener,
+    tls: Option<std::net::TcpListener>,
+    socks: Option<std::net::TcpListener>,
+    admin: Option<std::net::TcpListener>,
+}
+
+/// Binds every shard's listeners, then starts the shards. Binding happens
+/// here, synchronously, so errors surface before any thread starts and an
+/// ephemeral port (`:0`) resolved by the first listener is shared by all.
 pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
     let n = shard_count(cfg.server.workers);
-    let listen: SocketAddr = cfg
-        .server
-        .listen
-        .parse()
-        .with_context(|| format!("invalid listen address: {}", cfg.server.listen))?;
-    let reuse_port = n > 1;
-    let first = bind(listen, reuse_port).with_context(|| format!("binding {listen}"))?;
-    let addr = first.local_addr()?;
-    let mut listeners = vec![first];
-    for _ in 1..n {
-        listeners.push(bind(addr, true).with_context(|| format!("binding {addr}"))?);
-    }
-    // HTTPS proxy listener: same sharding (one SO_REUSEPORT socket each).
+    let (addr, plain) = bind_group(&cfg.server.listen, n, "listen")?;
+    // HTTPS proxy and SOCKS5 listeners: same sharding.
     let (tls, tls_addr, mut tls_listeners) = if cfg.tls.listen.is_empty() {
         (None, None, Vec::new())
     } else {
         let acceptor = crate::tls::acceptor(&cfg.tls)?;
-        let tl: SocketAddr = cfg
-            .tls
-            .listen
-            .parse()
-            .with_context(|| format!("invalid tls listen address: {}", cfg.tls.listen))?;
-        let first = bind(tl, reuse_port).with_context(|| format!("binding tls {tl}"))?;
-        let tl = first.local_addr()?;
-        let mut v = vec![first];
-        for _ in 1..n {
-            v.push(bind(tl, true).with_context(|| format!("binding tls {tl}"))?);
-        }
-        (Some(acceptor), Some(tl), v)
+        let (a, v) = bind_group(&cfg.tls.listen, n, "tls")?;
+        (Some(acceptor), Some(a), v)
     };
-    let admin = if cfg.server.admin_listen.is_empty() {
+    let (socks_addr, mut socks_listeners) = if cfg.socks5.listen.is_empty() {
+        (None, Vec::new())
+    } else {
+        let (a, v) = bind_group(&cfg.socks5.listen, n, "socks5")?;
+        (Some(a), v)
+    };
+    let mut admin = if cfg.server.admin_listen.is_empty() {
         None
     } else {
         let a: SocketAddr = cfg
@@ -147,6 +166,12 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
     let shared = Arc::new(Shared {
         auth: Arc::new(Authenticator::new(&cfg.auth.api_keys)),
         dns: Arc::new(DnsCache::new(cfg.dns.ttl, cfg.dns.max_entries)),
+        dest: Arc::new(DestPolicy::from_config(&cfg)?),
+        limiter: Arc::new(AuthLimiter::new(
+            cfg.auth.max_failures,
+            cfg.auth.failure_window,
+            cfg.auth.ban_duration,
+        )),
         tls,
         active: AtomicUsize::new(0),
         peak: AtomicUsize::new(0),
@@ -156,21 +181,27 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
     tracing::info!(
         %addr,
         tls = ?tls_addr,
+        socks5 = ?socks_addr,
         shards = n,
         pinned = !cpus.is_empty(),
         max_connections = shared.cfg.limits.max_connections,
+        block_private = shared.cfg.filter.block_private,
         "myproxy listening",
     );
 
     let (shutdown, rx) = watch::channel(false);
-    let mut admin = admin;
     let mut shards = Vec::with_capacity(n);
     tls_listeners.reverse(); // popped in shard order below
-    for (id, listener) in listeners.into_iter().enumerate() {
+    socks_listeners.reverse();
+    for (id, plain) in plain.into_iter().enumerate() {
         let shared = shared.clone();
         let rx = rx.clone();
-        let tls_listener = tls_listeners.pop();
-        let admin = if id == 0 { admin.take() } else { None };
+        let listeners = ShardListeners {
+            plain,
+            tls: tls_listeners.pop(),
+            socks: socks_listeners.pop(),
+            admin: if id == 0 { admin.take() } else { None },
+        };
         let cpu = (!cpus.is_empty()).then(|| cpus[id % cpus.len()]);
         let handle = std::thread::Builder::new()
             .name(format!("myproxy-shard-{id}"))
@@ -186,13 +217,14 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
                     .thread_stack_size(128 * 1024)
                     .max_blocking_threads((BLOCKING_THREADS_TOTAL / n).max(8))
                     .build()?;
-                rt.block_on(run_shard(id, shared, listener, tls_listener, admin, rx))
+                rt.block_on(run_shard(id, shared, listeners, rx))
             })?;
         shards.push(handle);
     }
     Ok(Server {
         addr,
         tls_addr,
+        socks_addr,
         shared,
         shutdown,
         shards,
@@ -204,6 +236,12 @@ impl Server {
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn local_addr(&self) -> SocketAddr {
         self.addr
+    }
+
+    /// SOCKS5 listen address, when enabled.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn socks_addr(&self) -> Option<SocketAddr> {
+        self.socks_addr
     }
 
     /// HTTPS proxy listen address, when enabled.
@@ -251,17 +289,26 @@ impl Drop for ConnSlot {
 
 /// One shard: accept loop, one task per connection, its own upstream pool.
 /// Shard 0 also serves the admin listener and the heap-trim task.
+/// Which listener a connection came from.
+#[derive(Clone, Copy)]
+enum Kind {
+    Plain,
+    Tls,
+    Socks,
+}
+
+/// One shard: accept loops, one task per connection, its own upstream pool.
+/// Shard 0 also serves the admin listener and the heap-trim task.
 async fn run_shard(
     id: usize,
     shared: Arc<Shared>,
-    listener: std::net::TcpListener,
-    tls_listener: Option<std::net::TcpListener>,
-    admin: Option<std::net::TcpListener>,
+    listeners: ShardListeners,
     mut shutdown: watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
-    let listener = TcpListener::from_std(listener)?;
-    let tls_listener = tls_listener.map(TcpListener::from_std).transpose()?;
-    if let Some(admin) = admin {
+    let plain = TcpListener::from_std(listeners.plain)?;
+    let tls_listener = listeners.tls.map(TcpListener::from_std).transpose()?;
+    let socks_listener = listeners.socks.map(TcpListener::from_std).transpose()?;
+    if let Some(admin) = listeners.admin {
         tokio::spawn(admin_loop(TcpListener::from_std(admin)?));
     }
     #[cfg(all(
@@ -274,16 +321,24 @@ async fn run_shard(
 
     let cfg = shared.cfg.clone();
     let max_connections = cfg.limits.max_connections;
-    let pool = Arc::new(UpstreamPool::new(if cfg.http.upstream_keepalive {
-        cfg.http.max_idle_per_origin
-    } else {
-        0
-    }));
+    let svc = Arc::new(proxy::Services {
+        cfg: cfg.clone(),
+        auth: shared.auth.clone(),
+        dns: shared.dns.clone(),
+        dest: shared.dest.clone(),
+        limiter: shared.limiter.clone(),
+        pool: UpstreamPool::new(if cfg.http.upstream_keepalive {
+            cfg.http.max_idle_per_origin
+        } else {
+            0
+        }),
+    });
 
     loop {
-        let (accepted, is_tls) = tokio::select! {
-            a = listener.accept() => (a, false),
-            a = accept_on(&tls_listener) => (a, true),
+        let (accepted, kind) = tokio::select! {
+            a = plain.accept() => (a, Kind::Plain),
+            a = accept_on(&tls_listener) => (a, Kind::Tls),
+            a = accept_on(&socks_listener) => (a, Kind::Socks),
             _ = shutdown.changed() => break,
         };
         let (sock, peer) = match accepted {
@@ -296,6 +351,12 @@ async fn run_shard(
                 continue;
             }
         };
+        let ip = peer.ip();
+        // Banned for repeated wrong keys: closed before any byte is read
+        // (lock-free while nobody failed).
+        if shared.limiter.banned(ip) {
+            continue;
+        }
 
         let now = shared.active.fetch_add(1, Relaxed) + 1;
         if now > max_connections {
@@ -310,42 +371,47 @@ async fn run_shard(
         // TCP_NODELAY and the 1 MB buffers are inherited from the listener
         // (set once in `bind`): no per-connection setsockopt.
         let slot = ConnSlot(shared.clone());
-        let cfg = cfg.clone();
-        let auth = shared.auth.clone();
-        let dns = shared.dns.clone();
-        let pool = pool.clone();
-        if is_tls {
-            let Some(acceptor) = shared.tls.clone() else {
-                continue;
-            };
-            tokio::spawn(async move {
-                let _slot = slot;
-                let hs = cfg.tls.handshake_timeout;
-                match tokio::time::timeout(hs, acceptor.accept(sock)).await {
-                    Ok(Ok(tls)) => {
-                        if tls.get_ref().1.alpn_protocol() == Some(b"h2") {
-                            proxy::handle_h2(tls, cfg, auth, dns, pool).await
-                        } else {
-                            proxy::handle_conn(tls, cfg, auth, dns, pool).await
+        let svc = svc.clone();
+        match kind {
+            Kind::Plain => {
+                tokio::spawn(async move {
+                    let _slot = slot;
+                    proxy::handle_conn(sock, ip, svc).await;
+                });
+            }
+            Kind::Socks => {
+                tokio::spawn(async move {
+                    let _slot = slot;
+                    proxy::handle_socks5(sock, ip, svc).await;
+                });
+            }
+            Kind::Tls => {
+                let Some(acceptor) = shared.tls.clone() else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    let _slot = slot;
+                    let hs = svc.cfg.tls.handshake_timeout;
+                    match tokio::time::timeout(hs, acceptor.accept(sock)).await {
+                        Ok(Ok(tls)) => {
+                            if tls.get_ref().1.alpn_protocol() == Some(b"h2") {
+                                proxy::handle_h2(tls, ip, svc).await
+                            } else {
+                                proxy::handle_conn(tls, ip, svc).await
+                            }
                         }
+                        Ok(Err(e)) => tracing::debug!(error = %e, "tls handshake failed"),
+                        Err(_) => tracing::debug!("tls handshake timed out"),
                     }
-                    Ok(Err(e)) => tracing::debug!(error = %e, "tls handshake failed"),
-                    Err(_) => tracing::debug!("tls handshake timed out"),
-                }
-            });
-        } else {
-            tokio::spawn(async move {
-                let _slot = slot;
-                proxy::handle_conn(sock, cfg, auth, dns, pool).await;
-            });
+                });
+            }
         }
     }
 
     // Graceful drain: let in-flight connections finish (capped to 5 s —
     // beyond that a deploy is more important than a stuck client). The
     // counter is global: every shard waits for the whole process.
-    drop(listener);
-    drop(tls_listener);
+    drop((plain, tls_listener, socks_listener));
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     while shared.active.load(Relaxed) > 0 && tokio::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -527,6 +593,8 @@ mod tests {
         cfg.server.admin_listen = String::new();
         cfg.server.workers = workers;
         cfg.limits.max_connections = max_connections;
+        // Tests talk to origins on 127.0.0.1.
+        cfg.filter.block_private = false;
         Arc::new(cfg)
     }
 
@@ -910,5 +978,172 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+    }
+
+    // ---- access policy, bans, slowloris, SOCKS5 ----
+
+    async fn send_recv(addr: SocketAddr, raw: &[u8]) -> Vec<u8> {
+        let mut c = TcpStream::connect(addr).await.unwrap();
+        c.write_all(raw).await.unwrap();
+        let mut out = Vec::new();
+        let _ = c.read_to_end(&mut out).await;
+        out
+    }
+
+    fn status(out: &[u8]) -> String {
+        String::from_utf8_lossy(out).lines().next().unwrap_or("").to_string()
+    }
+
+    #[tokio::test]
+    async fn destination_policy_and_port_allowlist() {
+        let up = origin().await;
+        let mut cfg = (*test_config(1, 100)).clone();
+        cfg.filter.block_private = true;
+        let srv = start(Arc::new(cfg)).unwrap();
+        let a = srv.local_addr();
+        // Private destination (numeric and by name), CONNECT and plain GET.
+        for req in [
+            format!("CONNECT {up} HTTP/1.1\r\nHost: {up}\r\n\r\n"),
+            format!("GET http://{up}/a HTTP/1.1\r\nHost: {up}\r\n\r\n"),
+            format!("GET http://localhost:{}/a HTTP/1.1\r\nHost: x\r\n\r\n", up.port()),
+            "CONNECT 169.254.169.254:80 HTTP/1.1\r\nHost: x\r\n\r\n".to_string(),
+        ] {
+            let st = status(&send_recv(a, req.as_bytes()).await);
+            assert!(st.starts_with("HTTP/1.1 403"), "{req}: {st}");
+        }
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+
+        // Port allowlist (private filter off): allowed port passes, other refused.
+        let mut cfg = (*test_config(1, 100)).clone();
+        cfg.filter.allowed_ports = vec![up.port()];
+        let srv = start(Arc::new(cfg)).unwrap();
+        let a = srv.local_addr();
+        let ok = send_recv(a, format!("GET http://{up}/a HTTP/1.1\r\nHost: {up}\r\nConnection: close\r\n\r\n").as_bytes()).await;
+        assert!(status(&ok).starts_with("HTTP/1.1 200"), "{}", status(&ok));
+        let st = status(&send_recv(a, b"CONNECT 127.0.0.1:1 HTTP/1.1\r\nHost: x\r\n\r\n").await);
+        assert!(st.starts_with("HTTP/1.1 403"), "{st}");
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn wrong_keys_ban_the_client_but_missing_credentials_do_not() {
+        let mut cfg = (*test_config(1, 100)).clone();
+        cfg.auth.api_keys = vec!["good".into()];
+        cfg.auth.max_failures = 3;
+        let srv = start(Arc::new(cfg)).unwrap();
+        let a = srv.local_addr();
+        use base64::Engine as _;
+        let bad = base64::engine::general_purpose::STANDARD.encode("u:bad");
+        // No credentials: plain 407, never counted.
+        for _ in 0..5 {
+            let st = status(&send_recv(a, b"CONNECT x:1 HTTP/1.1\r\nHost: x\r\n\r\n").await);
+            assert!(st.starts_with("HTTP/1.1 407"), "{st}");
+        }
+        for _ in 0..3 {
+            let req = format!("CONNECT x:1 HTTP/1.1\r\nProxy-Authorization: Basic {bad}\r\n\r\n");
+            let st = status(&send_recv(a, req.as_bytes()).await);
+            assert!(st.starts_with("HTTP/1.1 407"), "{st}");
+        }
+        // Banned: the connection is closed without a response, even with
+        // the good key.
+        let good = base64::engine::general_purpose::STANDARD.encode("u:good");
+        let req = format!("CONNECT x:1 HTTP/1.1\r\nProxy-Authorization: Basic {good}\r\n\r\n");
+        assert!(send_recv(a, req.as_bytes()).await.is_empty());
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn slowloris_head_is_cut() {
+        let mut cfg = (*test_config(1, 100)).clone();
+        cfg.timeouts.request_head = Duration::from_millis(300);
+        let srv = start(Arc::new(cfg)).unwrap();
+        let mut c = TcpStream::connect(srv.local_addr()).await.unwrap();
+        let t0 = std::time::Instant::now();
+        // One byte every 100 ms: each read is quick, the head never ends.
+        let mut closed = false;
+        for b in b"GET http://example.com/ HTTP/1.1\r\nX-Slow: aaaaaaaaaaaaaaaaaaaaaaaa".iter() {
+            if c.write_all(&[*b]).await.is_err() {
+                closed = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let mut probe = [0u8; 1];
+            if let Ok(Ok(0)) = tokio::time::timeout(Duration::from_millis(1), c.read(&mut probe)).await {
+                closed = true;
+                break;
+            }
+        }
+        assert!(closed, "trickling client never cut");
+        assert!(t0.elapsed() < Duration::from_secs(2), "{:?}", t0.elapsed());
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+    }
+
+    /// SOCKS5 CONNECT with username/password; returns (stream, REP code).
+    async fn socks_connect(addr: SocketAddr, pass: Option<&str>, target: SocketAddr) -> (TcpStream, u8) {
+        let mut c = TcpStream::connect(addr).await.unwrap();
+        let method = if pass.is_some() { 2 } else { 0 };
+        c.write_all(&[5, 1, method]).await.unwrap();
+        let mut sel = [0u8; 2];
+        c.read_exact(&mut sel).await.unwrap();
+        assert_eq!(sel, [5, method]);
+        if let Some(p) = pass {
+            let mut m = vec![1, 1, b'u', p.len() as u8];
+            m.extend_from_slice(p.as_bytes());
+            c.write_all(&m).await.unwrap();
+            let mut st = [0u8; 2];
+            c.read_exact(&mut st).await.unwrap();
+            if st[1] != 0 {
+                return (c, 0xff);
+            }
+        }
+        let SocketAddr::V4(t) = target else { panic!() };
+        let mut req = vec![5, 1, 0, 1];
+        req.extend_from_slice(&t.ip().octets());
+        req.extend_from_slice(&t.port().to_be_bytes());
+        c.write_all(&req).await.unwrap();
+        let mut rep = [0u8; 10];
+        c.read_exact(&mut rep).await.unwrap();
+        (c, rep[1])
+    }
+
+    #[tokio::test]
+    async fn socks5_auth_tunnel_and_policy() {
+        let echo = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let echo_addr = echo.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let (mut s, _) = echo.accept().await.unwrap();
+                tokio::spawn(async move {
+                    let (mut r, mut w) = s.split();
+                    let _ = tokio::io::copy(&mut r, &mut w).await;
+                });
+            }
+        });
+        let mut cfg = (*test_config(1, 100)).clone();
+        cfg.auth.api_keys = vec!["k1".into()];
+        cfg.socks5.listen = "127.0.0.1:0".into();
+        let srv = start(Arc::new(cfg)).unwrap();
+        let sa = srv.socks_addr().unwrap();
+
+        let (_, rep) = socks_connect(sa, Some("nope"), echo_addr).await;
+        assert_eq!(rep, 0xff, "wrong key accepted");
+
+        let (mut c, rep) = socks_connect(sa, Some("k1"), echo_addr).await;
+        assert_eq!(rep, 0);
+        c.write_all(b"ping through socks").await.unwrap();
+        let mut back = [0u8; 18];
+        c.read_exact(&mut back).await.unwrap();
+        assert_eq!(&back, b"ping through socks");
+        drop(c);
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+
+        // Destination policy applies to SOCKS5 too (REP 0x02).
+        let mut cfg = (*test_config(1, 100)).clone();
+        cfg.filter.block_private = true;
+        cfg.socks5.listen = "127.0.0.1:0".into();
+        let srv = start(Arc::new(cfg)).unwrap();
+        let (_, rep) = socks_connect(srv.socks_addr().unwrap(), None, echo_addr).await;
+        assert_eq!(rep, 0x02);
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
     }
 }

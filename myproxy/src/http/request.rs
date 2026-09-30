@@ -70,8 +70,13 @@ pub async fn read_head<S: tokio::io::AsyncRead + Unpin>(
     buf: &mut Vec<u8>,
     max_bytes: usize,
     idle: Duration,
+    head_timeout: Duration,
 ) -> Result<Option<RequestHead>, HeadError> {
     buf.clear();
+    // Slowloris: once part of a head is buffered, the rest must arrive
+    // within `head_timeout` in total (not per read). Armed only when a head
+    // spans several reads — the usual one-read head never computes it.
+    let mut deadline: Option<tokio::time::Instant> = None;
     loop {
         // Zero-borrow parse: spans are computed inside this block from the
         // very buffer; the returned head owns plain indices only.
@@ -92,11 +97,17 @@ pub async fn read_head<S: tokio::io::AsyncRead + Unpin>(
         if buf.len() >= max_bytes {
             return Err(HeadError::TooLarge);
         }
+        if !buf.is_empty() && deadline.is_none() {
+            deadline = Some(tokio::time::Instant::now() + head_timeout);
+        }
         buf.reserve(2048);
-        let n = timeout(idle, sock.read_buf(buf))
-            .await
-            .map_err(|_| HeadError::Io(std::io::Error::from(std::io::ErrorKind::TimedOut)))?
-            .map_err(HeadError::Io)?;
+        let read = sock.read_buf(buf);
+        let n = match deadline {
+            None => timeout(idle, read).await,
+            Some(d) => tokio::time::timeout_at(d, read).await,
+        }
+        .map_err(|_| HeadError::Io(std::io::Error::from(std::io::ErrorKind::TimedOut)))?
+        .map_err(HeadError::Io)?;
         if n == 0 {
             return Ok(None);
         }
