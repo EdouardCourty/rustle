@@ -5,6 +5,9 @@
 //!   filter (checked on every *resolved* address, right before connect —
 //!   a hostname resolving to a private address is refused too, DNS
 //!   rebinding included).
+//! - [`ClientPolicy`]: client IP allowlist, checked at accept on every
+//!   listener (empty = everyone) — for a personal proxy, typically the VPN
+//!   range: the rest of the internet never gets a byte read.
 //! - [`AuthLimiter`]: per-source-IP failure counter; after `max_failures`
 //!   wrong keys inside `failure_window` the IP is banned for
 //!   `ban_duration` and its connections are closed at accept. Only
@@ -136,6 +139,30 @@ impl DestPolicy {
     }
 }
 
+/// Which clients may connect at all.
+#[derive(Debug, Clone, Default)]
+pub struct ClientPolicy {
+    allow: Vec<Cidr>,
+}
+
+impl ClientPolicy {
+    pub fn from_config(cfg: &Config) -> anyhow::Result<Self> {
+        Ok(Self {
+            allow: cfg
+                .auth
+                .allow_clients
+                .iter()
+                .map(|s| Cidr::parse(s))
+                .collect::<anyhow::Result<_>>()?,
+        })
+    }
+
+    #[inline]
+    pub fn allows(&self, ip: IpAddr) -> bool {
+        self.allow.is_empty() || self.allow.iter().any(|c| c.contains(ip))
+    }
+}
+
 struct Failures {
     count: u32,
     window_start: Instant,
@@ -263,6 +290,21 @@ mod tests {
         assert!(!p.addr_allowed("10.0.0.1:443".parse().unwrap()));
         assert!(!p.addr_allowed("203.0.113.5:443".parse().unwrap()));
         assert!(p.addr_allowed("1.1.1.1:443".parse().unwrap()));
+    }
+
+    #[test]
+    fn client_allowlist() {
+        let mut cfg = Config::default();
+        assert!(ClientPolicy::from_config(&cfg).unwrap().allows(ip("203.0.113.1")));
+        cfg.auth.allow_clients = vec!["100.64.0.0/10".into(), "::1".into()];
+        let p = ClientPolicy::from_config(&cfg).unwrap();
+        assert!(p.allows(ip("100.101.102.103")));
+        assert!(p.allows(ip("::ffff:100.64.0.1"))); // dual-stack listener
+        assert!(p.allows(ip("::1")));
+        assert!(!p.allows(ip("203.0.113.1")));
+        assert!(!p.allows(ip("127.0.0.1")));
+        cfg.auth.allow_clients = vec!["nope".into()];
+        assert!(ClientPolicy::from_config(&cfg).is_err());
     }
 
     #[test]

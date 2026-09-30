@@ -23,7 +23,7 @@ use tokio::sync::watch;
 use crate::auth::Authenticator;
 use crate::config::Config;
 use crate::dns::DnsCache;
-use crate::policy::{AuthLimiter, DestPolicy};
+use crate::policy::{AuthLimiter, ClientPolicy, DestPolicy};
 use crate::proxy;
 use crate::upstream::UpstreamPool;
 
@@ -66,6 +66,7 @@ struct Shared {
     auth: Arc<Authenticator>,
     dns: Arc<DnsCache>,
     dest: Arc<DestPolicy>,
+    clients: ClientPolicy,
     limiter: Arc<AuthLimiter>,
     /// HTTPS proxy listener's acceptor (None = plain only).
     tls: Option<tokio_rustls::TlsAcceptor>,
@@ -167,6 +168,7 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
         auth: Arc::new(Authenticator::new(&cfg.auth.api_keys)),
         dns: Arc::new(DnsCache::new(cfg.dns.ttl, cfg.dns.max_entries)),
         dest: Arc::new(DestPolicy::from_config(&cfg)?),
+        clients: ClientPolicy::from_config(&cfg)?,
         limiter: Arc::new(AuthLimiter::new(
             cfg.auth.max_failures,
             cfg.auth.failure_window,
@@ -352,6 +354,11 @@ async fn run_shard(
             }
         };
         let ip = peer.ip();
+        // Client allowlist: outsiders are closed before any byte is read.
+        if !shared.clients.allows(ip) {
+            tracing::debug!(%ip, "client not in allow_clients, closed");
+            continue;
+        }
         // Banned for repeated wrong keys: closed before any byte is read
         // (lock-free while nobody failed).
         if shared.limiter.banned(ip) {
@@ -1144,6 +1151,27 @@ mod tests {
         let srv = start(Arc::new(cfg)).unwrap();
         let (_, rep) = socks_connect(srv.socks_addr().unwrap(), None, echo_addr).await;
         assert_eq!(rep, 0x02);
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn client_allowlist_closes_outsiders_at_accept() {
+        // 127.0.0.1 outside the list: closed without a response, on the
+        // HTTP and the SOCKS5 listeners.
+        let mut cfg = (*test_config(1, 100)).clone();
+        cfg.auth.allow_clients = vec!["10.0.0.0/8".into()];
+        cfg.socks5.listen = "127.0.0.1:0".into();
+        let srv = start(Arc::new(cfg)).unwrap();
+        assert!(send_recv(srv.local_addr(), b"garbage\r\n\r\n").await.is_empty());
+        assert!(send_recv(srv.socks_addr().unwrap(), &[5, 1, 0]).await.is_empty());
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+
+        // Inside the list: served as usual.
+        let mut cfg = (*test_config(1, 100)).clone();
+        cfg.auth.allow_clients = vec!["127.0.0.0/8".into()];
+        let srv = start(Arc::new(cfg)).unwrap();
+        let st = status(&send_recv(srv.local_addr(), b"garbage\r\n\r\n").await);
+        assert!(st.starts_with("HTTP/1.1 400"), "{st}");
         tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
     }
 }
