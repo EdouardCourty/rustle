@@ -265,3 +265,65 @@ par tunnel » publié plus haut était du résiduel. Avec `current_thread`, tout
 dans l'arène principale glibc (non réduite) : résiduel 125 MB. Fix :
 `malloc_trim` quand les connexions tombent sous la moitié du pic (tick 5 s) →
 2 MB résiduels.
+
+## M13 — campagne 5 proxies × 3 transports — 2026-09-30, seed 2004113323, auth on, 1 core proxy
+
+Protocole : matrice habituelle (REPEAT=3, médiane), proxy seul sur 1 core, harnais sur l'autre.
+Cellule = débit · CPU proxy par requête (cgroup du conteneur). Pic RAM = `peak_rss_mb` (somme des
+processus). DUT : 3proxy 0.9.4, Squid 5.7 (cache off, `access_log none`), gost 3.2.6 (logs d'accès
+coupés : il loggait chaque connexion en `info`, coût que les autres ne paient pas), Tinyproxy 1.11.
+TLS : certificat ECDSA P-256 identique en nature pour tous. 0 erreur HTTP partout.
+
+### Clair (HTTP/1.1)
+
+| Test | **myproxy** | 3proxy | Squid | gost | Tinyproxy |
+|---|---|---|---|---|---|
+| 1 KB ×64 | **14 291** · 49 µs | 1 555¹ · 75 µs | 9 113 · 120 µs | 1 913 · 570 µs | 2 806 · 347 µs |
+| 10 KB ×16 | **13 532** · 62 µs | 12 475 · 80 µs | 7 308 · 149 µs | 1 847 · 580 µs | 2 394 · 411 µs |
+| 1 MB ×16 | **2 642** · 334 µs | 2 146 · 395 µs | 309 · 3 574 µs | 695 · 1 563 µs | 129 · 8 566 µs |
+| 10 MB ×8 | **375** · 2,3 ms | 281 · 2,7 ms | 32 · 35 ms | 104 · 10,6 ms | 14 · 81 ms |
+| 1 KB short | **4 805** · 88 µs | 3 407 · 260 µs | 3 794 · 235 µs | 1 880 · 573 µs | 2 409 · 366 µs |
+| flood | **19,2 Gbps** | 18,0 | 12,8 | 11,7 | 1,2 |
+| hold-10k (pic RAM) | 10 000 · **52 MB** | 10 000 · 231 MB | 10 000 · 450 MB | 10 000 · 1 352 MB | 10 000 · 189 MB |
+| hold-25k | **25 000** · 119 MB | 17 146 · 371 MB | 25 000 · 882 MB | 14 618² | 16 746 · 314 MB |
+
+### TLS (proxy HTTPS, HTTP/1.1)
+
+| Test | **myproxy** | Squid | gost |
+|---|---|---|---|
+| 1 KB ×64 | **14 122** · 57 µs | 7 790 · 140 µs | 1 614 · 656 µs |
+| 10 KB ×16 | **13 375** · 62 µs | 6 089 · 180 µs | 1 539 · 685 µs |
+| 1 MB ×16 | **1 285** · 819 µs | 177 · 6 218 µs | 464 · 2 327 µs |
+| 10 MB ×8 | **105** · 10,3 ms | 18 · 61 ms | 60 · 18,2 ms |
+| 1 KB short (handshake/req) | **2 726** · 269 µs | 1 605 · 677 µs | 1 599 · 669 µs |
+| flood | **9,2 Gbps** | 4,9 | 6,7 |
+| hold-10k (pic RAM) | 10 000 · **332 MB** | 10 000 · 803 MB | 10 000 · 1 736 MB |
+| hold-25k | **25 000** · 659 MB | 25 000 · 1 774 MB | 21 924² |
+
+### HTTP/2 (TLS, ALPN h2 ; 1 connexion h2 par « conn » du générateur)
+
+| Test | **myproxy** | gost |
+|---|---|---|
+| 1 KB ×64 | **12 975** · 70 µs | 3 934 · 280 µs |
+| 10 KB ×16 | **11 958** · 83 µs | 3 676 · 298 µs |
+| 1 MB ×16 | **726** · 1,4 ms | 323 · 3,4 ms |
+| 10 MB ×8 | **69** · 15 ms | 35 · 31 ms |
+| 1 KB short | **2 240** · 349 µs | 1 469 · 680 µs |
+| flood (CONNECT sur stream) | 6,6 Gbps · 1 078 ms/GB | **7,7 Gbps** · 1 106 ms/GB |
+| hold-10k (pic RAM) | 10 000 · **622 MB** | 10 000 · 1 990 MB |
+| hold-25k | 21 351³ · 882 MB | 743² |
+
+¹ delayed-ACK 40 ms de 3proxy (caveat historique). ² conteneur mort pendant le test (plus de CPU
+mesurable, pic 0) : RAM de la box (4 GB) dépassée — gost ≈ 135-175 KB/tunnel. ³ limité par le
+**générateur** (une connexion TLS+h2 par tunnel : 39 s CPU sur son core, 868 MB, 145 s d'ouverture ;
+myproxy 21 s CPU) — non concluant sur cette box.
+
+**Lecture** : myproxy est premier sur toutes les lignes en clair et en TLS, avec le CPU/req le plus bas
+et la RAM la plus basse. En TLS, les petites requêtes keep-alive ne coûtent presque rien (1 KB +15 %
+CPU/req, 10 KB ≈ 0) ; le bulk paie le chiffrement et la perte du splice (1 MB ×2,5, 10 MB ×4,4
+CPU/req, flood ×5,6 CPU/GB) — cible du kTLS (M13.3). En h2 : devant gost partout sauf le flood
+(-14 % de débit, CPU/GB équivalent) ; le chemin h2 est plus lent que TLS+HTTP/1.1 sur le bulk
+(1 MB 726 vs 1 285) : framing h2 + copie `Bytes` par chunk — piste d'optimisation.
+
+**Caveats** : box 2 cores, loopback, un seed ; multi-core non mesuré ici (VPS : `run-scaling.sh`).
+Tunnels TLS : ~26 KB/tunnel chez myproxy (buffers rustls) contre ~5 KB en clair.
