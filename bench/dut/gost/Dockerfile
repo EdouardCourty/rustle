@@ -9,7 +9,9 @@ RUN apk add --no-cache openssl && openssl req -x509 -newkey ec \
 
 FROM gogost/gost:3.2.6
 COPY --from=cert /cert.pem /key.pem /etc/gost/
-ENV AUTH=on
+# Access logs off, like the other DUTs (gost logs every connection at
+# info: per-connection I/O the others do not pay).
+ENV AUTH=on GOST_LOGGER_LEVEL=error
 # bench-ports: tls=8443 h2=8444 (dedicated http2 listener)
 EXPOSE 8080 8443 8444
 ENTRYPOINT ["sh", "-c", "if [ \"${AUTH:-on}\" = on ]; then exec gost -L http://bench:secret1@:8080 -L \"https://bench:secret1@:8443?certFile=/etc/gost/cert.pem&keyFile=/etc/gost/key.pem\" -L \"http2://bench:secret1@:8444?certFile=/etc/gost/cert.pem&keyFile=/etc/gost/key.pem\"; else exec gost -L http://:8080 -L \"https://:8443?certFile=/etc/gost/cert.pem&keyFile=/etc/gost/key.pem\" -L \"http2://:8444?certFile=/etc/gost/cert.pem&keyFile=/etc/gost/key.pem\"; fi"]
