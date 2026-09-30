@@ -29,7 +29,7 @@ myproxy/              le proxy
     relay/splice.rs   pipe2 + splice, PipePair 1 MB, AsyncFd, dir() (fill-then-drain)
     relay/chunked.rs  relais chunked transparent (framing verbatim)
     auth.rs           Basic auth, mot de passe ∈ api_keys (ct_eq sur toutes les clés, sans court-circuit), base64 sur pile
-    policy.rs         DestPolicy (ports autorisés avant DNS, plages non publiques + deny CIDR sur l'adresse résolue) ; AuthLimiter (bans par IP après N mauvaises clés, sans verrou tant que personne n'échoue)
+    policy.rs         DestPolicy (ports autorisés avant DNS, plages non publiques + deny CIDR sur l'adresse résolue) ; ClientPolicy (allowlist d'IP clientes, à l'accept) ; AuthLimiter (bans par IP après N mauvaises clés, sans verrou tant que personne n'échoue)
     dns.rs            cache positif, TTL, Mutex<HashMap>
     upstream.rs       pool keep-alive par origine (LIFO)
 bench/
@@ -48,7 +48,7 @@ bench/
 
 - **Threading** : shared-nothing. `workers` = N shards (0 = un par CPU) : chacun un thread OS, un runtime `current_thread`, un listener `SO_REUSEPORT` sur le même port (le noyau répartit), son pool amont. Une connexion reste sur son shard. Partagé : `Config`, `Authenticator`, `DnsCache` (Mutex, froid), compteurs atomiques (`active` = max_connections global, `peak`, `accepted` par shard loggé au shutdown). `pin_cores` optionnel. Shard 0 : admin + `malloc_trim` après rafales. NODELAY + buffers 1 MB posés sur le listener (hérités). Le main attend le signal puis `shutdown_and_join`.
 - **Transports client** : port clair (HTTP/1.1, splice) et port TLS optionnel (`[tls]`) : HTTP/1.1 via le même pipeline générique (`ClientStream`, monomorphisé : le chemin clair est compilé à l'identique) ou HTTP/2 si l'ALPN négocie `h2`. En TLS : pas de splice (le socket porte des records), `flush()` à chaque fin d'écriture (rustls peut garder du chiffré en buffer), `close_notify` en fin de connexion. Côté upstream : toujours TCP clair HTTP/1.1.
-- **Policy** : `connect_upstream` refuse (403 / SOCKS REP 0x02) un port hors allowlist puis toute adresse résolue non publique ou dans `deny` (protège du DNS rebinding) ; appliqué à CONNECT, HTTP, h2 et SOCKS5. Une IP bannie (mauvaises clés) est fermée à l'accept. Une connexion = un `Arc<Services>` (config, auth, DNS, policy, limiter, pool du shard).
+- **Policy** : `connect_upstream` refuse (403 / SOCKS REP 0x02) un port hors allowlist puis toute adresse résolue non publique ou dans `deny` (protège du DNS rebinding) ; appliqué à CONNECT, HTTP, h2 et SOCKS5. Une IP hors `allow_clients` ou bannie (mauvaises clés) est fermée à l'accept, avant toute lecture. Une connexion = un `Arc<Services>` (config, auth, DNS, policy, limiter, pool du shard).
 - **CONNECT** : clé `host:port` → DNS → connect → `200` → early bytes → `relay::bidirectional` (2 PipePair splice, half-close via `shutdown(SHUT_WR)`).
 - **HTTP** : clé d'origine → `pool.take` ou connect → `forward_request` (réécriture du head dans `rewrite_buf`, `write_all` 1 syscall si sans body, `write_vectored` head+prefix sinon) → `read_response_head` (httparse, 64 headers) → body selon framing (CL borné / chunked / EOF) → remise au pool si complet + keep-alive.
 - **Retry** sur socket poolée périmée : GET/HEAD avec body entièrement bufferisé uniquement.
@@ -71,6 +71,7 @@ bench/
 | `http.max_request_body_bytes` / `max_response_body_bytes` | 0 = illimité |
 | `tls.listen` / `cert` / `key` | `""` (off) / PEM |
 | `tls.handshake_timeout` / `http2` | 10s / true (ALPN h2) |
+| `auth.allow_clients` | [] (vide = tous ; CIDR, fermé à l'accept sur tous les listeners) |
 | `auth.max_failures` / `failure_window` / `ban_duration` | 5 / 1m / 15m (0 = off ; sans credentials ne compte pas) |
 | `timeouts.request_head` | 10s (total head / handshake SOCKS5, anti-slowloris) |
 | `filter.block_private` / `deny` / `allowed_ports` | **true** / [] / [] (vide = tous) — les configs de bench mettent false (réseau Docker privé) |

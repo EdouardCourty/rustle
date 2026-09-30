@@ -134,6 +134,9 @@ impl Default for ServerConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct AuthConfig {
     pub api_keys: Vec<String>,
+    /// Client IPs/networks allowed to connect (CIDR; empty = everyone).
+    /// Others are closed at accept, on every listener.
+    pub allow_clients: Vec<String>,
     /// Wrong keys tolerated per client IP within `failure_window` before a
     /// ban (0 disables). Requests without credentials do not count.
     pub max_failures: u32,
@@ -147,6 +150,7 @@ impl Default for AuthConfig {
     fn default() -> Self {
         Self {
             api_keys: Vec::new(),
+            allow_clients: Vec::new(),
             max_failures: 5,
             failure_window: Duration::from_secs(60),
             ban_duration: Duration::from_secs(900),
