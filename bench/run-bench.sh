@@ -24,6 +24,25 @@ REPEAT="${REPEAT:-3}"
 # runtime threads (size to BENCH_CPU or the generator saturates first).
 export WORKERS="${WORKERS:-1}"
 GEN_THREADS="${GEN_THREADS:-2}"
+# PROXY_TLS=1: HTTPS proxy benchmark (client -> proxy over TLS).
+# PROXY_H2=1: HTTP/2 over TLS (ALPN h2). Ports come from the DUT's
+# "# bench-ports: tls=<p> h2=<p>" line; a DUT without one lacks the mode.
+PROXY_TLS="${PROXY_TLS:-0}"
+PROXY_H2="${PROXY_H2:-0}"
+GEN_ARGS=(--threads "$GEN_THREADS")
+LABEL="$PROXY"
+_port() { sed -n "s/^# bench-ports:.*$1=\([0-9]*\).*/\1/p" "dut/$PROXY/Dockerfile"; }
+if [[ "$PROXY_H2" == 1 ]]; then
+    p=$(_port h2)
+    [[ -n "$p" ]] || { echo "$PROXY has no HTTP/2 proxy listener (PROXY_H2=1)" >&2; exit 2; }
+    GEN_ARGS+=(--proxy "proxy:$p" --proxy-h2)
+    LABEL="$PROXY-h2"
+elif [[ "$PROXY_TLS" == 1 ]]; then
+    p=$(_port tls)
+    [[ -n "$p" ]] || { echo "$PROXY has no HTTPS proxy listener (PROXY_TLS=1)" >&2; exit 2; }
+    GEN_ARGS+=(--proxy "proxy:$p" --proxy-tls)
+    LABEL="$PROXY-tls"
+fi
 HOLD_MAX_SINGLE=30000   # above this, split across 2 client replicas (ephemeral ports)
 
 export PROXY_IMAGE="${PROXY}:bench"
@@ -43,18 +62,18 @@ docker compose up -d upstream sink proxy >/dev/null
 trap 'docker compose down >/dev/null 2>&1' EXIT
 sleep 1
 
-out="results/${PROXY}/auth-${AUTH}/$(date +%Y%m%d-%H%M%S)"
+out="results/${LABEL}/auth-${AUTH}/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$out"
 : > "$out/results.txt"
-echo "# $PROXY auth=$AUTH repeat=$REPEAT workers=$WORKERS proxy_cpu=$PROXY_CPU bench_cpu=$BENCH_CPU gen_threads=$GEN_THREADS $(date)" | tee -a "$out/results.txt"
+echo "# $PROXY auth=$AUTH tls=$PROXY_TLS h2=$PROXY_H2 repeat=$REPEAT workers=$WORKERS proxy_cpu=$PROXY_CPU bench_cpu=$BENCH_CPU gen_threads=$GEN_THREADS $(date)" | tee -a "$out/results.txt"
 
 # CPU ticks and RSS (MB) of the proxy under test.
 # Whole container (cgroup v2), not PID 1: multi-process DUTs (Squid SMP
 # workers) would otherwise hide their workers' CPU. Unit: 1/100 s.
-cpu_ticks() { docker compose exec -T proxy cat /sys/fs/cgroup/cpu.stat | awk '/^usage_usec/{printf "%d", $2/10000}'; }
+cpu_ticks() { docker compose exec -T proxy cat /sys/fs/cgroup/cpu.stat | awk '/^usage_usec/{printf "%d", $2/10000}' || echo 0; }
 # Sum over the container's processes (same reason), minus the sh/cat of
 # this probe itself.
-_sum_status() { docker compose exec -T proxy sh -c "cat /proc/[0-9]*/status 2>/dev/null" | awk -v k="$1:" '$1=="Name:"{n=$2} $1==k && n!="sh" && n!="cat"{s+=$2} END{printf "%.1f", s/1024}'; }
+_sum_status() { docker compose exec -T proxy sh -c "cat /proc/[0-9]*/status 2>/dev/null" | awk -v k="$1:" '$1=="Name:"{n=$2} $1==k && n!="sh" && n!="cat"{s+=$2} END{printf "%.1f", s/1024}' || echo 0; }
 rss_mb() { _sum_status VmRSS; }
 # Peak RSS of the test (VmHWM; the proxy restarts before each test). rss_mb
 # is sampled after the load ended = memory still held, not the live cost.
@@ -76,7 +95,8 @@ run_test() {
     tick0=$(cpu_ticks)
     up0=$(up_ticks)
     docker compose --profile generator run --rm -T generator \
-        --repeat "$REPEAT" --threads "$GEN_THREADS" "$@" | tee /dev/stderr | grep '^RESULT median' > "$out/.median.txt"
+        --repeat "$REPEAT" "${GEN_ARGS[@]}" "$@" | tee /dev/stderr | grep '^RESULT median' > "$out/.median.txt" \
+        || true  # no RESULT (generator/proxy died): reported below, the matrix goes on
     tick1=$(cpu_ticks)
     up1=$(up_ticks)
     median=$(cat "$out/.median.txt")
@@ -108,7 +128,7 @@ run_hold() {
     tick0=$(cpu_ticks)
     for i in 1 2; do
         docker compose --profile generator run -d --name "holdrep-$i" \
-            generator --repeat 1 --no-warmup --threads "$GEN_THREADS" hold sink:9000 \
+            generator --repeat 1 --no-warmup "${GEN_ARGS[@]}" hold sink:9000 \
             --conns "$half" --duration "$duration" --ramp 4096 >/dev/null
     done
     for i in 1 2; do docker wait "holdrep-$i" >/dev/null; done
@@ -136,9 +156,9 @@ run_hold() {
 # DNS/kernel, fenêtres TCP autotunées — sans ça, les 1ers tests de la
 # matrice absorbent la chauffe et la variance entre passes est ±30 %.
 echo "### warmup-network"
-docker compose --profile generator run --rm -T generator --repeat 1 --no-warmup \
+docker compose --profile generator run --rm -T generator --repeat 1 --no-warmup "${GEN_ARGS[@]}" \
     http http://upstream:8000/1mb --conns 16 --requests 200 >/dev/null 2>&1 || true
-docker compose --profile generator run --rm -T generator --repeat 1 --no-warmup \
+docker compose --profile generator run --rm -T generator --repeat 1 --no-warmup "${GEN_ARGS[@]}" \
     flood sink:9000 --conns 8 --duration 3 >/dev/null 2>&1 || true
 
 # --- Workloads, ordre randomisé à seed fixe (reproductible d'une passe à

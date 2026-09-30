@@ -59,6 +59,12 @@ struct Cli {
     /// or it saturates before a multi-core proxy does).
     #[arg(long, default_value_t = 2)]
     threads: usize,
+    /// Talk TLS to the proxy (HTTPS proxy listener).
+    #[arg(long)]
+    proxy_tls: bool,
+    /// HTTP/2 to the proxy (implies --proxy-tls; ALPN h2).
+    #[arg(long)]
+    proxy_h2: bool,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -137,6 +143,9 @@ fn main() -> anyhow::Result<()> {
 }
 
 async fn amain(cli: Cli) {
+    if cli.proxy_tls || cli.proxy_h2 {
+        connect::enable_proxy_tls(cli.proxy_h2);
+    }
     // Own RSS (MB): the hold/flood generators spawn tens of thousands of
     // tasks; knowing the harness footprint matters on small boxes (the
     // 4 GB dev instance once OOM'd mid-matrix). Read at start …

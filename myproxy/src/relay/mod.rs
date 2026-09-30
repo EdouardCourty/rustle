@@ -14,12 +14,15 @@ mod adaptive;
 mod chunked;
 mod splice;
 
-pub(crate) use adaptive::copy_limited;
+pub(crate) use adaptive::{copy_limited, write_flush};
+pub(crate) use chunked::chunk_size;
 pub use chunked::chunked;
 pub use splice::PipePair;
 
 use std::time::Duration;
 use tokio::time::Instant;
+
+use crate::stream::ClientStream;
 
 /// Inactivity deadline (B1): reset on every successful transfer step and
 /// checked at every park. Replaces the external absolute `timeout(idle,
@@ -79,11 +82,18 @@ pub(crate) const RELAY_BUF_MAX: usize = 64 * 1024;
 /// Semantics match `copy_bidirectional`: both directions run to EOF; the
 /// returned byte counts are cumulative per direction; EOF half-closes the
 /// opposite write side.
-pub async fn bidirectional(
-    client: tokio::net::TcpStream,
+///
+/// A TLS client cannot be spliced (the socket carries records): it is
+/// relayed through user-space copies.
+pub async fn bidirectional<C: ClientStream>(
+    client: C,
     up: tokio::net::TcpStream,
     idle: Duration,
 ) -> std::io::Result<(u64, u64)> {
+    let client = match client.into_tcp() {
+        Ok(tcp) => tcp,
+        Err(tls) => return Ok(adaptive::bidirectional_io(tls, up, idle).await),
+    };
     #[cfg(target_os = "linux")]
     {
         match splice::bidirectional(client, up, idle).await {
@@ -104,9 +114,9 @@ pub async fn bidirectional(
 /// `pipes` is the connection-owned reusable pipe pair: `None` until the
 /// first bulk response; on zero-copy failure mid-relay the pair is
 /// dropped (state unknown → fresh pair next time).
-pub async fn response(
+pub async fn response<C: ClientStream>(
     up: &mut tokio::net::TcpStream,
-    client: &mut tokio::net::TcpStream,
+    client: &mut C,
     remaining: Option<u64>,
     pipes: &mut Option<PipePair>,
     idle: Duration,

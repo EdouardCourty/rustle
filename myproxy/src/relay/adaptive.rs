@@ -12,6 +12,17 @@ use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 
 use super::{IdleTimer, RELAY_BUF0, RELAY_BUF_MAX};
+use crate::stream::ClientStream;
+
+/// `write_all` + `flush`: TLS may keep ciphertext buffered after
+/// `write_all` (see `stream`); the flush is a no-op on TCP.
+pub(crate) async fn write_flush<W>(w: &mut W, buf: &[u8]) -> std::io::Result<()>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    w.write_all(buf).await?;
+    w.flush().await
+}
 
 /// One direction of the plain tunnel fallback. Returns the transferred
 /// byte count.
@@ -36,12 +47,32 @@ pub(super) async fn bidirectional(
     Ok((a2b, b2a))
 }
 
+/// Tunnel relay for a client that is not a plain socket (TLS): the client
+/// is split through a lock (`tokio::io::split`), the upstream natively.
+pub(super) async fn bidirectional_io<C>(
+    client: C,
+    up: TcpStream,
+    idle: std::time::Duration,
+) -> (u64, u64)
+where
+    C: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let (mut ra, mut wa) = tokio::io::split(client);
+    let (mut rb, mut wb) = up.into_split();
+    let mut ta = IdleTimer::new(idle);
+    let mut tb = IdleTimer::new(idle);
+    tokio::join!(
+        copy_loop(&mut ra, &mut wb, true, &mut ta),
+        copy_loop(&mut rb, &mut wa, true, &mut tb)
+    )
+}
+
 /// HTTP response relay: upstream -> client, adaptive with spill-to-splice
 /// on sustained bulk (`limit` bounds the relayed body). `pipes` is the
 /// connection-owned reusable pair (`None` = create on first bulk).
-pub(super) async fn response(
+pub(super) async fn response<C: ClientStream>(
     up: &mut TcpStream,
-    client: &mut TcpStream,
+    client: &mut C,
     remaining: Option<u64>,
     pipes: &mut Option<super::PipePair>,
     idle: std::time::Duration,
@@ -73,8 +104,9 @@ pub(super) async fn response(
             // error against a declared Content-Length (truncated body).
             return total;
         }
-        if client.write_all(&buf[..n]).await.is_err() {
-            return total;
+        match timer.park(write_flush(client, &buf[..n])).await {
+            Some(Ok(_)) => {}
+            _ => return total,
         }
         total += n as u64;
         timer.reset();
@@ -82,6 +114,10 @@ pub(super) async fn response(
             if buf.capacity() < RELAY_BUF_MAX {
                 buf.reserve(buf.capacity()); // double
             } else if remaining.is_none() || remaining.unwrap() > total {
+                // Zero-copy needs the client socket itself (plain TCP).
+                let Some(client) = client.tcp() else {
+                    continue;
+                };
                 // Sustained bulk flow: hand the rest to the zero-copy relay
                 // with the connection's reusable pipe pair.
                 let limit = remaining.map(|l| l - total);
@@ -110,14 +146,15 @@ pub(super) async fn response(
 
 /// Copy-only body relay (used inside chunked framing, where the underlying
 /// source is a bounded `Take` wrapper that cannot feed the splice path).
-pub async fn copy_limited<R>(
+pub async fn copy_limited<R, W>(
     up: &mut R,
-    client: &mut TcpStream,
+    client: &mut W,
     remaining: Option<u64>,
     idle: std::time::Duration,
 ) -> u64
 where
     R: tokio::io::AsyncRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
 {
     let mut buf: Vec<u8> = Vec::with_capacity(RELAY_BUF0);
     let mut timer = IdleTimer::new(idle);
@@ -139,8 +176,7 @@ where
         if n == 0 {
             return total;
         }
-        let write = client.write_all(&buf[..n]);
-        match timer.park(write).await {
+        match timer.park(write_flush(client, &buf[..n])).await {
             Some(Ok(_)) => {}
             _ => return total,
         }
@@ -164,7 +200,11 @@ where
         buf.clear(); // logical len 0, keep the reserved capacity
         let n = match timer.park(r.read_buf(&mut buf)).await {
             Some(Ok(n)) => n,
-            _ => return written, // I/O error / inactivity: stop
+            // A read error ends this direction like EOF does: a TLS client
+            // closing TCP without close_notify (common) surfaces as
+            // UnexpectedEof, and must not leave the far end open.
+            Some(Err(_)) => 0,
+            None => return written, // inactivity: stop
         };
         if n == 0 {
             if shutdown_on_eof {
@@ -174,7 +214,7 @@ where
             }
             return written;
         }
-        match timer.park(w.write_all(&buf[..n])).await {
+        match timer.park(write_flush(w, &buf[..n])).await {
             Some(Ok(_)) => {}
             _ => return written,
         }

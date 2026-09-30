@@ -14,6 +14,7 @@ use crate::dns::DnsCache;
 use crate::http::{read_response_head, HeadError, RequestHead, RespError, Span, Target};
 use crate::relay;
 use crate::relay::PipePair;
+use crate::stream::ClientStream;
 use crate::upstream::UpstreamPool;
 
 use super::{RESP_502, RESP_504};
@@ -34,8 +35,8 @@ pub(crate) const RESP_413: &[u8] =
 /// (client asked to close, broken state); `true` keeps the keep-alive loop
 /// alive. All error paths already wrote the error response to the client.
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn http(
-    client: &mut TcpStream,
+pub(super) async fn http<C: ClientStream>(
+    client: &mut C,
     cfg: &Config,
     buf: &mut [u8],
     head: &RequestHead,
@@ -77,12 +78,12 @@ pub(super) async fn http(
             None => match connect_upstream(host_str, port, connect, dns, key).await {
                 Ok(s) => (s, false),
                 Err(UpstreamError::Timeout) => {
-                    let _ = client.write_all(RESP_504).await;
+                    super::reply(client, RESP_504).await;
                     return false;
                 }
                 Err(UpstreamError::Other(e)) => {
                     tracing::debug!(error = %e, "upstream connect failed");
-                    let _ = client.write_all(RESP_502).await;
+                    super::reply(client, RESP_502).await;
                     return false;
                 }
             },
@@ -113,7 +114,7 @@ pub(super) async fn http(
             // Body over budget: answer 413 and drop (the client may still
             // be uploading — the close aborts it, like nginx does).
             if ctx.body_rejected {
-                let _ = client.write_all(RESP_413).await;
+                super::reply(client, RESP_413).await;
             }
             return false;
         }
@@ -151,7 +152,10 @@ pub(super) async fn http(
         if hops > 3 {
             return false;
         }
-        if client.write_all(&resp_buf[..rhead.raw_len]).await.is_err() {
+        if relay::write_flush(client, &resp_buf[..rhead.raw_len])
+            .await
+            .is_err()
+        {
             return false;
         }
         let mut next: Vec<u8> = resp_buf[rhead.raw_len..].to_vec(); // residual = next head prefix
@@ -203,12 +207,16 @@ pub(super) async fn http(
             .map(|l| l > cfg.http.max_response_body_bytes)
             .unwrap_or(false);
     if over_declared {
-        let _ = client.write_all(RESP_502).await;
+        super::reply(client, RESP_502).await;
         return false;
     }
 
     let window_end = (rhead.raw_len + forward_n).min(resp_buf.len());
-    if window_end > 0 && client.write_all(&resp_buf[..window_end]).await.is_err() {
+    if window_end > 0
+        && relay::write_flush(client, &resp_buf[..window_end])
+            .await
+            .is_err()
+    {
         return false;
     }
     let remaining: Option<u64> = body_left.map(|l| l - forward_n as u64);
@@ -283,8 +291,8 @@ struct UpWriteCtx<'a> {
     rewrite_buf: &'a mut Vec<u8>,
 }
 
-async fn forward_request(
-    client: &mut TcpStream,
+async fn forward_request<C: ClientStream>(
+    client: &mut C,
     up: &mut TcpStream,
     buf: &[u8],
     head: &RequestHead,

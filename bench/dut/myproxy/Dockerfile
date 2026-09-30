@@ -1,3 +1,10 @@
+# Bench TLS certificate: same type for every DUT (ECDSA P-256,
+# self-signed) so handshake costs compare. The generator does not verify it.
+FROM alpine:3.20 AS cert
+RUN apk add --no-cache openssl && openssl req -x509 -newkey ec \
+    -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 -subj /CN=proxy \
+    -keyout /key.pem -out /cert.pem && chmod 644 /key.pem
+
 FROM rust:1-slim AS build
 WORKDIR /build
 # ALLOCATOR build arg: "" (glibc default) | --features jemalloc | --features mimalloc
@@ -26,9 +33,11 @@ RUN find myproxy/src bench/generator/src -type f -exec touch {} + && \
 
 FROM debian:bookworm-slim
 COPY --from=build /build/target/release/myproxy /usr/local/bin/myproxy
+COPY --from=cert /cert.pem /key.pem /etc/myproxy/
 COPY bench/dut/myproxy/myproxy-on.toml /etc/myproxy/on.toml
 COPY bench/dut/myproxy/myproxy-off.toml /etc/myproxy/off.toml
 ENV AUTH=on WORKERS=1
-EXPOSE 8080
+# bench-ports: tls=8443 h2=8443 (HTTP/2 via ALPN on the HTTPS listener)
+EXPOSE 8080 8443
 # WORKERS (harness, multi-core runs): shard count patched into the config.
 ENTRYPOINT ["sh", "-c", "sed \"s/^workers = .*/workers = ${WORKERS:-1}/\" /etc/myproxy/${AUTH:-on}.toml > /tmp/myproxy.toml && exec myproxy /tmp/myproxy.toml"]

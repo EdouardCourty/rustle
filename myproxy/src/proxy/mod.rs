@@ -1,10 +1,15 @@
 //! Proxy connection state machine: one task per client. Reads request
 //! heads, checks auth, routes CONNECT (tunnel via [`relay`]) or plain
-//! HTTP (via the [`pipeline`]) and loops for keep-alive.
+//! HTTP (via the [`pipeline`]) and loops for keep-alive. Generic over the
+//! client transport ([`ClientStream`]: plain TCP or TLS).
 
+mod h2;
 mod pipeline;
 
+pub use h2::handle_h2;
+
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
@@ -15,6 +20,7 @@ use crate::config::Config;
 use crate::dns::DnsCache;
 use crate::http::{classify, read_head, HeadError, Target};
 use crate::relay;
+use crate::stream::ClientStream;
 use crate::upstream::UpstreamPool;
 
 use pipeline::UpstreamError;
@@ -29,13 +35,47 @@ const RESP_504: &[u8] =
     b"HTTP/1.1 504 Gateway Timeout\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 const RESP_200_CONNECT: &[u8] = b"HTTP/1.1 200 Connection Established\r\n\r\n";
 
-pub async fn handle_conn(
-    mut client: TcpStream,
+/// Final reply before the connection is dropped (error responses).
+async fn reply<C: ClientStream>(client: &mut C, resp: &[u8]) {
+    let _ = relay::write_flush(client, resp).await;
+}
+
+pub async fn handle_conn<C: ClientStream>(
+    mut client: C,
     cfg: Arc<Config>,
     auth: Arc<Authenticator>,
     dns: Arc<DnsCache>,
     pool: Arc<UpstreamPool>,
 ) {
+    let idle = cfg.timeouts.idle;
+    match serve(&mut client, &cfg, &auth, &dns, &pool).await {
+        // Tunnel: relay both directions until one side closes.
+        // Inactivity-bounded internally (no absolute cap).
+        Some(up) => match relay::bidirectional(client, up, idle).await {
+            Ok((c2u, u2c)) => {
+                tracing::trace!(c2u, u2c, "tunnel closed");
+            }
+            Err(e) => tracing::trace!(error = %e, "tunnel error"),
+        },
+        None => {
+            if C::TLS {
+                // close_notify: a TLS peer must see a clean end of stream.
+                let _ = timeout(Duration::from_secs(1), client.shutdown()).await;
+            }
+        }
+    }
+}
+
+/// The keep-alive loop. Returns the upstream socket when the connection
+/// becomes a CONNECT tunnel (the 200 is already sent); `None` when it must
+/// be closed.
+async fn serve<C: ClientStream>(
+    client: &mut C,
+    cfg: &Config,
+    auth: &Authenticator,
+    dns: &DnsCache,
+    pool: &UpstreamPool,
+) -> Option<TcpStream> {
     let idle = cfg.timeouts.idle;
     let connect = cfg.timeouts.connect;
     let max_head = cfg.limits.max_header_bytes;
@@ -57,36 +97,38 @@ pub async fn handle_conn(
     // B: TCP_QUICKACK once per connection — the kernel re-arms it per
     // segment; per-request setsockopts were pure syscall overhead in the
     // keep-alive hot path.
-    client.set_quickack(true).ok();
+    if let Some(tcp) = client.tcp() {
+        tcp.set_quickack(true).ok();
+    }
     loop {
-        let head = match read_head(&mut client, &mut buf, max_head, idle).await {
+        let head = match read_head(client, &mut buf, max_head, idle).await {
             Ok(Some(h)) => h,
-            Ok(None) => return,
+            Ok(None) => return None,
             Err(HeadError::Io(e)) => {
                 tracing::trace!(error = %e, "client read error");
-                return;
+                return None;
             }
             Err(HeadError::TooLarge) => {
-                let _ = client.write_all(RESP_431).await;
-                return;
+                reply(client, RESP_431).await;
+                return None;
             }
             Err(HeadError::Invalid) => {
-                let _ = client.write_all(RESP_400).await;
-                return;
+                reply(client, RESP_400).await;
+                return None;
             }
         };
 
-        // Auth is a span into `buf` — sliced per check, zero alloc.
+        // Proxy-Authorization checked on every request (keep-alive safe).
         if !auth.check(head.auth.map(|s| s.slice(&buf))) {
-            let _ = client.write_all(RESP_407).await;
-            return;
+            reply(client, RESP_407).await;
+            return None;
         }
 
         let target = match classify(&head, &buf) {
             Ok(t) => t,
             Err(_) => {
-                let _ = client.write_all(RESP_400).await;
-                return;
+                reply(client, RESP_400).await;
+                return None;
             }
         };
 
@@ -106,45 +148,45 @@ pub async fn handle_conn(
                 // Free the head-read buffer: the tunnel relay has its own
                 // buffers, and holding this one would inflate RAM/connection.
                 drop(std::mem::take(&mut buf));
-                match pipeline::connect_upstream(&host_owned, port, connect, &dns, &origin_key)
-                    .await
+                return match pipeline::connect_upstream(
+                    &host_owned,
+                    port,
+                    connect,
+                    dns,
+                    &origin_key,
+                )
+                .await
                 {
                     Ok(mut up) => {
                         let _ = up.set_nodelay(true);
-                        if client.write_all(RESP_200_CONNECT).await.is_err() {
-                            return;
+                        if relay::write_flush(client, RESP_200_CONNECT).await.is_err() {
+                            return None;
                         }
                         if !early.is_empty() {
                             let _ = timeout(idle, up.write_all(&early)).await;
                         }
-                        // Tunnel: relay both directions until one side closes.
-                        // Inactivity-bounded internally (no absolute cap).
-                        match relay::bidirectional(client, up, idle).await {
-                            Ok((c2u, u2c)) => {
-                                tracing::trace!(c2u, u2c, "tunnel closed");
-                            }
-                            Err(e) => tracing::trace!(error = %e, "tunnel error"),
-                        }
+                        Some(up)
                     }
                     Err(UpstreamError::Timeout) => {
-                        let _ = client.write_all(RESP_504).await;
+                        reply(client, RESP_504).await;
+                        None
                     }
                     Err(UpstreamError::Other(e)) => {
                         tracing::debug!(error = %e, "upstream connect failed");
-                        let _ = client.write_all(RESP_502).await;
+                        reply(client, RESP_502).await;
+                        None
                     }
-                }
-                return;
+                };
             }
             Target::Http { .. } => {
                 let keep_going = pipeline::http(
-                    &mut client,
-                    &cfg,
+                    client,
+                    cfg,
                     &mut buf,
                     &head,
                     &target,
-                    &dns,
-                    &pool,
+                    dns,
+                    pool,
                     &mut resp_pipes,
                     &mut resp_buf,
                     &mut rewrite_buf,
@@ -152,7 +194,7 @@ pub async fn handle_conn(
                 )
                 .await;
                 if !keep_going {
-                    return;
+                    return None;
                 }
             }
         }
