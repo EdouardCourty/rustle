@@ -44,7 +44,7 @@ smoke: ## test rapide via la stack (http 1kb)
 	docker compose --profile generator run --rm -T generator \
 		--repeat 1 --no-warmup http http://upstream:8000/1kb --conns 4 --requests 40
 
-bench: ## matrice complète : make bench [P=myproxy|3proxy] [A=on|off] [R=3]
+bench: ## matrice complète : make bench [P=myproxy|3proxy|squid|gost|tinyproxy] [A=on|off] [R=3]
 	cd bench && REPEAT=$(R) ./run-bench.sh $(P) $(A)
 
 latest: ## afficher la dernière passe de résultats du proxy courant
@@ -58,6 +58,9 @@ bench-all: ## les 4 matrices en séquence (myproxy/3proxy × on/off) — ~1 h
 	cd bench && ./run-bench.sh myproxy off
 	cd bench && ./run-bench.sh 3proxy on
 	cd bench && ./run-bench.sh 3proxy off
+
+bench-scaling: ## courbe multi-core (VPS) : PROXIES="..." NCPUS="1 2 4 8" make bench-scaling
+	cd bench && AUTH=$(A) ./run-scaling.sh
 
 clean: ## nettoyer les artefacts rust (rebuild long après)
 	cargo clean

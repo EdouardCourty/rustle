@@ -1,8 +1,8 @@
 name: proxybench
 
-# CPU pinning: PROXY_CPU gives the proxy under test its own core,
-# BENCH_CPU hosts generator/upstream/sink. Defaults 0/1; run-bench.sh
-# auto-detects from the cgroup cpuset (e.g. "0,2" or "1,3").
+# CPU pinning: PROXY_CPU gives the proxy under test its own core(s),
+# BENCH_CPU hosts generator/upstream/sink. Defaults 0/1; env.sh derives
+# them from the cgroup cpuset (PROXY_NCPU=<n> for multi-core runs).
 services:
   upstream:
     build: ./upstream
@@ -23,6 +23,7 @@ services:
     image: ${PROXY_IMAGE:-myproxy:bench}
     environment:
       AUTH: ${AUTH:-on}
+      WORKERS: ${WORKERS:-1}
     cpuset: "${PROXY_CPU:-0}"
     sysctls:
       - net.core.somaxconn=65535

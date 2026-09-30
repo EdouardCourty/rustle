@@ -28,6 +28,7 @@ FROM debian:bookworm-slim
 COPY --from=build /build/target/release/myproxy /usr/local/bin/myproxy
 COPY bench/dut/myproxy/myproxy-on.toml /etc/myproxy/on.toml
 COPY bench/dut/myproxy/myproxy-off.toml /etc/myproxy/off.toml
-ENV AUTH=on
+ENV AUTH=on WORKERS=1
 EXPOSE 8080
-ENTRYPOINT ["sh", "-c", "exec myproxy /etc/myproxy/${AUTH:-on}.toml"]
+# WORKERS (harness, multi-core runs): shard count patched into the config.
+ENTRYPOINT ["sh", "-c", "sed \"s/^workers = .*/workers = ${WORKERS:-1}/\" /etc/myproxy/${AUTH:-on}.toml > /tmp/myproxy.toml && exec myproxy /tmp/myproxy.toml"]

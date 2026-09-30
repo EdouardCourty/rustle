@@ -55,6 +55,10 @@ struct Cli {
     /// Disable the warmup run.
     #[arg(long)]
     no_warmup: bool,
+    /// Runtime worker threads (size to the cores given to the generator,
+    /// or it saturates before a multi-core proxy does).
+    #[arg(long, default_value_t = 2)]
+    threads: usize,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -122,19 +126,20 @@ enum Cmd {
 // measured) and OOM-pressure the 4 GB box. A hand-built runtime with
 // small stacks (like myproxy's) cuts that ~4x.
 fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
     let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
+        .worker_threads(cli.threads.max(1))
         .enable_all()
         .thread_stack_size(128 * 1024)
         .build()?;
-    rt.block_on(amain());
+    rt.block_on(amain(cli));
     Ok(())
 }
 
-async fn amain() {
-    let cli = Cli::parse(); // Own RSS (MB): the hold/flood generators spawn tens of thousands of
-                            // tasks; knowing the harness footprint matters on small boxes (the
-                            // 4 GB dev instance once OOM'd mid-matrix). Read at start …
+async fn amain(cli: Cli) {
+    // Own RSS (MB): the hold/flood generators spawn tens of thousands of
+    // tasks; knowing the harness footprint matters on small boxes (the
+    // 4 GB dev instance once OOM'd mid-matrix). Read at start …
     let own_rss_start = rss_pages();
     if let Cmd::Sink { listen } = &cli.cmd {
         modes::sink::run_sink(listen).await;
