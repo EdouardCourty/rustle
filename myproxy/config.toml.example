@@ -82,6 +82,7 @@ deny = []
 allowed_ports = []
 
 [socks5]
-# SOCKS5 listener (CONNECT only). Password = one of the api_keys, username
-# ignored; no auth when api_keys is empty. Empty disables it.
+# SOCKS5 listener: CONNECT and UDP ASSOCIATE (QUIC/HTTP3, DNS through
+# SOCKS). Password = one of the api_keys, username ignored; no auth when
+# api_keys is empty. Empty disables it.
 listen = ""

@@ -306,11 +306,9 @@ async fn send_all(send: &mut SendStream<Bytes>, mut data: Bytes, t: &mut IdleTim
 // ---- plain HTTP forward -------------------------------------------------
 
 /// HTTP/1.1 request head for the origin (origin-form, rebuilt headers).
-fn request_head(
-    req: &Request<RecvStream>,
-    authority: &str,
-    content_length: Option<u64>,
-) -> Vec<u8> {
+/// `body`: `None` = no body, `Some(Some(n))` = Content-Length n,
+/// `Some(None)` = chunked.
+fn request_head(req: &Request<RecvStream>, authority: &str, body: Option<Option<u64>>) -> Vec<u8> {
     let path = req
         .uri()
         .path_and_query()
@@ -336,8 +334,10 @@ fn request_head(
         h.extend_from_slice(value.as_bytes());
         h.extend_from_slice(b"\r\n");
     }
-    if let Some(cl) = content_length {
-        h.extend_from_slice(format!("Content-Length: {cl}\r\n").as_bytes());
+    match body {
+        Some(Some(cl)) => h.extend_from_slice(format!("Content-Length: {cl}\r\n").as_bytes()),
+        Some(None) => h.extend_from_slice(b"Transfer-Encoding: chunked\r\n"),
+        None => {}
     }
     h.extend_from_slice(b"Connection: keep-alive\r\n\r\n");
     h
@@ -373,16 +373,11 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
             }
         },
     };
+    // A body without Content-Length is streamed upstream as chunked.
     let has_body = !req.body().is_end_stream();
-    let body_len = match (has_body, declared) {
-        (false, _) => 0,
-        (true, Some(n)) => n,
-        (true, None) => {
-            reply(&mut respond, StatusCode::LENGTH_REQUIRED);
-            return;
-        }
-    };
-    if cfg.http.max_request_body_bytes > 0 && body_len > cfg.http.max_request_body_bytes {
+    let body_len = if has_body { declared } else { Some(0) };
+    let budget = cfg.http.max_request_body_bytes;
+    if budget > 0 && body_len.is_some_and(|n| n > budget) {
         reply(&mut respond, StatusCode::PAYLOAD_TOO_LARGE);
         return;
     }
@@ -417,7 +412,7 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
             reply(&mut respond, StatusCode::BAD_GATEWAY);
             return;
         }
-        if has_body && !upload(&mut body, &mut up, body_len, idle).await {
+        if has_body && !upload(&mut body, &mut up, body_len, budget, idle).await {
             respond.send_reset(Reason::CANCEL);
             return;
         }
@@ -502,24 +497,52 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
     }
 }
 
-/// Streams the h2 request body upstream (exactly `len` bytes).
-async fn upload(body: &mut RecvStream, up: &mut TcpStream, len: u64, idle: Duration) -> bool {
+/// Streams the h2 request body upstream: exactly `len` bytes, or chunked
+/// framing when the length is unknown (each DATA frame = one chunk).
+/// `budget` caps the body (0 = unlimited).
+async fn upload(
+    body: &mut RecvStream,
+    up: &mut TcpStream,
+    len: Option<u64>,
+    budget: u64,
+    idle: Duration,
+) -> bool {
     let mut t = IdleTimer::new(idle);
     let mut sent: u64 = 0;
     loop {
         match t.park(body.data()).await {
             Some(Some(Ok(chunk))) => {
                 sent += chunk.len() as u64;
-                if sent > len {
+                if len.is_some_and(|l| sent > l) || (budget > 0 && sent > budget) {
                     return false;
                 }
-                if !matches!(t.park(up.write_all(&chunk)).await, Some(Ok(()))) {
+                let n = chunk.len();
+                let ok = match len {
+                    Some(_) => matches!(t.park(up.write_all(&chunk)).await, Some(Ok(()))),
+                    None if n == 0 => true,
+                    None => {
+                        // Size line + data + CRLF: one small head alloc per
+                        // frame, then a single buffered write sequence.
+                        let size = format!("{n:x}\r\n");
+                        let mut framed = Vec::with_capacity(size.len() + n + 2);
+                        framed.extend_from_slice(size.as_bytes());
+                        framed.extend_from_slice(&chunk);
+                        framed.extend_from_slice(b"\r\n");
+                        matches!(t.park(up.write_all(&framed)).await, Some(Ok(())))
+                    }
+                };
+                if !ok {
                     return false;
                 }
-                let _ = body.flow_control().release_capacity(chunk.len());
+                let _ = body.flow_control().release_capacity(n);
                 t.reset();
             }
-            Some(None) => return sent == len,
+            Some(None) => {
+                return match len {
+                    Some(l) => sent == l,
+                    None => matches!(t.park(up.write_all(b"0\r\n\r\n")).await, Some(Ok(()))),
+                };
+            }
             _ => return false,
         }
     }

@@ -19,7 +19,8 @@ myproxy/              le proxy
     stream.rs         trait ClientStream (TcpStream | TlsStream) : tcp()/into_tcp() = chemins splice/QUICKACK, TLS = copie user-space
     tls.rs            rustls (ring) : cert/clé PEM, ALPN h2 + http/1.1
     proxy/mod.rs      handle_conn<C: ClientStream> : boucle keep-alive serve() (read_head → auth → classify → CONNECT | HTTP), tunnel monté après
-    proxy/socks5.rs   SOCKS5 (RFC 1928/1929) : CONNECT seul, mot de passe = clé API, tunnel = même relais splice
+    proxy/socks5.rs   SOCKS5 (RFC 1928/1929) : CONNECT (relais splice) + UDP ASSOCIATE, mot de passe = clé API, BIND refusé
+    proxy/socks5_udp.rs UDP ASSOCIATE (QUIC/HTTP3, DNS) : socket côté client + socket dual-stack sortante ; datagrammes acceptés de l'IP du contrôle TCP seulement, réponses seulement des destinations contactées, même policy que TCP ; vit tant que le contrôle TCP
     proxy/h2.rs       HTTP/2 (ALPN h2) : 1 tâche/stream ; CONNECT = tunnel h2 ↔ TCP (flow control) ; autres méthodes → HTTP/1.1 via le pool, chunked décodé
     proxy/pipeline.rs http() : forward_request, retry, 1xx, framing de body, pooling amont
     http/request.rs   RequestHead = Spans dans le buffer (parse zéro-alloc), classify, parse_authority
@@ -27,7 +28,7 @@ myproxy/              le proxy
     relay/mod.rs      bidirectional (splice sur Linux), IdleTimer (timeout d'inactivité)
     relay/adaptive.rs copy adaptatif 8→64 KB, puis bascule splice pour le reste du body
     relay/splice.rs   pipe2 + splice, PipePair 1 MB, AsyncFd, dir() (fill-then-drain)
-    relay/chunked.rs  relais chunked transparent (framing verbatim)
+    relay/chunked.rs  relais chunked transparent (framing verbatim), dans les deux sens : réponses upstream→client et uploads client→upstream
     auth.rs           Basic auth, mot de passe ∈ api_keys (ct_eq sur toutes les clés, sans court-circuit), base64 sur pile
     policy.rs         DestPolicy (ports autorisés avant DNS, plages non publiques + deny CIDR sur l'adresse résolue) ; ClientPolicy (allowlist d'IP clientes, à l'accept) ; AuthLimiter (bans par IP après N mauvaises clés, sans verrou tant que personne n'échoue)
     dns.rs            cache positif, TTL, Mutex<HashMap>
@@ -52,6 +53,7 @@ bench/
 - **CONNECT** : clé `host:port` → DNS → connect → `200` → early bytes → `relay::bidirectional` (2 PipePair splice, half-close via `shutdown(SHUT_WR)`).
 - **HTTP** : clé d'origine → `pool.take` ou connect → `forward_request` (réécriture du head dans `rewrite_buf`, `write_all` 1 syscall si sans body, `write_vectored` head+prefix sinon) → `read_response_head` (httparse, 64 headers) → body selon framing (CL borné / chunked / EOF) → remise au pool si complet + keep-alive.
 - **Retry** sur socket poolée périmée : GET/HEAD avec body entièrement bufferisé uniquement.
+- **Uploads** : `Transfer-Encoding: chunked` accepté (seul, sans Content-Length, pas en HTTP/1.0 → sinon 400) et relayé verbatim (staging = `rewrite_buf`), budget appliqué pendant le relais, octets après le chunk final → close après la réponse ; non rejouable. En h2, un body sans Content-Length part en chunked vers l'upstream.
 - **Limites** : `max_request_body_bytes` → 413, `max_response_body_bytes` → 502 (CL déclaré) ou coupure (inconnu).
 - **Syscalls** mesurés : ~2 recv + 2 send / requête, epoll_ctl ≈ 0. NODELAY 1×/socket, QUICKACK 1×/connexion, SO_SNDBUF/RCVBUF 1 MB, pipes 1 MB.
 

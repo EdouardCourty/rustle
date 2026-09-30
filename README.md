@@ -69,7 +69,7 @@ curl --proxy https://127.0.0.1:8443 --proxy-insecure -U bench:secret1 http://exa
 curl --proxy https://127.0.0.1:8443 --proxy-insecure --proxy-http2 -U bench:secret1 https://example.com
 ```
 
-SOCKS5 (section `[socks5]`, mot de passe = clé API) :
+SOCKS5 (section `[socks5]`, mot de passe = clé API ; CONNECT + UDP ASSOCIATE pour QUIC/DNS) :
 
 ```sh
 curl --socks5-hostname u:secret1@127.0.0.1:1080 https://example.com
