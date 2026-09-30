@@ -232,8 +232,8 @@ async fn dir(
             }
             // Socket dry. CRITICAL: if the pipe holds data, DRAIN it now —
             // parking on src.readable() with a loaded pipe deadlocks the
-            // relay (measured: upstream waits for our window, client waits
-            // for our pipe, 0 % CPU everywhere). Park only when empty.
+            // relay (upstream waits for our window, client waits for our
+            // pipe, 0 % CPU everywhere). Park only when empty.
             if in_pipe > 0 {
                 break; // go drain the pipe into dst
             }

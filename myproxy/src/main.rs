@@ -38,8 +38,18 @@ fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|| "config.toml".to_string());
     let cfg = Arc::new(Config::load(Path::new(&config_path)).context("loading config")?);
 
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(cfg.server.workers.max(1))
+    // One worker = `current_thread`: acceptor and connection tasks share
+    // the thread driving `block_on` (a 1-worker multi_thread runtime puts
+    // the acceptor on the main thread and wakes the worker cross-thread
+    // for every connection — two threads fighting for one pinned core).
+    let mut builder = if cfg.server.workers <= 1 {
+        tokio::runtime::Builder::new_current_thread()
+    } else {
+        let mut b = tokio::runtime::Builder::new_multi_thread();
+        b.worker_threads(cfg.server.workers);
+        b
+    };
+    let rt = builder
         .enable_all()
         // Small tasks + a large accept fan-in: 128 KB/task stacks instead of
         // glibc/tokio defaults (2 MB reserve, ~12-20 KB touched per tunnel

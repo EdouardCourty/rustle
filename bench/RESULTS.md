@@ -226,3 +226,42 @@ variance hold bimodale (ci-dessus).
 
 **Backlog suivant** : port du relay chunked bufferisé (M10.3 lit le framing octet par
 octet, ~1 syscall/octet — hors matrice, réel hors-bench), profilage du VPS, PGO.
+
+## M10.5 (correctifs + squeeze single-core) — 2026-09-30, seed 2004113323, auth on
+
+**Correctifs** (hors matrice : le bench sert du Content-Length) : relais chunked
+réécrit (les octets lus avec le head étaient forwardés bruts puis le parser
+démarrait désynchronisé → connexion client bloquée jusqu'à l'idle timeout ;
+staging = `resp_buf`, budget appliqué pendant le relais, trailers bornés),
+requêtes TE / Content-Length invalide ou contradictoire → 400 (anti-smuggling),
+backoff sur erreur `accept`, `config.toml.example` (table `[http]` dupliquée),
+test pool (tokio 1.53 refuse un fd bloquant).
+
+**Mesures, une matrice par étape** (µs CPU proxy/req ; bruit constaté entre deux
+matrices au code identique sur ces chemins : jusqu'à ±7 % CPU, ±13 % débit 10mb) :
+
+| Étape | Effet mesuré |
+|---|---|
+| S1 runtime `current_thread` (workers=1) | short −11 % CPU/req ; le reste dans le bruit |
+| S2 fenêtre de lecture du head de réponse 2 → 16 KB | 10kb : 2 recv+2 send → 1+1 (strace), CPU dans le bruit |
+| S3 plus d'alloc par réponse (`to_ascii_lowercase`, Vec 8 KB si body déjà lu) | bruit |
+| S4 NODELAY/SNDBUF/RCVBUF posés sur le listener (hérités, test) | short −2,4 % supplémentaire |
+| mimalloc (retest) | bruit (hot path sans alloc) — non retenu |
+
+**Final vs HEAD M10.4-2** : short 101,2 → 88,8 µs/req (**−12 %**, stable sur 5
+matrices), 10kb −5 %, 10mb −5 %, holds CPU −2 à −7 %, 1kb neutre. Débits
+inchangés : le harnais (2 cores) plafonne.
+
+**Répartition user/sys (1kb ×64)** : user ≈ 9 µs/req, sys ≈ 35 µs/req. ~80 % du
+CPU proxy est de la pile TCP loopback (qui inclut le traitement RX des pairs) ;
+les syscalls sont au plancher (2 recv + 2 send + epoll_wait). Le code Rust ne peut
+plus gagner que sur ~20 % du CPU → PGO, refonte des timers, FxHash : gains
+attendus < bruit, non faits.
+
+**Mémoire — biais de mesure corrigé** : `rss_mb` est lu *après* la fin du test
+(mémoire retenue), pas pendant. Nouveau `peak_rss_mb` (VmHWM) : **~5 KB par
+tunnel vivant** (hold-25k : 123-125 MB, identique HEAD et final) — le « ~1,3 KB
+par tunnel » publié plus haut était du résiduel. Avec `current_thread`, tout vit
+dans l'arène principale glibc (non réduite) : résiduel 125 MB. Fix :
+`malloc_trim` quand les connexions tombent sous la moitié du pic (tick 5 s) →
+2 MB résiduels.

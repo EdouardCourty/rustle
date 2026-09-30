@@ -43,8 +43,8 @@ pub(super) async fn http(
     dns: &DnsCache,
     pool: &UpstreamPool,
     pipes: &mut Option<PipePair>,
-    // Connection-owned scratches (M10.2: zero alloc in the hot path —
-    // reused across keep-alive requests, dropped with the connection).
+    // Connection-owned scratches: zero alloc in the hot path — reused
+    // across keep-alive requests, dropped with the connection.
     resp_buf: &mut Vec<u8>,
     rewrite_buf: &mut Vec<u8>,
     origin_key: &mut String,
@@ -52,9 +52,9 @@ pub(super) async fn http(
     let idle = cfg.timeouts.idle;
     let connect = cfg.timeouts.connect;
     let max_head = cfg.limits.max_header_bytes;
-    // M10.3: host/origin are spans into `buf`; the origin key is still
-    // rebuilt per request into the connection-owned scratch (port digits
-    // appended without allocating).
+    // host/origin are spans into `buf`; the origin key is rebuilt per
+    // request into the connection-owned scratch (port digits appended
+    // without allocating).
     let (host_span, port, origin_span) = match target {
         Target::Http { host, port, origin } => (*host, *port, *origin),
         _ => return false,
@@ -178,8 +178,12 @@ pub(super) async fn http(
     } else {
         rhead.content_length
     };
+    let chunked = rhead.chunked && !zero_body;
     let spare = (resp_buf.len() - rhead.raw_len) as u64;
     let forward_n = match body_left {
+        // Chunked: early body bytes stay in `resp_buf`, the framing parser
+        // must see them (it forwards them itself).
+        _ if chunked => 0,
         Some(l) => l.min(spare) as usize,
         None => spare as usize,
     };
@@ -223,22 +227,20 @@ pub(super) async fn http(
     } else {
         remaining
     };
-    let relaid: Option<u64> = if rhead.chunked && !zero_body {
-        Some(
-            relay::chunked(&mut up, client, idle)
-                .await
-                .unwrap_or(u64::MAX),
-        )
+    let (relaid, over_read) = if chunked {
+        match relay::chunked(&mut up, client, resp_buf, rhead.raw_len, budget, idle).await {
+            Ok(end) => (end.body, end.over_read),
+            Err(e) => {
+                tracing::debug!(upstream = %key, error = %e, "chunked relay aborted");
+                return false; // close: truncated stream is the honest signal
+            }
+        }
     } else {
-        Some(relay::response(&mut up, client, remaining_capped, pipes, idle).await)
+        let n = relay::response(&mut up, client, remaining_capped, pipes, idle).await;
+        // B4: bytes buffered beyond the body belong to a backend-pipelined
+        // response — the stream is desynchronized, never pool it.
+        (n, resp_buf.len() > window_end)
     };
-    let Some(relaid) = relaid else {
-        return false;
-    };
-
-    // B4: bytes buffered beyond the body belong to a backend-pipelined
-    // response — the stream is desynchronized, never pool it.
-    let over_read = resp_buf.len() > window_end;
 
     // Pool the upstream when the response allows clean reuse.
     let over_budget = budget > 0 && forward_n as u64 + relaid > budget;
@@ -381,8 +383,8 @@ pub(super) async fn connect_upstream(
         }
     } else {
         // Resolve once and cache: without this, every CONNECT to a hostname
-        // pays a getaddrinfo in the 512-thread blocking pool (measured:
-        // bursts of CONNECTs overflow it and blow the connect timeout).
+        // pays a getaddrinfo in the 512-thread blocking pool, and bursts
+        // of CONNECTs overflow it and blow the connect timeout.
         let addrs = match dns.get(key) {
             Some(a) => a,
             None => match timeout(connect, tokio::net::lookup_host((host, port))).await {

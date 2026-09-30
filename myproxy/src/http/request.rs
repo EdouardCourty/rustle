@@ -18,7 +18,7 @@ pub enum HeadError {
 
 /// A byte range inside the buffer a head was parsed from. Plain indices —
 /// `RequestHead` owns no allocation and no borrow; consumers slice through
-/// the buffer (`span.slice(buf)`). M10.3: zero-alloc parsing (method, path,
+/// the buffer (`span.slice(buf)`). Zero-alloc parsing (method, path,
 /// auth and host used to be heap Strings — 4-6 mallocs per request gone).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Span {
@@ -80,7 +80,9 @@ pub async fn read_head(
             let mut headers = [httparse::EMPTY_HEADER; MAX_HEADERS];
             let mut req = httparse::Request::new(&mut headers);
             match req.parse(buf) {
-                Ok(httparse::Status::Complete(len)) => Some(RequestHead::from(&req, len, buf)),
+                Ok(httparse::Status::Complete(len)) => {
+                    Some(RequestHead::from(&req, len, buf).ok_or(HeadError::Invalid)?)
+                }
                 Ok(httparse::Status::Partial) => None,
                 Err(_) => return Err(HeadError::Invalid),
             }
@@ -103,7 +105,10 @@ pub async fn read_head(
 }
 
 impl RequestHead {
-    fn from(req: &httparse::Request, len: usize, buf: &[u8]) -> Self {
+    /// `None` = ambiguous body framing (request smuggling vectors): any
+    /// Transfer-Encoding (request bodies are relayed by Content-Length
+    /// only), an invalid Content-Length, or conflicting duplicates.
+    fn from(req: &httparse::Request, len: usize, buf: &[u8]) -> Option<Self> {
         let mut auth = None;
         let mut host = None;
         let mut content_length = None;
@@ -118,16 +123,18 @@ impl RequestHead {
                     host = Some(span_of(buf, h.value));
                 }
             } else if h.name.eq_ignore_ascii_case("content-length") {
-                if content_length.is_none() {
-                    content_length = std::str::from_utf8(h.value)
-                        .ok()
-                        .and_then(|s| s.trim().parse().ok());
+                let v = parse_content_length(h.value)?;
+                if content_length.is_some_and(|cl| cl != v) {
+                    return None;
                 }
+                content_length = Some(v);
+            } else if h.name.eq_ignore_ascii_case("transfer-encoding") {
+                return None;
             } else if h.name.eq_ignore_ascii_case("connection") {
                 close = contains_token(h.value, "close");
             }
         }
-        RequestHead {
+        Some(RequestHead {
             raw_len: len,
             method: span_of(buf, req.method.unwrap_or("").as_bytes()),
             path: span_of(buf, req.path.unwrap_or("").as_bytes()),
@@ -136,8 +143,18 @@ impl RequestHead {
             host,
             content_length,
             close,
-        }
+        })
     }
+}
+
+/// Strict Content-Length: 1..=19 ASCII digits, optional surrounding
+/// whitespace (no sign, no list — `u64::from_str` would accept `+5`).
+fn parse_content_length(v: &[u8]) -> Option<u64> {
+    let v = v.trim_ascii();
+    if v.is_empty() || v.len() > 19 || !v.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    v.iter().try_fold(0u64, |acc, &d| acc.checked_mul(10)?.checked_add((d - b'0') as u64))
 }
 
 /// Byte range of `s` inside `buf` (httparse returns zero-copy slices into
@@ -160,7 +177,7 @@ fn span_of(buf: &[u8], s: &[u8]) -> Span {
     }
 }
 
-fn contains_token(value: &[u8], token: &str) -> bool {
+pub(super) fn contains_token(value: &[u8], token: &str) -> bool {
     std::str::from_utf8(value)
         .map(|s| s.split(',').any(|t| t.trim().eq_ignore_ascii_case(token)))
         .unwrap_or(false)
@@ -434,7 +451,7 @@ mod tests {
             httparse::Status::Complete(len) => len,
             _ => panic!("expected complete"),
         };
-        let head = RequestHead::from(&req, len, &buf);
+        let head = RequestHead::from(&req, len, &buf).unwrap();
         assert_eq!(head.method.slice(&buf), b"GET");
         assert_eq!(head.path.slice(&buf), b"http://upstream:8000/1kb");
         assert_eq!(head.raw_len, raw.len() - 4); // body = "body"
@@ -468,5 +485,31 @@ mod tests {
         rewrite_head_into(&mut out, raw, b"GET", b"");
         let out = String::from_utf8_lossy(&out);
         assert!(out.starts_with("GET / HTTP/1.1\r\n"));
+    }
+
+    fn parse(raw: &[u8]) -> Option<RequestHead> {
+        let mut headers = [httparse::EMPTY_HEADER; MAX_HEADERS];
+        let mut req = httparse::Request::new(&mut headers);
+        let len = match req.parse(raw).unwrap() {
+            httparse::Status::Complete(n) => n,
+            httparse::Status::Partial => panic!("partial"),
+        };
+        RequestHead::from(&req, len, raw)
+    }
+
+    #[test]
+    fn ambiguous_body_framing_rejected() {
+        let ok = parse(b"POST / HTTP/1.1\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\n");
+        assert_eq!(ok.unwrap().content_length, Some(5));
+        for bad in [
+            &b"POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n"[..],
+            b"POST / HTTP/1.1\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n",
+            b"POST / HTTP/1.1\r\nContent-Length: 5\r\nContent-Length: 6\r\n\r\n",
+            b"POST / HTTP/1.1\r\nContent-Length: +5\r\n\r\n",
+            b"POST / HTTP/1.1\r\nContent-Length: abc\r\n\r\n",
+            b"POST / HTTP/1.1\r\nContent-Length: 5, 5\r\n\r\n",
+        ] {
+            assert!(parse(bad).is_none(), "{}", String::from_utf8_lossy(bad));
+        }
     }
 }

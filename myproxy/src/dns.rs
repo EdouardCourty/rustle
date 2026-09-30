@@ -6,9 +6,9 @@ use std::time::{Duration, Instant};
 /// Process-wide DNS cache for CONNECT targets.
 ///
 /// Without it, every CONNECT to a hostname pays a `getaddrinfo` in tokio's
-/// blocking pool (512 threads max). Under a connection burst the queue
-/// alone exceeded the 5 s connect timeout (measured: 504s on ~400/25 000
-/// CONNECTs) — the benchmark harness bypasses DNS, real workloads don't.
+/// blocking pool (512 threads max) — under a connection burst the queue
+/// alone blew the connect timeout. The benchmark harness bypasses DNS,
+/// real workloads don't.
 struct Inner {
     entries: HashMap<String, (Vec<std::net::SocketAddr>, Instant)>,
     ttl: Duration,

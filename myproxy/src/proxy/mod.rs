@@ -48,7 +48,7 @@ pub async fn handle_conn(
     // first bulk response, reused across keep-alive requests, dropped with
     // the connection).
     let mut resp_pipes: Option<relay::PipePair> = None;
-    // M10.2: zero-alloc hot path — connection-owned scratches reused
+    // Zero-alloc hot path — connection-owned scratches reused
     // across keep-alive requests (response head+body buffer, rewrite
     // buffer, origin key). Virtual capacity, dropped with the connection.
     let mut resp_buf: Vec<u8> = Vec::new();
@@ -56,7 +56,7 @@ pub async fn handle_conn(
     let mut origin_key: String = String::new();
     // B: TCP_QUICKACK once per connection — the kernel re-arms it per
     // segment; per-request setsockopts were pure syscall overhead in the
-    // keep-alive hot path (M10.3).
+    // keep-alive hot path.
     client.set_quickack(true).ok();
     loop {
         let head = match read_head(&mut client, &mut buf, max_head, idle).await {
@@ -76,7 +76,7 @@ pub async fn handle_conn(
             }
         };
 
-        // M10.3: auth is a span into `buf` — sliced per check, zero alloc.
+        // Auth is a span into `buf` — sliced per check, zero alloc.
         if !auth.check(head.auth.map(|s| s.slice(&buf))) {
             let _ = client.write_all(RESP_407).await;
             return;
@@ -92,7 +92,7 @@ pub async fn handle_conn(
 
         match target {
             Target::Connect { host, port } => {
-                // M10.3 fix: build the origin key from the CONNECT
+                // Build the origin key from the CONNECT
                 // authority — it used to stay empty, so every CONNECT
                 // shared a single DNS cache entry.
                 origin_key.clear();
