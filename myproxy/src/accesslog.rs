@@ -14,7 +14,9 @@
 //!   (`event=dropped`), never waited for.
 //! - Refusals at accept (client allowlist, banned IP) are only counted and
 //!   summarized once per second: a scan cannot flood the file.
-//! - SIGHUP reopens the file (logrotate: rename, then `kill -HUP`).
+//! - Output: a dedicated file (SIGHUP reopens it — logrotate: rename, then
+//!   `kill -HUP`) or stdout (journald / `docker logs` handle retention;
+//!   the diagnostics then stay alone on stderr).
 //!
 //! Format: `<RFC 3339 UTC> key=value ...`, values sanitized (no spaces or
 //! control characters) so a line is always one line.
@@ -38,6 +40,17 @@ pub enum Level {
     #[default]
     Errors,
     All,
+}
+
+/// Where lines go.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Output {
+    /// The `file` path (empty = no access log).
+    #[default]
+    File,
+    /// Standard output (`file` ignored).
+    Stdout,
 }
 
 /// How a plain-HTTP request target is written.
@@ -98,20 +111,25 @@ impl AccessLog {
         }
     }
 
-    /// Opens the file and starts the writer (disabled when `file` is empty
-    /// or `level` is off).
-    pub fn start(level: Level, file: &str, target: TargetMode) -> anyhow::Result<Self> {
-        if file.is_empty() || level == Level::Off {
+    /// Opens the output and starts the writer (disabled when `level` is
+    /// off, or the output is a file with an empty path).
+    pub fn start(level: Level, output: Output, file: &str, target: TargetMode) -> anyhow::Result<Self> {
+        let dest = match output {
+            Output::Stdout => None,
+            Output::File if file.is_empty() => return Ok(Self::disabled()),
+            Output::File => Some(file.to_string()),
+        };
+        if level == Level::Off {
             return Ok(Self::disabled());
         }
-        let path = file.to_string();
-        let out = open(&path).with_context(|| format!("opening access log {path}"))?;
+        let out = open(dest.as_deref())
+            .with_context(|| format!("opening access log {}", dest.as_deref().unwrap_or("stdout")))?;
         let (tx, rx) = sync_channel::<Vec<u8>>(QUEUE);
         let counters = Arc::new(Counters::default());
         let c = counters.clone();
         std::thread::Builder::new()
             .name("myproxy-accesslog".into())
-            .spawn(move || writer(rx, out, path, c))?;
+            .spawn(move || writer(rx, out, dest, c))?;
         Ok(Self {
             level,
             target,
@@ -240,15 +258,21 @@ impl std::fmt::Write for Buf<'_> {
     }
 }
 
-fn open(path: &str) -> std::io::Result<std::io::BufWriter<std::fs::File>> {
-    let f = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
-    Ok(std::io::BufWriter::with_capacity(64 * 1024, f))
+type Sink = std::io::BufWriter<Box<dyn std::io::Write + Send>>;
+
+/// The file (append) or stdout (`None`), buffered.
+fn open(path: Option<&str>) -> std::io::Result<Sink> {
+    let w: Box<dyn std::io::Write + Send> = match path {
+        Some(p) => Box::new(std::fs::OpenOptions::new().create(true).append(true).open(p)?),
+        None => Box::new(std::io::stdout()),
+    };
+    Ok(std::io::BufWriter::with_capacity(64 * 1024, w))
 }
 
 fn writer(
     rx: std::sync::mpsc::Receiver<Vec<u8>>,
-    mut out: std::io::BufWriter<std::fs::File>,
-    path: String,
+    mut out: Sink,
+    path: Option<String>,
     c: Arc<Counters>,
 ) {
     let mut last_summary = Instant::now();
@@ -267,10 +291,13 @@ fn writer(
             summaries(&mut out, &c);
         }
         let _ = out.flush();
+        // Reopen (SIGHUP) only means something for a file.
         if c.reopen.swap(false, Relaxed) {
-            match open(&path) {
-                Ok(o) => out = o,
-                Err(e) => tracing::warn!(error = %e, %path, "access log reopen failed"),
+            if let Some(p) = path.as_deref() {
+                match open(Some(p)) {
+                    Ok(o) => out = o,
+                    Err(e) => tracing::warn!(error = %e, path = p, "access log reopen failed"),
+                }
             }
         }
         if disconnected {
@@ -375,12 +402,14 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("myproxy-log-unit-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let f = dir.join("a.log");
-        let e = AccessLog::start(Level::Errors, f.to_str().unwrap(), TargetMode::Host).unwrap();
+        let e = AccessLog::start(Level::Errors, Output::File, f.to_str().unwrap(), TargetMode::Host).unwrap();
         assert!(e.errors() && !e.all());
-        let a = AccessLog::start(Level::All, f.to_str().unwrap(), TargetMode::Url).unwrap();
+        let a = AccessLog::start(Level::All, Output::File, f.to_str().unwrap(), TargetMode::Url).unwrap();
         assert!(a.errors() && a.all() && a.target_mode() == TargetMode::Url);
-        // Empty path = disabled whatever the level.
-        assert!(!AccessLog::start(Level::All, "", TargetMode::Host).unwrap().errors());
+        // Empty path = disabled whatever the level; stdout needs no path.
+        assert!(!AccessLog::start(Level::All, Output::File, "", TargetMode::Host).unwrap().errors());
+        assert!(AccessLog::start(Level::All, Output::Stdout, "", TargetMode::Host).unwrap().all());
+        assert!(!AccessLog::start(Level::Off, Output::Stdout, "", TargetMode::Host).unwrap().errors());
     }
 
     #[test]

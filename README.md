@@ -82,8 +82,9 @@ ex. la plage de ton VPN), destinations privées refusées par défaut
 après N mauvaises clés (`[auth] max_failures`), deadline totale sur le
 head (`timeouts.request_head`).
 
-Logs d'accès (`[log]`) : fichier dédié, niveau `off`/`errors`/`all`, cible
-`host` ou `url` ; rotation par `kill -HUP` après renommage (logrotate).
+Logs d'accès (`[log]`) : `output = "file"` (rotation par `kill -HUP` après
+renommage) ou `"stdout"` (journald / `docker logs`), niveau
+`off`/`errors`/`all`, cible `host` ou `url`. Les diagnostics sont sur stderr.
 
 ## Tests
 
