@@ -113,7 +113,12 @@ impl AccessLog {
 
     /// Opens the output and starts the writer (disabled when `level` is
     /// off, or the output is a file with an empty path).
-    pub fn start(level: Level, output: Output, file: &str, target: TargetMode) -> anyhow::Result<Self> {
+    pub fn start(
+        level: Level,
+        output: Output,
+        file: &str,
+        target: TargetMode,
+    ) -> anyhow::Result<Self> {
         let dest = match output {
             Output::Stdout => None,
             Output::File if file.is_empty() => return Ok(Self::disabled()),
@@ -122,8 +127,9 @@ impl AccessLog {
         if level == Level::Off {
             return Ok(Self::disabled());
         }
-        let out = open(dest.as_deref())
-            .with_context(|| format!("opening access log {}", dest.as_deref().unwrap_or("stdout")))?;
+        let out = open(dest.as_deref()).with_context(|| {
+            format!("opening access log {}", dest.as_deref().unwrap_or("stdout"))
+        })?;
         let (tx, rx) = sync_channel::<Vec<u8>>(QUEUE);
         let counters = Arc::new(Counters::default());
         let c = counters.clone();
@@ -263,7 +269,12 @@ type Sink = std::io::BufWriter<Box<dyn std::io::Write + Send>>;
 /// The file (append) or stdout (`None`), buffered.
 fn open(path: Option<&str>) -> std::io::Result<Sink> {
     let w: Box<dyn std::io::Write + Send> = match path {
-        Some(p) => Box::new(std::fs::OpenOptions::new().create(true).append(true).open(p)?),
+        Some(p) => Box::new(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(p)?,
+        ),
         None => Box::new(std::io::stdout()),
     };
     Ok(std::io::BufWriter::with_capacity(64 * 1024, w))
@@ -317,7 +328,10 @@ fn summaries(out: &mut impl std::io::Write, c: &Counters) {
             let mut b = Vec::with_capacity(96);
             rfc3339(&mut b, SystemTime::now());
             let last = last.map(|ip| ip.to_string()).unwrap_or_else(|| "-".into());
-            let _ = writeln!(Buf2(&mut b), " event=refused reason={reason} count={n} last={last}");
+            let _ = writeln!(
+                Buf2(&mut b),
+                " event=refused reason={reason} count={n} last={last}"
+            );
             let _ = out.write_all(&b);
         }
     }
@@ -379,18 +393,28 @@ mod tests {
         assert_eq!(b, b"1970-01-01T00:00:00.000Z");
         let mut b = Vec::new();
         // 2026-09-30T21:32:12.920Z
-        rfc3339(&mut b, SystemTime::UNIX_EPOCH + Duration::from_millis(1_790_803_932_920));
+        rfc3339(
+            &mut b,
+            SystemTime::UNIX_EPOCH + Duration::from_millis(1_790_803_932_920),
+        );
         assert_eq!(String::from_utf8(b).unwrap(), "2026-09-30T21:32:12.920Z");
         let mut b = Vec::new();
         // Leap day 2024-02-29T12:00:00Z
-        rfc3339(&mut b, SystemTime::UNIX_EPOCH + Duration::from_secs(1_709_208_000));
+        rfc3339(
+            &mut b,
+            SystemTime::UNIX_EPOCH + Duration::from_secs(1_709_208_000),
+        );
         assert_eq!(String::from_utf8(b).unwrap(), "2024-02-29T12:00:00.000Z");
     }
 
     #[test]
     fn values_are_sanitized() {
         let log = AccessLog::disabled();
-        let l = log.line().kv("target", "a b\tc\nd").kv("empty", "").kv_bytes("url", b"/x y");
+        let l = log
+            .line()
+            .kv("target", "a b\tc\nd")
+            .kv("empty", "")
+            .kv_bytes("url", b"/x y");
         let s = String::from_utf8(l.0).unwrap();
         assert!(s.ends_with(" target=a_b_c_d empty=- url=/x_y"), "{s}");
     }
@@ -402,14 +426,38 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("myproxy-log-unit-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let f = dir.join("a.log");
-        let e = AccessLog::start(Level::Errors, Output::File, f.to_str().unwrap(), TargetMode::Host).unwrap();
+        let e = AccessLog::start(
+            Level::Errors,
+            Output::File,
+            f.to_str().unwrap(),
+            TargetMode::Host,
+        )
+        .unwrap();
         assert!(e.errors() && !e.all());
-        let a = AccessLog::start(Level::All, Output::File, f.to_str().unwrap(), TargetMode::Url).unwrap();
+        let a = AccessLog::start(
+            Level::All,
+            Output::File,
+            f.to_str().unwrap(),
+            TargetMode::Url,
+        )
+        .unwrap();
         assert!(a.errors() && a.all() && a.target_mode() == TargetMode::Url);
         // Empty path = disabled whatever the level; stdout needs no path.
-        assert!(!AccessLog::start(Level::All, Output::File, "", TargetMode::Host).unwrap().errors());
-        assert!(AccessLog::start(Level::All, Output::Stdout, "", TargetMode::Host).unwrap().all());
-        assert!(!AccessLog::start(Level::Off, Output::Stdout, "", TargetMode::Host).unwrap().errors());
+        assert!(
+            !AccessLog::start(Level::All, Output::File, "", TargetMode::Host)
+                .unwrap()
+                .errors()
+        );
+        assert!(
+            AccessLog::start(Level::All, Output::Stdout, "", TargetMode::Host)
+                .unwrap()
+                .all()
+        );
+        assert!(
+            !AccessLog::start(Level::Off, Output::Stdout, "", TargetMode::Host)
+                .unwrap()
+                .errors()
+        );
     }
 
     #[test]

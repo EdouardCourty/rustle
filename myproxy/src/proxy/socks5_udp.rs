@@ -30,7 +30,11 @@ const DGRAM_MAX: usize = 65_535;
 /// Destinations remembered per association (reply filter).
 const MAX_PEERS: usize = 1024;
 
-pub(super) async fn associate(mut ctl: TcpStream, peer: IpAddr, svc: &Services) -> std::io::Result<()> {
+pub(super) async fn associate(
+    mut ctl: TcpStream,
+    peer: IpAddr,
+    svc: &Services,
+) -> std::io::Result<()> {
     let local_ip = ctl.local_addr()?.ip();
     let client_side = UdpSocket::bind(SocketAddr::new(local_ip, 0)).await?;
     let (remote_side, dual) = remote_socket()?;
@@ -125,7 +129,8 @@ fn remote_socket() -> std::io::Result<(UdpSocket, bool)> {
     match dual {
         Ok(s) => Ok((s, true)),
         Err(_) => {
-            let s = std::net::UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))?;
+            let s =
+                std::net::UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))?;
             s.set_nonblocking(true)?;
             Ok((UdpSocket::from_std(s)?, false))
         }
@@ -156,7 +161,10 @@ fn parse_header(d: &[u8]) -> Option<(String, u16, usize)> {
             if len == 0 || d.len() < 5 + len + 2 {
                 return None;
             }
-            (std::str::from_utf8(&d[5..5 + len]).ok()?.to_string(), 5 + len)
+            (
+                std::str::from_utf8(&d[5..5 + len]).ok()?.to_string(),
+                5 + len,
+            )
         }
         _ => return None,
     };
@@ -231,7 +239,10 @@ mod tests {
         let mut d = vec![0, 0, 0, 1, 1, 2, 3, 4, 0x01, 0xbb];
         d.extend_from_slice(b"payload");
         let (h, p, off) = parse_header(&d).unwrap();
-        assert_eq!((h.as_str(), p, &d[off..]), ("1.2.3.4", 443, &b"payload"[..]));
+        assert_eq!(
+            (h.as_str(), p, &d[off..]),
+            ("1.2.3.4", 443, &b"payload"[..])
+        );
 
         let mut d = vec![0, 0, 0, 3, 11];
         d.extend_from_slice(b"example.com");

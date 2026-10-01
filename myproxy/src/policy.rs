@@ -37,10 +37,16 @@ impl Cidr {
             Some((a, p)) => (a, Some(p)),
             None => (s, None),
         };
-        let addr: IpAddr = a.trim().parse().with_context(|| format!("invalid CIDR {s}"))?;
+        let addr: IpAddr = a
+            .trim()
+            .parse()
+            .with_context(|| format!("invalid CIDR {s}"))?;
         let max = if addr.is_ipv4() { 32 } else { 128 };
         let prefix = match p {
-            Some(p) => p.trim().parse::<u8>().with_context(|| format!("invalid CIDR {s}"))?,
+            Some(p) => p
+                .trim()
+                .parse::<u8>()
+                .with_context(|| format!("invalid CIDR {s}"))?,
             None => max,
         };
         anyhow::ensure!(prefix <= max, "invalid CIDR prefix {s}");
@@ -265,14 +271,37 @@ mod tests {
     #[test]
     fn non_public_ranges() {
         for s in [
-            "127.0.0.1", "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.1.1",
-            "169.254.169.254", "100.64.0.1", "0.0.0.0", "0.1.2.3", "224.0.0.1",
-            "240.0.0.1", "255.255.255.255", "::1", "::", "fc00::1", "fd12::1",
-            "fe80::1", "ff02::1", "::ffff:127.0.0.1", "::ffff:10.0.0.1",
+            "127.0.0.1",
+            "10.1.2.3",
+            "172.16.0.1",
+            "172.31.255.255",
+            "192.168.1.1",
+            "169.254.169.254",
+            "100.64.0.1",
+            "0.0.0.0",
+            "0.1.2.3",
+            "224.0.0.1",
+            "240.0.0.1",
+            "255.255.255.255",
+            "::1",
+            "::",
+            "fc00::1",
+            "fd12::1",
+            "fe80::1",
+            "ff02::1",
+            "::ffff:127.0.0.1",
+            "::ffff:10.0.0.1",
         ] {
             assert!(is_non_public(ip(s)), "{s}");
         }
-        for s in ["1.1.1.1", "8.8.8.8", "172.32.0.1", "100.128.0.1", "2606:4700::1111", "::ffff:1.1.1.1"] {
+        for s in [
+            "1.1.1.1",
+            "8.8.8.8",
+            "172.32.0.1",
+            "100.128.0.1",
+            "2606:4700::1111",
+            "::ffff:1.1.1.1",
+        ] {
             assert!(!is_non_public(ip(s)), "{s}");
         }
     }
@@ -307,7 +336,9 @@ mod tests {
     #[test]
     fn client_allowlist() {
         let mut cfg = Config::default();
-        assert!(ClientPolicy::from_config(&cfg).unwrap().allows(ip("203.0.113.1")));
+        assert!(ClientPolicy::from_config(&cfg)
+            .unwrap()
+            .allows(ip("203.0.113.1")));
         cfg.auth.allow_clients = vec!["100.64.0.0/10".into(), "::1".into()];
         let p = ClientPolicy::from_config(&cfg).unwrap();
         assert!(p.allows(ip("100.101.102.103")));

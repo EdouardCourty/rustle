@@ -46,7 +46,9 @@ fn io_err<E: std::fmt::Display>(e: E) -> std::io::Error {
 
 /// Opens an HTTP/2 connection to the proxy (the connection driver runs in
 /// its own task).
-pub(crate) async fn h2_connect(proxy: &str) -> std::io::Result<h2::client::SendRequest<bytes::Bytes>> {
+pub(crate) async fn h2_connect(
+    proxy: &str,
+) -> std::io::Result<h2::client::SendRequest<bytes::Bytes>> {
     let s = connect_proxy(proxy).await?;
     let (send, conn) = h2::client::handshake(s).await.map_err(io_err)?;
     tokio::spawn(async move {
@@ -273,12 +275,9 @@ pub(crate) async fn connect_via_proxy(
     // 10 s connect timeout: without it, a proxy that drops SYNs (3proxy
     // over its ~17k wall) makes the kernel retransmit for ~127 s per
     // connection and the hold matrix crawls for minutes.
-    let mut s = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        connect_proxy(proxy),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("connect timeout"))??;
+    let mut s = tokio::time::timeout(std::time::Duration::from_secs(10), connect_proxy(proxy))
+        .await
+        .map_err(|_| anyhow::anyhow!("connect timeout"))??;
     let auth = B64.encode(format!("bench:{api_key}"));
     let req = format!(
         "CONNECT {target} HTTP/1.1\r\nHost: {target}\r\nProxy-Authorization: Basic {auth}\r\n\r\n"

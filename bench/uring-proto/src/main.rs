@@ -20,9 +20,11 @@ use monoio::io::{AsyncReadRent, AsyncWriteRentExt};
 use monoio::net::{TcpListener, TcpStream};
 
 const KEY: &[u8] = b"secret1";
-const RESP_400: &[u8] = b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+const RESP_400: &[u8] =
+    b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 const RESP_407: &[u8] = b"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"p\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-const RESP_502: &[u8] = b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+const RESP_502: &[u8] =
+    b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 
 fn main() {
     let auth = std::env::var("AUTH").map(|v| v != "off").unwrap_or(true);
@@ -36,7 +38,9 @@ fn main() {
         let l = TcpListener::bind(listen.as_str()).expect("bind");
         eprintln!("uring-proto listening on {listen} auth={auth}");
         loop {
-            let Ok((s, _)) = l.accept().await else { continue };
+            let Ok((s, _)) = l.accept().await else {
+                continue;
+            };
             let _ = s.set_nodelay(true);
             monoio::spawn(async move {
                 let _ = conn(s, auth).await;
@@ -58,14 +62,21 @@ where
     monoio::time::timeout(IDLE, fut).await.ok()
 }
 
-async fn read_more(s: &mut TcpStream, mut buf: Vec<u8>, grow: usize) -> (std::io::Result<usize>, Vec<u8>) {
+async fn read_more(
+    s: &mut TcpStream,
+    mut buf: Vec<u8>,
+    grow: usize,
+) -> (std::io::Result<usize>, Vec<u8>) {
     if buf.capacity() - buf.len() < grow / 2 {
         buf.reserve(grow);
     }
     let (len, cap) = (buf.len(), buf.capacity());
     match timed(s.read(buf.slice_mut(len..cap))).await {
         Some((r, slice)) => (r, slice.into_inner()),
-        None => (Err(std::io::ErrorKind::TimedOut.into()), Vec::with_capacity(grow)),
+        None => (
+            Err(std::io::ErrorKind::TimedOut.into()),
+            Vec::with_capacity(grow),
+        ),
     }
 }
 
@@ -82,10 +93,15 @@ fn basic_ok(value: &[u8]) -> bool {
         return false;
     }
     let mut out = [0u8; 192];
-    match base64::engine::general_purpose::STANDARD.decode_slice(value[6..].trim_ascii(), &mut out) {
+    match base64::engine::general_purpose::STANDARD.decode_slice(value[6..].trim_ascii(), &mut out)
+    {
         Ok(n) => {
             let d = &out[..n];
-            let key = d.iter().position(|&b| b == b':').map(|i| &d[i + 1..]).unwrap_or(d);
+            let key = d
+                .iter()
+                .position(|&b| b == b':')
+                .map(|i| &d[i + 1..])
+                .unwrap_or(d);
             key == KEY
         }
         Err(_) => false,
@@ -106,7 +122,11 @@ async fn conn(mut c: TcpStream, auth: bool) -> Option<()> {
             let mut r = httparse::Request::new(&mut headers);
             match r.parse(&req) {
                 Ok(httparse::Status::Complete(n)) => {
-                    if auth && !r.headers.iter().any(|h| h.name.eq_ignore_ascii_case("proxy-authorization") && basic_ok(h.value)) {
+                    if auth
+                        && !r.headers.iter().any(|h| {
+                            h.name.eq_ignore_ascii_case("proxy-authorization") && basic_ok(h.value)
+                        })
+                    {
                         let (_, _) = write(&mut c, RESP_407.to_vec(), 0..RESP_407.len()).await;
                         return None;
                     }
@@ -128,7 +148,8 @@ async fn conn(mut c: TcpStream, auth: bool) -> Option<()> {
                         return None;
                     };
                     let close = r.headers.iter().any(|h| {
-                        h.name.eq_ignore_ascii_case("connection") && h.value.eq_ignore_ascii_case(b"close")
+                        h.name.eq_ignore_ascii_case("connection")
+                            && h.value.eq_ignore_ascii_case(b"close")
                     });
                     // Rewritten head (origin-form, proxy headers dropped).
                     out.clear();
@@ -202,13 +223,20 @@ async fn conn(mut c: TcpStream, auth: bool) -> Option<()> {
                     .headers
                     .iter()
                     .find(|h| h.name.eq_ignore_ascii_case("content-length"))
-                    .and_then(|h| std::str::from_utf8(h.value).ok()?.trim().parse::<usize>().ok());
+                    .and_then(|h| {
+                        std::str::from_utf8(h.value)
+                            .ok()?
+                            .trim()
+                            .parse::<usize>()
+                            .ok()
+                    });
                 let Some(cl) = cl else {
                     return None; // chunked / until-EOF: out of scope
                 };
                 let keep = r.version == Some(1)
                     && !r.headers.iter().any(|h| {
-                        h.name.eq_ignore_ascii_case("connection") && h.value.eq_ignore_ascii_case(b"close")
+                        h.name.eq_ignore_ascii_case("connection")
+                            && h.value.eq_ignore_ascii_case(b"close")
                     });
                 break (n, cl, keep);
             }
@@ -231,9 +259,7 @@ async fn conn(mut c: TcpStream, auth: bool) -> Option<()> {
         while left > 0 {
             resp.clear();
             let cap = resp.capacity().min(left);
-            let Some((r, slice)) = timed(u.read(resp.slice_mut(0..cap))).await else {
-                return None;
-            };
+            let (r, slice) = timed(u.read(resp.slice_mut(0..cap))).await?;
             resp = slice.into_inner();
             let n = match r {
                 Ok(0) | Err(_) => return None,

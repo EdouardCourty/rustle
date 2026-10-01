@@ -12,8 +12,8 @@ use tokio::time::timeout;
 use crate::accesslog::TargetMode;
 use crate::config::Config;
 use crate::dns::DnsCache;
-use crate::policy::DestPolicy;
 use crate::http::{read_response_head, HeadError, RequestHead, RespError, Span, Target};
+use crate::policy::DestPolicy;
 use crate::relay;
 use crate::relay::PipePair;
 use crate::stream::ClientStream;
@@ -110,7 +110,8 @@ pub(super) async fn http<C: ClientStream>(
         attempt += 1;
         let (mut up, from_pool) = match pool.take(key) {
             Some(s) => (s, true),
-            None => match connect_upstream(host_str, port, connect, &svc.dns, key, &svc.dest).await {
+            None => match connect_upstream(host_str, port, connect, &svc.dns, key, &svc.dest).await
+            {
                 Ok(s) => (s, false),
                 Err(UpstreamError::Forbidden(reason)) => {
                     log_fail(403, Some(reason));
@@ -325,7 +326,14 @@ pub(super) async fn http<C: ClientStream>(
                 left = ?body_left, got = relaid
             );
         }
-        log_fail(rhead.status, Some(if over_budget { "over-budget" } else { "truncated" }));
+        log_fail(
+            rhead.status,
+            Some(if over_budget {
+                "over-budget"
+            } else {
+                "truncated"
+            }),
+        );
         return false; // close: truncated stream is the honest signal
     }
     if let Some(t0) = t0 {
@@ -459,12 +467,24 @@ async fn forward_chunked<C: ClientStream>(
     head: &RequestHead,
     ctx: &mut UpWriteCtx<'_>,
 ) -> bool {
-    if !matches!(timeout(ctx.idle, up.write_all(ctx.rewrite_buf)).await, Ok(Ok(()))) {
+    if !matches!(
+        timeout(ctx.idle, up.write_all(ctx.rewrite_buf)).await,
+        Ok(Ok(()))
+    ) {
         return false;
     }
     ctx.rewrite_buf.clear();
     ctx.rewrite_buf.extend_from_slice(&buf[head.raw_len..]);
-    match relay::chunked(client, up, ctx.rewrite_buf, 0, ctx.max_request_body, ctx.idle).await {
+    match relay::chunked(
+        client,
+        up,
+        ctx.rewrite_buf,
+        0,
+        ctx.max_request_body,
+        ctx.idle,
+    )
+    .await
+    {
         Ok(end) => {
             ctx.close_after = end.over_read;
             ctx.sent = end.body;
@@ -532,7 +552,10 @@ pub(super) async fn connect_upstream(
         // Policy on the resolved addresses (a public name pointing at a
         // private address is refused too): disallowed ones are skipped.
         if !addrs.iter().any(|&a| dest.addr_allowed(a)) {
-            let reason = addrs.first().and_then(|&a| dest.addr_verdict(a)).unwrap_or("private");
+            let reason = addrs
+                .first()
+                .and_then(|&a| dest.addr_verdict(a))
+                .unwrap_or("private");
             return Err(UpstreamError::Forbidden(reason));
         }
         match timeout(connect, connect_first(&addrs, dest)).await {
@@ -589,6 +612,3 @@ async fn connect_first(
         std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "no address to try")
     }))
 }
-
-#[allow(dead_code)] // HeadError import used by variant matching below
-fn _unused(_e: HeadError) {}

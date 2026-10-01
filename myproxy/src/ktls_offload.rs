@@ -64,7 +64,15 @@ fn setup_ulp(fd: RawFd) -> std::io::Result<()> {
 
 fn setup_keys(fd: RawFd, dir: libc::c_int, info: &CryptoInfo) -> std::io::Result<()> {
     // SAFETY: `info` is the kernel's tls12_crypto_info_* struct, size given.
-    let r = unsafe { libc::setsockopt(fd, SOL_TLS, dir, info.as_ptr(), info.size() as libc::socklen_t) };
+    let r = unsafe {
+        libc::setsockopt(
+            fd,
+            SOL_TLS,
+            dir,
+            info.as_ptr(),
+            info.size() as libc::socklen_t,
+        )
+    };
     if r < 0 {
         return Err(os_err());
     }
@@ -101,12 +109,22 @@ pub async fn offload(mut tls: CorkedTls) -> std::io::Result<KtlsClient> {
     }
     let (cork, conn) = tls.into_inner();
     let tcp = cork.io;
-    let suite = conn.negotiated_cipher_suite().ok_or_else(|| other("no cipher suite"))?;
+    let suite = conn
+        .negotiated_cipher_suite()
+        .ok_or_else(|| other("no cipher suite"))?;
     let secrets = conn.dangerous_extract_secrets().map_err(other)?;
     let fd = tcp.as_raw_fd();
     setup_ulp(fd)?;
-    setup_keys(fd, TLS_TX, &CryptoInfo::from_rustls(suite, secrets.tx).map_err(other)?)?;
-    setup_keys(fd, TLS_RX, &CryptoInfo::from_rustls(suite, secrets.rx).map_err(other)?)?;
+    setup_keys(
+        fd,
+        TLS_TX,
+        &CryptoInfo::from_rustls(suite, secrets.tx).map_err(other)?,
+    )?;
+    setup_keys(
+        fd,
+        TLS_RX,
+        &CryptoInfo::from_rustls(suite, secrets.rx).map_err(other)?,
+    )?;
     // Best effort (older kernels refuse them; TLS 1.2 ignores NO_PAD).
     let one: libc::c_int = 1;
     for opt in [TLS_TX_ZEROCOPY_RO, TLS_RX_EXPECT_NO_PAD] {
@@ -195,7 +213,11 @@ impl AsyncRead for KtlsClient {
 }
 
 impl AsyncWrite for KtlsClient {
-    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
         Pin::new(&mut self.tcp).poll_write(cx, buf)
     }
 

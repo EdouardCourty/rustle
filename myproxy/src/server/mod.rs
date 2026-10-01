@@ -180,7 +180,12 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
         dns: Arc::new(DnsCache::new(cfg.dns.ttl, cfg.dns.max_entries)),
         dest: Arc::new(DestPolicy::from_config(&cfg)?),
         clients: ClientPolicy::from_config(&cfg)?,
-        log: Arc::new(AccessLog::start(cfg.log.access, cfg.log.output, &cfg.log.file, cfg.log.target)?),
+        log: Arc::new(AccessLog::start(
+            cfg.log.access,
+            cfg.log.output,
+            &cfg.log.file,
+            cfg.log.target,
+        )?),
         limiter: Arc::new(AuthLimiter::new(
             cfg.auth.max_failures,
             cfg.auth.failure_window,
@@ -457,7 +462,9 @@ async fn run_shard(
                                     proxy::handle_conn(k, ip, svc).await
                                 }
                             }
-                            Ok(Err(e)) => tracing::debug!(error = %e, "tls handshake / ktls offload failed"),
+                            Ok(Err(e)) => {
+                                tracing::debug!(error = %e, "tls handshake / ktls offload failed")
+                            }
                             Err(_) => tracing::debug!("tls handshake timed out"),
                         }
                         return;
@@ -901,7 +908,10 @@ mod tests {
     }
 
     /// Keep-alive GETs (CL + chunked) and a flushed 400 over one TLS session.
-    async fn https_keepalive_round<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(c: &mut S, up: SocketAddr) {
+    async fn https_keepalive_round<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+        c: &mut S,
+        up: SocketAddr,
+    ) {
         for path in ["/a", "/chunked", "/b"] {
             let req = format!("GET http://{up}{path} HTTP/1.1\r\nHost: {up}\r\n\r\n");
             c.write_all(req.as_bytes()).await.unwrap();
@@ -1089,7 +1099,11 @@ mod tests {
     }
 
     fn status(out: &[u8]) -> String {
-        String::from_utf8_lossy(out).lines().next().unwrap_or("").to_string()
+        String::from_utf8_lossy(out)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .to_string()
     }
 
     #[tokio::test]
@@ -1103,24 +1117,38 @@ mod tests {
         for req in [
             format!("CONNECT {up} HTTP/1.1\r\nHost: {up}\r\n\r\n"),
             format!("GET http://{up}/a HTTP/1.1\r\nHost: {up}\r\n\r\n"),
-            format!("GET http://localhost:{}/a HTTP/1.1\r\nHost: x\r\n\r\n", up.port()),
+            format!(
+                "GET http://localhost:{}/a HTTP/1.1\r\nHost: x\r\n\r\n",
+                up.port()
+            ),
             "CONNECT 169.254.169.254:80 HTTP/1.1\r\nHost: x\r\n\r\n".to_string(),
         ] {
             let st = status(&send_recv(a, req.as_bytes()).await);
             assert!(st.starts_with("HTTP/1.1 403"), "{req}: {st}");
         }
-        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
 
         // Port allowlist (private filter off): allowed port passes, other refused.
         let mut cfg = (*test_config(1, 100)).clone();
         cfg.filter.allowed_ports = vec![up.port()];
         let srv = start(Arc::new(cfg)).unwrap();
         let a = srv.local_addr();
-        let ok = send_recv(a, format!("GET http://{up}/a HTTP/1.1\r\nHost: {up}\r\nConnection: close\r\n\r\n").as_bytes()).await;
+        let ok = send_recv(
+            a,
+            format!("GET http://{up}/a HTTP/1.1\r\nHost: {up}\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
+        )
+        .await;
         assert!(status(&ok).starts_with("HTTP/1.1 200"), "{}", status(&ok));
         let st = status(&send_recv(a, b"CONNECT 127.0.0.1:1 HTTP/1.1\r\nHost: x\r\n\r\n").await);
         assert!(st.starts_with("HTTP/1.1 403"), "{st}");
-        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]
@@ -1147,7 +1175,10 @@ mod tests {
         let good = base64::engine::general_purpose::STANDARD.encode("u:good");
         let req = format!("CONNECT x:1 HTTP/1.1\r\nProxy-Authorization: Basic {good}\r\n\r\n");
         assert!(send_recv(a, req.as_bytes()).await.is_empty());
-        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]
@@ -1166,18 +1197,27 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
             let mut probe = [0u8; 1];
-            if let Ok(Ok(0)) = tokio::time::timeout(Duration::from_millis(1), c.read(&mut probe)).await {
+            if let Ok(Ok(0)) =
+                tokio::time::timeout(Duration::from_millis(1), c.read(&mut probe)).await
+            {
                 closed = true;
                 break;
             }
         }
         assert!(closed, "trickling client never cut");
         assert!(t0.elapsed() < Duration::from_secs(2), "{:?}", t0.elapsed());
-        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     /// SOCKS5 CONNECT with username/password; returns (stream, REP code).
-    async fn socks_connect(addr: SocketAddr, pass: Option<&str>, target: SocketAddr) -> (TcpStream, u8) {
+    async fn socks_connect(
+        addr: SocketAddr,
+        pass: Option<&str>,
+        target: SocketAddr,
+    ) -> (TcpStream, u8) {
         let mut c = TcpStream::connect(addr).await.unwrap();
         let method = if pass.is_some() { 2 } else { 0 };
         c.write_all(&[5, 1, method]).await.unwrap();
@@ -1233,7 +1273,10 @@ mod tests {
         c.read_exact(&mut back).await.unwrap();
         assert_eq!(&back, b"ping through socks");
         drop(c);
-        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
 
         // Destination policy applies to SOCKS5 too (REP 0x02).
         let mut cfg = (*test_config(1, 100)).clone();
@@ -1242,7 +1285,10 @@ mod tests {
         let srv = start(Arc::new(cfg)).unwrap();
         let (_, rep) = socks_connect(srv.socks_addr().unwrap(), None, echo_addr).await;
         assert_eq!(rep, 0x02);
-        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]
@@ -1253,9 +1299,16 @@ mod tests {
         cfg.auth.allow_clients = vec!["10.0.0.0/8".into()];
         cfg.socks5.listen = "127.0.0.1:0".into();
         let srv = start(Arc::new(cfg)).unwrap();
-        assert!(send_recv(srv.local_addr(), b"garbage\r\n\r\n").await.is_empty());
-        assert!(send_recv(srv.socks_addr().unwrap(), &[5, 1, 0]).await.is_empty());
-        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+        assert!(send_recv(srv.local_addr(), b"garbage\r\n\r\n")
+            .await
+            .is_empty());
+        assert!(send_recv(srv.socks_addr().unwrap(), &[5, 1, 0])
+            .await
+            .is_empty());
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
 
         // Inside the list: served as usual.
         let mut cfg = (*test_config(1, 100)).clone();
@@ -1263,7 +1316,10 @@ mod tests {
         let srv = start(Arc::new(cfg)).unwrap();
         let st = status(&send_recv(srv.local_addr(), b"garbage\r\n\r\n").await);
         assert!(st.starts_with("HTTP/1.1 400"), "{st}");
-        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     // ---- request bodies without Content-Length (chunked uploads) ----
@@ -1275,7 +1331,9 @@ mod tests {
         let addr = ln.local_addr().unwrap();
         tokio::spawn(async move {
             loop {
-                let Ok((s, _)) = ln.accept().await else { return };
+                let Ok((s, _)) = ln.accept().await else {
+                    return;
+                };
                 tokio::spawn(async move {
                     let mut r = tokio::io::BufReader::new(s);
                     use tokio::io::AsyncBufReadExt;
@@ -1315,7 +1373,10 @@ mod tests {
                             n = cl;
                         }
                         let body = format!("got {n}");
-                        let resp = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}", body.len());
+                        let resp = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+                            body.len()
+                        );
                         if r.get_mut().write_all(resp.as_bytes()).await.is_err() {
                             return;
                         }
@@ -1341,12 +1402,20 @@ mod tests {
         assert!(st.starts_with("HTTP/1.1 200"), "{st}");
         assert_eq!(body, b"got 11");
         // Keep-alive survives: a Content-Length upload on the same connection.
-        c.write_all(format!("POST http://{up}/u HTTP/1.1\r\nHost: {up}\r\nContent-Length: 3\r\n\r\nabc").as_bytes()).await.unwrap();
+        c.write_all(
+            format!("POST http://{up}/u HTTP/1.1\r\nHost: {up}\r\nContent-Length: 3\r\n\r\nabc")
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
         let (st, body) = read_resp(&mut c).await;
         assert!(st.starts_with("HTTP/1.1 200"), "{st}");
         assert_eq!(body, b"got 3");
         drop(c);
-        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]
@@ -1360,8 +1429,15 @@ mod tests {
             format!("POST http://{up}/u HTTP/1.1\r\nHost: {up}\r\nTransfer-Encoding: chunked\r\n\r\n10\r\n0123456789abcdef\r\n0\r\n\r\n").as_bytes(),
         )
         .await;
-        assert!(!status(&out).starts_with("HTTP/1.1 200"), "{}", status(&out));
-        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+        assert!(
+            !status(&out).starts_with("HTTP/1.1 200"),
+            "{}",
+            status(&out)
+        );
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]
@@ -1370,15 +1446,22 @@ mod tests {
         let up = upload_origin().await;
         let srv = start(cfg).unwrap();
         let mut send = h2_client(srv.tls_addr().unwrap(), der).await;
-        let req = http::Request::post(format!("http://{up}/u")).body(()).unwrap();
+        let req = http::Request::post(format!("http://{up}/u"))
+            .body(())
+            .unwrap();
         let (resp, mut tx) = send.send_request(req, false).unwrap();
-        tx.send_data(bytes::Bytes::from_static(b"hello "), false).unwrap();
-        tx.send_data(bytes::Bytes::from_static(b"h2 world"), true).unwrap();
+        tx.send_data(bytes::Bytes::from_static(b"hello "), false)
+            .unwrap();
+        tx.send_data(bytes::Bytes::from_static(b"h2 world"), true)
+            .unwrap();
         let resp = resp.await.unwrap();
         assert_eq!(resp.status(), 200);
         assert_eq!(h2_body(resp.into_body()).await, b"got 14");
         drop((tx, send));
-        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     // ---- SOCKS5 UDP ASSOCIATE ----
@@ -1430,7 +1513,9 @@ mod tests {
         let srv = start(Arc::new(cfg)).unwrap();
         let (ctl, relay) = socks_udp(srv.socks_addr().unwrap()).await;
         let u = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        u.send_to(&udp_dgram(echo, b"quic-ish"), relay).await.unwrap();
+        u.send_to(&udp_dgram(echo, b"quic-ish"), relay)
+            .await
+            .unwrap();
         let mut b = [0u8; 2048];
         let (n, _) = tokio::time::timeout(Duration::from_secs(2), u.recv_from(&mut b))
             .await
@@ -1442,8 +1527,15 @@ mod tests {
         drop(ctl);
         tokio::time::sleep(Duration::from_millis(50)).await;
         u.send_to(&udp_dgram(echo, b"late"), relay).await.unwrap();
-        assert!(tokio::time::timeout(Duration::from_millis(200), u.recv_from(&mut b)).await.is_err());
-        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), u.recv_from(&mut b))
+                .await
+                .is_err()
+        );
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
 
         // Destination policy: a private target is dropped.
         let mut cfg = (*test_config(1, 100)).clone();
@@ -1452,9 +1544,16 @@ mod tests {
         let srv = start(Arc::new(cfg)).unwrap();
         let (ctl, relay) = socks_udp(srv.socks_addr().unwrap()).await;
         u.send_to(&udp_dgram(echo, b"x"), relay).await.unwrap();
-        assert!(tokio::time::timeout(Duration::from_millis(200), u.recv_from(&mut b)).await.is_err());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), u.recv_from(&mut b))
+                .await
+                .is_err()
+        );
         drop(ctl);
-        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     // ---- access log ----
@@ -1507,21 +1606,44 @@ mod tests {
 
         let out = send_recv(
             srv.local_addr(),
-            format!("GET http://{up}/page?q=1 HTTP/1.1\r\nHost: {up}\r\nConnection: close\r\n\r\n").as_bytes(),
+            format!("GET http://{up}/page?q=1 HTTP/1.1\r\nHost: {up}\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
         )
         .await;
         assert!(status(&out).starts_with("HTTP/1.1 200"));
-        wait_log(&path, &["via=http1", "kind=http", "method=GET", &format!("target=http://{up}/page?q=1"), "status=200", "down=1000"]).await;
+        wait_log(
+            &path,
+            &[
+                "via=http1",
+                "kind=http",
+                "method=GET",
+                &format!("target=http://{up}/page?q=1"),
+                "status=200",
+                "down=1000",
+            ],
+        )
+        .await;
 
         let mut c = TcpStream::connect(srv.local_addr()).await.unwrap();
-        c.write_all(format!("CONNECT {echo_addr} HTTP/1.1\r\nHost: x\r\n\r\n").as_bytes()).await.unwrap();
+        c.write_all(format!("CONNECT {echo_addr} HTTP/1.1\r\nHost: x\r\n\r\n").as_bytes())
+            .await
+            .unwrap();
         let mut head = vec![0u8; 39];
         c.read_exact(&mut head).await.unwrap();
         c.write_all(b"12345").await.unwrap();
         let mut back = [0u8; 5];
         c.read_exact(&mut back).await.unwrap();
         drop(c);
-        wait_log(&path, &["kind=connect", &format!("target={echo_addr}"), "up=5", "down=5"]).await;
+        wait_log(
+            &path,
+            &[
+                "kind=connect",
+                &format!("target={echo_addr}"),
+                "up=5",
+                "down=5",
+            ],
+        )
+        .await;
 
         let (mut c, rep) = socks_connect(srv.socks_addr().unwrap(), None, echo_addr).await;
         assert_eq!(rep, 0);
@@ -1530,7 +1652,10 @@ mod tests {
         c.read_exact(&mut back).await.unwrap();
         drop(c);
         wait_log(&path, &["via=socks5", "kind=connect", "up=3", "down=3"]).await;
-        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]
@@ -1552,8 +1677,17 @@ mod tests {
         let ok = send_recv(a, format!("GET http://{up}/a HTTP/1.1\r\nProxy-Authorization: Basic {good}\r\nConnection: close\r\n\r\n").as_bytes()).await;
         assert!(status(&ok).starts_with("HTTP/1.1 200"));
         // Port refused and wrong key are.
-        send_recv(a, format!("CONNECT 127.0.0.1:1 HTTP/1.1\r\nProxy-Authorization: Basic {good}\r\n\r\n").as_bytes()).await;
-        send_recv(a, format!("CONNECT x:1 HTTP/1.1\r\nProxy-Authorization: Basic {bad}\r\n\r\n").as_bytes()).await;
+        send_recv(
+            a,
+            format!("CONNECT 127.0.0.1:1 HTTP/1.1\r\nProxy-Authorization: Basic {good}\r\n\r\n")
+                .as_bytes(),
+        )
+        .await;
+        send_recv(
+            a,
+            format!("CONNECT x:1 HTTP/1.1\r\nProxy-Authorization: Basic {bad}\r\n\r\n").as_bytes(),
+        )
+        .await;
         let s = wait_log(&path, &["event=auth-fail"]).await;
         assert!(s.contains("status=403 reason=port"), "{s}");
         assert!(!s.contains("status=200"), "{s}");
@@ -1564,9 +1698,19 @@ mod tests {
         srv.reopen_logs();
         tokio::time::sleep(Duration::from_millis(300)).await;
         send_recv(a, b"CONNECT 127.0.0.1:2 HTTP/1.1\r\n\r\n").await; // 407 without creds: not logged
-        send_recv(a, format!("CONNECT 127.0.0.1:2 HTTP/1.1\r\nProxy-Authorization: Basic {good}\r\n\r\n").as_bytes()).await;
+        send_recv(
+            a,
+            format!("CONNECT 127.0.0.1:2 HTTP/1.1\r\nProxy-Authorization: Basic {good}\r\n\r\n")
+                .as_bytes(),
+        )
+        .await;
         wait_log(&path, &["target=127.0.0.1:2", "status=403"]).await;
-        assert!(!std::fs::read_to_string(&rotated).unwrap().contains("127.0.0.1:2"));
-        tokio::task::spawn_blocking(move || srv.shutdown_and_join()).await.unwrap().unwrap();
+        assert!(!std::fs::read_to_string(&rotated)
+            .unwrap()
+            .contains("127.0.0.1:2"));
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
     }
 }

@@ -5,7 +5,7 @@
 #   make bench P=myproxy A=off R=5
 
 SHELL := /bin/bash
-.PHONY: help build test fmt clippy images up down smoke bench bench-off bench-3proxy bench-off-3proxy bench-all latest clean
+.PHONY: help build test fmt check clippy images up down smoke bench bench-all bench-scaling latest latest-3proxy latest-off clean
 
 P ?= myproxy
 A ?= on
@@ -23,15 +23,21 @@ test: ## tests unitaires
 
 fmt: ## formatter tout le code
 	cargo fmt --all
+	cd bench/uring-proto && cargo fmt
 
-clippy: ## linter (best effort)
-	@cargo clippy --release 2>/dev/null && echo "clippy clean" || echo "(clippy non installé: rustup component add clippy)"
+check: ## fmt + clippy (0 warning) + tests — à passer avant chaque commit
+	cargo fmt --all --check
+	cargo clippy --workspace --all-targets -- -D warnings
+	cargo test -p myproxy
 
-images: ## construire les images Docker (sérialisé — rustc pic ~1-2 GB)
+clippy: ## linter (warnings = erreurs)
+	cargo clippy --workspace --all-targets -- -D warnings
+
+images: ## construire toutes les images Docker (sérialisé — rustc pic ~1-2 GB)
 	cd bench && docker compose build generator
 	cd bench && docker compose build upstream
-	cd bench && docker build -q -t myproxy:bench -f dut/myproxy/Dockerfile ..
-	cd bench && docker build -q -t 3proxy:bench -f dut/3proxy/Dockerfile ..
+	cd bench && for p in myproxy 3proxy squid gost tinyproxy; do \
+		docker build -q -t $$p:bench -f dut/$$p/Dockerfile .. >/dev/null && echo "$$p:bench"; done
 
 up: ## monter la stack (upstream + sink + proxy)
 	cd bench && . ./env.sh && docker compose up -d upstream sink proxy && sleep 1 && docker ps --format '{{.Names}}\t{{.Status}}' | grep proxybench
@@ -53,11 +59,9 @@ latest: ## afficher la dernière passe de résultats du proxy courant
 latest-3proxy: latest P=3proxy
 latest-off: latest A=off
 
-bench-all: ## les 4 matrices en séquence (myproxy/3proxy × on/off) — ~1 h
-	cd bench && ./run-bench.sh myproxy on
-	cd bench && ./run-bench.sh myproxy off
-	cd bench && ./run-bench.sh 3proxy on
-	cd bench && ./run-bench.sh 3proxy off
+bench-all: ## campagne complète : 5 proxies × clair/TLS/h2 (~2-3 h) puis tableaux
+	cd bench && AUTH=$(A) ./run-campaign.sh
+	cd bench && ./tools/campaign-table.py $$(ls -t results/campaign-*.txt | head -1)
 
 bench-scaling: ## courbe multi-core (VPS) : PROXIES="..." NCPUS="1 2 4 8" make bench-scaling
 	cd bench && AUTH=$(A) ./run-scaling.sh

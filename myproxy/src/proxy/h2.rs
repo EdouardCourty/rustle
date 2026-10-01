@@ -193,7 +193,16 @@ async fn dial(
     port: u16,
     key: &str,
 ) -> Result<TcpStream, (StatusCode, Option<&'static str>)> {
-    match pipeline::connect_upstream(host, port, ctx.cfg.timeouts.connect, &ctx.dns, key, &ctx.dest).await {
+    match pipeline::connect_upstream(
+        host,
+        port,
+        ctx.cfg.timeouts.connect,
+        &ctx.dns,
+        key,
+        &ctx.dest,
+    )
+    .await
+    {
         Ok(up) => {
             let _ = up.set_nodelay(true);
             Ok(up)
@@ -227,7 +236,8 @@ async fn connect(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
     let up = match dial(ctx, &host, port, &key).await {
         Ok(up) => up,
         Err((status, reason)) => {
-            ctx.svc.log_fail(ctx.peer, "h2", "connect", &key, status.as_u16(), reason);
+            ctx.svc
+                .log_fail(ctx.peer, "h2", "connect", &key, status.as_u16(), reason);
             reply(&mut respond, status);
             return;
         }
@@ -239,7 +249,8 @@ async fn connect(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
     let (c2u, u2c) = tunnel(req.into_body(), send, up, ctx.cfg.timeouts.idle).await;
     tracing::trace!(c2u, u2c, "h2 tunnel closed");
     if ctx.log.all() {
-        ctx.svc.log_tunnel(ctx.peer, "h2", "connect", &key, (c2u, u2c), t0);
+        ctx.svc
+            .log_tunnel(ctx.peer, "h2", "connect", &key, (c2u, u2c), t0);
     }
 }
 
@@ -413,7 +424,11 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
         Some(v) => match v.to_str().ok().and_then(|s| s.trim().parse::<u64>().ok()) {
             Some(n) => Some(n),
             None => {
-                fail(&mut respond, StatusCode::BAD_REQUEST, Some("content-length"));
+                fail(
+                    &mut respond,
+                    StatusCode::BAD_REQUEST,
+                    Some("content-length"),
+                );
                 return;
             }
         },
