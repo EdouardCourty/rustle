@@ -94,8 +94,11 @@ listen = ""
 # from the proxy, truncated responses) | all (+ one line per request / h2
 # stream and one per tunnel when it closes).
 access = "errors"
-# Empty = no access log. logrotate: rename, then `kill -HUP <pid>`
-# (postrotate), or `copytruncate`.
+# file | stdout. stdout: journald / `docker logs` keep the lines (the
+# diagnostics stay on stderr); `file` is then ignored.
+output = "file"
+# With output = "file": empty = no access log. logrotate: rename, then
+# `kill -HUP <pid>` (postrotate), or `copytruncate`.
 file = ""
 # host (host:port) | url (method + full URL of plain-HTTP requests).
 target = "host"

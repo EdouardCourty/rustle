@@ -171,7 +171,7 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
         dns: Arc::new(DnsCache::new(cfg.dns.ttl, cfg.dns.max_entries)),
         dest: Arc::new(DestPolicy::from_config(&cfg)?),
         clients: ClientPolicy::from_config(&cfg)?,
-        log: Arc::new(AccessLog::start(cfg.log.access, &cfg.log.file, cfg.log.target)?),
+        log: Arc::new(AccessLog::start(cfg.log.access, cfg.log.output, &cfg.log.file, cfg.log.target)?),
         limiter: Arc::new(AuthLimiter::new(
             cfg.auth.max_failures,
             cfg.auth.failure_window,

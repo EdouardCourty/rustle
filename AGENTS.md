@@ -13,7 +13,7 @@ Makefile              build test fmt clippy images up down smoke bench bench-off
 myproxy/              le proxy
   config.toml.example
   src/
-    main.rs           tracing (RUST_LOG), config = argv[1] (défaut config.toml), server::start puis attente SIGTERM/SIGINT
+    main.rs           tracing (RUST_LOG, sur stderr), config = argv[1] (défaut config.toml), server::start puis attente SIGTERM/SIGINT
     config/mod.rs     TOML → structs (humantime pour les durées)
     server/mod.rs     shards (thread + runtime current_thread + listeners SO_REUSEPORT clair + TLS + pool), handshake TLS puis dispatch h2/h1 selon ALPN, compteur global max_connections, admin /health, trim, shutdown gracieux 5 s
     stream.rs         trait ClientStream (TcpStream | TlsStream) : tcp()/into_tcp() = chemins splice/QUICKACK, TLS = copie user-space
@@ -79,7 +79,7 @@ bench/
 | `timeouts.request_head` | 10s (total head / handshake SOCKS5, anti-slowloris) |
 | `filter.block_private` / `deny` / `allowed_ports` | **true** / [] / [] (vide = tous) — les configs de bench mettent false (réseau Docker privé) |
 | `socks5.listen` | `""` (off) |
-| `log.access` / `file` / `target` | errors / `""` (off) / host (ou url) — bench : off, `ACCESS_LOG=all` pour mesurer |
+| `log.access` / `output` / `file` / `target` | errors / file (ou stdout) / `""` (off) / host (ou url) — bench : off, `ACCESS_LOG=all` pour mesurer |
 
 `deny_unknown_fields` sur toutes les sections : une clé inconnue ou mal placée fait échouer le chargement.
 

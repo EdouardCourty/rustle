@@ -32,7 +32,9 @@ pub struct Config {
 pub struct LogConfig {
     /// off | errors | all.
     pub access: crate::accesslog::Level,
-    /// Log file (empty = no access log).
+    /// file | stdout.
+    pub output: crate::accesslog::Output,
+    /// Log file when `output = "file"` (empty = no access log).
     pub file: String,
     /// host | url: how a plain-HTTP request target is written.
     pub target: crate::accesslog::TargetMode,
