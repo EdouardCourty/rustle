@@ -40,7 +40,12 @@ enum Cmd {
 pub async fn handle_socks5(mut client: TcpStream, peer: IpAddr, svc: Arc<Services>) {
     let cfg = &svc.cfg;
     // The whole negotiation is bounded (slowloris), like a request head.
-    let cmd = match timeout(cfg.timeouts.request_head, negotiate(&mut client, peer, &svc)).await {
+    let cmd = match timeout(
+        cfg.timeouts.request_head,
+        negotiate(&mut client, peer, &svc),
+    )
+    .await
+    {
         Ok(Ok(Some(c))) => c,
         _ => return,
     };
@@ -57,7 +62,16 @@ pub async fn handle_socks5(mut client: TcpStream, peer: IpAddr, svc: Arc<Service
     key.push_str(&host);
     key.push(':');
     pipeline::push_u16(&mut key, port);
-    let up = match pipeline::connect_upstream(&host, port, cfg.timeouts.connect, &svc.dns, &key, &svc.dest).await {
+    let up = match pipeline::connect_upstream(
+        &host,
+        port,
+        cfg.timeouts.connect,
+        &svc.dns,
+        &key,
+        &svc.dest,
+    )
+    .await
+    {
         Ok(up) => up,
         Err(e) => {
             // Access log speaks HTTP status codes for every transport.
@@ -75,7 +89,10 @@ pub async fn handle_socks5(mut client: TcpStream, peer: IpAddr, svc: Arc<Service
         }
     };
     let _ = up.set_nodelay(true);
-    if reply(&mut client, REP_OK, up.local_addr().ok()).await.is_err() {
+    if reply(&mut client, REP_OK, up.local_addr().ok())
+        .await
+        .is_err()
+    {
         return;
     }
     let t0 = std::time::Instant::now();
@@ -105,7 +122,11 @@ async fn negotiate(
     let mut methods = [0u8; 255];
     let methods = &mut methods[..h[1] as usize];
     c.read_exact(methods).await?;
-    let want = if svc.auth.enabled() { USER_PASS } else { NO_AUTH };
+    let want = if svc.auth.enabled() {
+        USER_PASS
+    } else {
+        NO_AUTH
+    };
     if !methods.contains(&want) {
         c.write_all(&[VER, NO_METHOD]).await?;
         return Ok(None);
@@ -183,7 +204,11 @@ async fn negotiate(
 }
 
 /// VER | REP | RSV | ATYP | BND.ADDR | BND.PORT
-pub(super) async fn reply(c: &mut TcpStream, rep: u8, bound: Option<SocketAddr>) -> std::io::Result<()> {
+pub(super) async fn reply(
+    c: &mut TcpStream,
+    rep: u8,
+    bound: Option<SocketAddr>,
+) -> std::io::Result<()> {
     let mut out = [0u8; 22];
     out[..3].copy_from_slice(&[VER, rep, 0]);
     let n = match bound {

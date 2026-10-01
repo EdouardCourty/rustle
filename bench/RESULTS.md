@@ -379,3 +379,63 @@ timers, pas d'io_uring. 1 MB / 10 MB / short non comparables (proto sans splice 
 partagé). **Verdict** : ±8 % selon la taille, pas de gain net — même conclusion que M11 (FSM
 epoll) : sur un core, le coût est dans la pile TCP du noyau. Pas de migration ; à retester sur
 le VPS multi-core (batching des soumissions).
+
+## M19 — campagne finale — 2026-10-01, seed 2004113323, auth on, 1 core proxy
+
+`bench/run-campaign.sh` (5 proxies × chaque transport supporté), tables par
+`bench/tools/campaign-table.py`. Cellule = débit · CPU proxy par requête (http : µs/req,
+flood : ms/GB) ; holds = tunnels ouverts / demandés · pic RAM. Configuration par défaut de
+myproxy (kTLS off, log off). Aucune erreur (`err_kinds` vides) ; seules les reconnexions de
+Tinyproxy (1 par requête, il ferme sans l'annoncer).
+
+### plain
+
+| test | myproxy | 3proxy | squid | gost | tinyproxy |
+|---|---|---|---|---|---|
+| http-1kb | 14,332 rps 49µs | 1,558 rps 74µs | 8,841 rps 124µs | 1,930 rps 561µs | 2,627 rps 366µs |
+| http-10kb | 14,024 rps 61µs | 13,207 rps 79µs | 7,174 rps 152µs | 1,864 rps 575µs | 2,606 rps 396µs |
+| http-1mb | 2,622 rps 336µs | 2,437 rps 369µs | 306 rps 3601µs | 703 rps 1553µs | 130 rps 8445µs |
+| http-10mb | 347 rps 2168µs | 279 rps 2628µs | 32 rps 35203µs | 104 rps 10562µs | 14 rps 82017µs |
+| http-1kb-short | 4,822 rps 87µs | 3,345 rps 261µs | 3,775 rps 237µs | 1,927 rps 567µs | 2,802 rps 356µs |
+| flood | 19.0 Gbps 152ms/GB | 17.7 Gbps 192ms/GB | 12.9 Gbps 674ms/GB | 11.6 Gbps 750ms/GB | 1.2 Gbps 6913ms/GB |
+| hold-1000 | 1,000/1000 10.2MB | 1,000/1000 26.0MB | 1,000/1000 164.8MB | 1,000/1000 179.9MB | 1,000/1000 21.8MB |
+| hold-5000 | 5,000/5000 29.8MB | 5,000/5000 117.1MB | 5,000/5000 291.7MB | 5,000/5000 774.5MB | 5,000/5000 95.9MB |
+| hold-10000 | 10,000/10000 52.2MB | 10,000/10000 230.8MB | 10,000/10000 449.7MB | 10,000/10000 1446.2MB | 10,000/10000 189.6MB |
+| hold-25000 | 25,000/25000 124.8MB | 24,959/25000 384.5MB | 25,000/25000 875.3MB | 18,656/25000 0.00MB | 16,765/25000 314.0MB |
+
+### tls
+
+| test | myproxy | squid | gost |
+|---|---|---|---|
+| http-1kb | 14,018 rps 57µs | 7,837 rps 141µs | 1,566 rps 676µs |
+| http-10kb | 13,540 rps 62µs | 5,999 rps 183µs | 1,550 rps 690µs |
+| http-1mb | 1,297 rps 813µs | 182 rps 6060µs | 464 rps 2328µs |
+| http-10mb | 108 rps 10017µs | 18 rps 60648µs | 59 rps 18334µs |
+| http-1kb-short | 2,722 rps 278µs | 1,618 rps 669µs | 1,603 rps 661µs |
+| flood | 9.3 Gbps 938ms/GB | 4.8 Gbps 1796ms/GB | 6.6 Gbps 1309ms/GB |
+| hold-1000 | 1,000/1000 47.9MB | 1,000/1000 203.5MB | 1,000/1000 246.5MB |
+| hold-5000 | 5,000/5000 222.8MB | 5,000/5000 462.9MB | 5,000/5000 1044.2MB |
+| hold-10000 | 10,000/10000 438.7MB | 10,000/10000 811.6MB | 10,000/10000 1863.8MB |
+| hold-25000 | 25,000/25000 802.4MB | 25,000/25000 2028.0MB | 0/25000 0.00MB |
+
+### h2
+
+| test | myproxy | gost |
+|---|---|---|
+| http-1kb | 13,028 rps 70µs | 3,922 rps 281µs |
+| http-10kb | 12,232 rps 82µs | 3,709 rps 295µs |
+| http-1mb | 739 rps 1428µs | 324 rps 3374µs |
+| http-10mb | 68 rps 15495µs | 35 rps 30183µs |
+| http-1kb-short | 2,281 rps 354µs | 1,432 rps 689µs |
+| flood | 6.6 Gbps 1074ms/GB | 7.7 Gbps 1105ms/GB |
+| hold-1000 | 1,000/1000 93.2MB | 1,000/1000 259.0MB |
+| hold-5000 | 5,000/5000 462.9MB | 5,000/5000 997.1MB |
+| hold-10000 | 10,000/10000 807.2MB | 10,000/10000 0.00MB |
+| hold-25000 | 21,291/25000 1112.7MB | 931/25000 0.00MB |
+
+Notes : 3proxy 1 KB = delayed-ACK 40 ms (caveat historique) ; 3proxy tient cette fois 24 959 /
+25 000 tunnels (17 146 en M13 — variance connue de son mur à ~17-25k) ; gost : conteneur tué
+par manque de RAM à 25k (clair et TLS) et dès la fin de hold-10k en h2 (pic 0) ; myproxy h2
+hold-25k limité par le générateur (une connexion TLS+h2 par tunnel), comme en M13. Écarts à
+M13 dans le bruit.
+

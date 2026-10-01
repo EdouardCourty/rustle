@@ -19,14 +19,14 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
+use crate::accesslog::AccessLog;
 use crate::auth::Authenticator;
 use crate::config::Config;
 use crate::dns::DnsCache;
 use crate::http::{classify, read_head, HeadError, Target};
+use crate::policy::{AuthLimiter, DestPolicy};
 use crate::relay;
 use crate::stream::ClientStream;
-use crate::accesslog::AccessLog;
-use crate::policy::{AuthLimiter, DestPolicy};
 use crate::upstream::UpstreamPool;
 
 use pipeline::UpstreamError;
@@ -79,7 +79,13 @@ impl Services {
         if !self.log.errors() {
             return;
         }
-        self.log.emit(self.log.line().kv("client", peer).kv("event", "auth-fail").kv("via", via));
+        self.log.emit(
+            self.log
+                .line()
+                .kv("client", peer)
+                .kv("event", "auth-fail")
+                .kv("via", via),
+        );
         if banned {
             self.log.emit(
                 self.log
@@ -87,7 +93,10 @@ impl Services {
                     .kv("client", peer)
                     .kv("event", "ban")
                     .kv("failures", self.cfg.auth.max_failures)
-                    .kv("for", format_args!("{}s", self.cfg.auth.ban_duration.as_secs())),
+                    .kv(
+                        "for",
+                        format_args!("{}s", self.cfg.auth.ban_duration.as_secs()),
+                    ),
             );
         }
     }
@@ -126,8 +135,7 @@ struct Tunnel {
 }
 
 const RESP_407: &[u8] = b"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"myproxy\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-const RESP_403: &[u8] =
-    b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+const RESP_403: &[u8] = b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 const RESP_400: &[u8] =
     b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 const RESP_431: &[u8] = b"HTTP/1.1 431 Request Header Fields Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
@@ -168,11 +176,7 @@ pub async fn handle_conn<C: ClientStream>(mut client: C, peer: IpAddr, svc: Arc<
 /// The keep-alive loop. Returns the upstream socket when the connection
 /// becomes a CONNECT tunnel (the 200 is already sent); `None` when it must
 /// be closed.
-async fn serve<C: ClientStream>(
-    client: &mut C,
-    peer: IpAddr,
-    svc: &Services,
-) -> Option<Tunnel> {
+async fn serve<C: ClientStream>(client: &mut C, peer: IpAddr, svc: &Services) -> Option<Tunnel> {
     let cfg: &Config = &svc.cfg;
     let idle = cfg.timeouts.idle;
     let head_timeout = cfg.timeouts.request_head;
