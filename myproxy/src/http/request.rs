@@ -49,6 +49,8 @@ pub struct RequestHead {
     pub auth: Option<Span>,
     pub host: Option<Span>,
     pub content_length: Option<u64>,
+    /// `Transfer-Encoding: chunked` body (relayed verbatim upstream).
+    pub chunked: bool,
     pub close: bool,
 }
 
@@ -115,13 +117,15 @@ pub async fn read_head<S: tokio::io::AsyncRead + Unpin>(
 }
 
 impl RequestHead {
-    /// `None` = ambiguous body framing (request smuggling vectors): any
-    /// Transfer-Encoding (request bodies are relayed by Content-Length
-    /// only), an invalid Content-Length, or conflicting duplicates.
+    /// `None` = ambiguous body framing (request smuggling vectors):
+    /// Transfer-Encoding other than a single plain `chunked`, TE together
+    /// with Content-Length, TE on HTTP/1.0, an invalid Content-Length, or
+    /// conflicting duplicates.
     fn from(req: &httparse::Request, len: usize, buf: &[u8]) -> Option<Self> {
         let mut auth = None;
         let mut host = None;
         let mut content_length = None;
+        let mut chunked = false;
         let mut close = false;
         for h in req.headers.iter() {
             if h.name.eq_ignore_ascii_case("proxy-authorization") {
@@ -139,10 +143,16 @@ impl RequestHead {
                 }
                 content_length = Some(v);
             } else if h.name.eq_ignore_ascii_case("transfer-encoding") {
-                return None;
+                if chunked || !h.value.trim_ascii().eq_ignore_ascii_case(b"chunked") {
+                    return None;
+                }
+                chunked = true;
             } else if h.name.eq_ignore_ascii_case("connection") {
                 close = contains_token(h.value, "close");
             }
+        }
+        if chunked && (content_length.is_some() || req.version == Some(0)) {
+            return None;
         }
         Some(RequestHead {
             raw_len: len,
@@ -152,6 +162,7 @@ impl RequestHead {
             auth,
             host,
             content_length,
+            chunked,
             close,
         })
     }
@@ -362,6 +373,7 @@ mod tests {
             auth: None,
             host: host.map(|(s, e)| Span { start: s, end: e }),
             content_length: None,
+            chunked: false,
             close: false,
         }
     }
@@ -513,9 +525,15 @@ mod tests {
     fn ambiguous_body_framing_rejected() {
         let ok = parse(b"POST / HTTP/1.1\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\n");
         assert_eq!(ok.unwrap().content_length, Some(5));
+        let c = parse(b"POST / HTTP/1.1\r\nTransfer-Encoding:  Chunked \r\n\r\n").unwrap();
+        assert!(c.chunked && c.content_length.is_none());
         for bad in [
-            &b"POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n"[..],
-            b"POST / HTTP/1.1\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n",
+            &b"POST / HTTP/1.1\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n"[..],
+            b"POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\nContent-Length: 5\r\n\r\n",
+            b"POST / HTTP/1.1\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+            b"POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n",
+            b"POST / HTTP/1.1\r\nTransfer-Encoding: identity\r\n\r\n",
+            b"POST / HTTP/1.0\r\nTransfer-Encoding: chunked\r\n\r\n",
             b"POST / HTTP/1.1\r\nContent-Length: 5\r\nContent-Length: 6\r\n\r\n",
             b"POST / HTTP/1.1\r\nContent-Length: +5\r\n\r\n",
             b"POST / HTTP/1.1\r\nContent-Length: abc\r\n\r\n",

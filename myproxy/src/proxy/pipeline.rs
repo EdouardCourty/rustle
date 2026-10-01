@@ -73,6 +73,7 @@ pub(super) async fn http<C: ClientStream>(
     // pooled connection that died while idle is retried once on a fresh
     // one (safe: no response byte has reached the client at that point).
     let mut attempt = 0;
+    let mut close_after;
     let (mut up, _from_pool, mut rhead) = loop {
         attempt += 1;
         let (mut up, from_pool) = match pool.take(key) {
@@ -108,15 +109,19 @@ pub(super) async fn http<C: ClientStream>(
         let idempotent =
             method.eq_ignore_ascii_case(b"GET") || method.eq_ignore_ascii_case(b"HEAD");
         let replayable = idempotent
+            && !head.chunked
             && head.content_length.unwrap_or(0) as usize == buf.len().saturating_sub(head.raw_len);
 
         let mut ctx = UpWriteCtx {
             idle,
             max_request_body: cfg.http.max_request_body_bytes,
             body_rejected: false,
+            close_after: false,
             rewrite_buf,
         };
-        if !forward_request(client, &mut up, buf, head, origin_span, &mut ctx).await {
+        let forwarded = forward_request(client, &mut up, buf, head, origin_span, &mut ctx).await;
+        close_after = ctx.close_after;
+        if !forwarded {
             // Body over budget: answer 413 and drop (the client may still
             // be uploading — the close aborts it, like nginx does).
             if ctx.body_rejected {
@@ -279,7 +284,7 @@ pub(super) async fn http<C: ClientStream>(
     if rhead.keep_alive && !over_read {
         pool.put(key, up);
     }
-    !(head.close || head.version_minor == 0)
+    !(head.close || head.version_minor == 0 || close_after)
 }
 
 /// Writes the rewritten request head plus the request body to the upstream.
@@ -294,6 +299,9 @@ struct UpWriteCtx<'a> {
     /// Set when the declared request-body budget was exceeded (caller
     /// answers 413).
     body_rejected: bool,
+    /// Bytes followed the chunked body (a pipelined request, unsupported):
+    /// close after the response.
+    close_after: bool,
     rewrite_buf: &'a mut Vec<u8>,
 }
 
@@ -322,6 +330,9 @@ async fn forward_request<C: ClientStream>(
         head.method.slice(buf),
         origin.slice(buf),
     );
+    if head.chunked {
+        return forward_chunked(client, up, buf, head, ctx).await;
+    }
     let body = &buf[head.raw_len..];
     if body.len() as u64 > content_length {
         // Pipelined bytes beyond the body are not supported in V1.
@@ -370,6 +381,34 @@ async fn forward_request<C: ClientStream>(
         let _ = crate::relay::copy_limited(&mut limited, up, None, ctx.idle).await;
     }
     true
+}
+
+/// Chunked request body: head first, then the body relayed verbatim
+/// (framing included) by the chunked relay — the rewrite scratch is its
+/// staging buffer (the head is out), seeded with the body bytes read along
+/// with the head. The body budget is enforced while relaying.
+async fn forward_chunked<C: ClientStream>(
+    client: &mut C,
+    up: &mut TcpStream,
+    buf: &[u8],
+    head: &RequestHead,
+    ctx: &mut UpWriteCtx<'_>,
+) -> bool {
+    if !matches!(timeout(ctx.idle, up.write_all(ctx.rewrite_buf)).await, Ok(Ok(()))) {
+        return false;
+    }
+    ctx.rewrite_buf.clear();
+    ctx.rewrite_buf.extend_from_slice(&buf[head.raw_len..]);
+    match relay::chunked(client, up, ctx.rewrite_buf, 0, ctx.max_request_body, ctx.idle).await {
+        Ok(end) => {
+            ctx.close_after = end.over_read;
+            true
+        }
+        Err(e) => {
+            tracing::debug!(error = %e, "chunked request body aborted");
+            false
+        }
+    }
 }
 
 /// Builds the upstream connection to `host:port`:

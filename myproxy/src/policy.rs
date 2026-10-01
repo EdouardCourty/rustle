@@ -63,7 +63,7 @@ impl Cidr {
 }
 
 /// IPv4-mapped IPv6 (`::ffff:a.b.c.d`) is the IPv4 address it wraps.
-fn canonical(ip: IpAddr) -> IpAddr {
+pub(crate) fn canonical(ip: IpAddr) -> IpAddr {
     match ip {
         IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
             Some(v4) => IpAddr::V4(v4),

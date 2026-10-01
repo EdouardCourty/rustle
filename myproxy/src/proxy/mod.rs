@@ -6,6 +6,7 @@
 mod h2;
 mod pipeline;
 mod socks5;
+mod socks5_udp;
 
 pub use h2::handle_h2;
 pub use socks5::handle_socks5;

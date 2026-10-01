@@ -1,5 +1,5 @@
-//! SOCKS5 listener (RFC 1928): CONNECT only (BIND / UDP ASSOCIATE are
-//! refused with "command not supported"). Authentication is RFC 1929
+//! SOCKS5 listener (RFC 1928): CONNECT and UDP ASSOCIATE (QUIC/HTTP3,
+//! DNS, games); BIND is refused with "command not supported". Authentication is RFC 1929
 //! username/password with the API key as the password (the username is
 //! ignored, as with HTTP Basic); no authentication when no key is
 //! configured. Same destination policy and ban rules as the HTTP side; the
@@ -22,7 +22,7 @@ const USER_PASS: u8 = 0x02;
 const NO_METHOD: u8 = 0xff;
 
 /// Reply codes (RFC 1928 §6).
-const REP_OK: u8 = 0x00;
+pub(super) const REP_OK: u8 = 0x00;
 const REP_FAILURE: u8 = 0x01;
 const REP_NOT_ALLOWED: u8 = 0x02;
 const REP_HOST_UNREACHABLE: u8 = 0x04;
@@ -31,12 +31,27 @@ const REP_TTL_EXPIRED: u8 = 0x06;
 const REP_CMD_UNSUPPORTED: u8 = 0x07;
 const REP_ATYP_UNSUPPORTED: u8 = 0x08;
 
+/// What the client asked for.
+enum Cmd {
+    Connect(String, u16),
+    UdpAssociate,
+}
+
 pub async fn handle_socks5(mut client: TcpStream, peer: IpAddr, svc: Arc<Services>) {
     let cfg = &svc.cfg;
     // The whole negotiation is bounded (slowloris), like a request head.
-    let (host, port) = match timeout(cfg.timeouts.request_head, negotiate(&mut client, peer, &svc)).await {
-        Ok(Ok(Some(t))) => t,
+    let cmd = match timeout(cfg.timeouts.request_head, negotiate(&mut client, peer, &svc)).await {
+        Ok(Ok(Some(c))) => c,
         _ => return,
+    };
+    let (host, port) = match cmd {
+        Cmd::Connect(h, p) => (h, p),
+        Cmd::UdpAssociate => {
+            if let Err(e) = super::socks5_udp::associate(client, peer, &svc).await {
+                tracing::debug!(error = %e, "socks5 udp association ended");
+            }
+            return;
+        }
     };
     let mut key = String::with_capacity(host.len() + 6);
     key.push_str(&host);
@@ -71,7 +86,7 @@ async fn negotiate(
     c: &mut TcpStream,
     peer: IpAddr,
     svc: &Services,
-) -> std::io::Result<Option<(String, u16)>> {
+) -> std::io::Result<Option<Cmd>> {
     let mut h = [0u8; 2];
     c.read_exact(&mut h).await?;
     if h[0] != VER {
@@ -145,15 +160,20 @@ async fn negotiate(
     };
     let mut p = [0u8; 2];
     c.read_exact(&mut p).await?;
-    if r[1] != 1 {
-        reply(c, REP_CMD_UNSUPPORTED, None).await?;
-        return Ok(None);
+    match r[1] {
+        1 => Ok(Some(Cmd::Connect(host, u16::from_be_bytes(p)))),
+        // DST of an UDP ASSOCIATE is the client's own (often zero) address:
+        // datagrams are accepted from the TCP peer's IP only.
+        3 => Ok(Some(Cmd::UdpAssociate)),
+        _ => {
+            reply(c, REP_CMD_UNSUPPORTED, None).await?;
+            Ok(None)
+        }
     }
-    Ok(Some((host, u16::from_be_bytes(p))))
 }
 
 /// VER | REP | RSV | ATYP | BND.ADDR | BND.PORT
-async fn reply(c: &mut TcpStream, rep: u8, bound: Option<SocketAddr>) -> std::io::Result<()> {
+pub(super) async fn reply(c: &mut TcpStream, rep: u8, bound: Option<SocketAddr>) -> std::io::Result<()> {
     let mut out = [0u8; 22];
     out[..3].copy_from_slice(&[VER, rep, 0]);
     let n = match bound {
