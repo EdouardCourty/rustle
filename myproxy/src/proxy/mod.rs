@@ -25,6 +25,7 @@ use crate::dns::DnsCache;
 use crate::http::{classify, read_head, HeadError, Target};
 use crate::relay;
 use crate::stream::ClientStream;
+use crate::accesslog::AccessLog;
 use crate::policy::{AuthLimiter, DestPolicy};
 use crate::upstream::UpstreamPool;
 
@@ -39,7 +40,89 @@ pub struct Services {
     pub dns: Arc<DnsCache>,
     pub dest: Arc<DestPolicy>,
     pub limiter: Arc<AuthLimiter>,
+    pub log: Arc<AccessLog>,
     pub pool: UpstreamPool,
+}
+
+impl Services {
+    /// Failure line (errors level): refused or failed request/tunnel.
+    pub(crate) fn log_fail(
+        &self,
+        peer: IpAddr,
+        via: &str,
+        kind: &str,
+        target: &str,
+        status: u16,
+        reason: Option<&str>,
+    ) {
+        if !self.log.errors() {
+            return;
+        }
+        let mut l = self
+            .log
+            .line()
+            .kv("client", peer)
+            .kv("via", via)
+            .kv("kind", kind)
+            .kv("target", target)
+            .kv("status", status);
+        if let Some(r) = reason {
+            l = l.kv("reason", r);
+        }
+        self.log.emit(l);
+    }
+
+    /// Wrong credentials: counts towards a ban; logs the failure and the
+    /// ban when it triggers.
+    pub(crate) fn auth_failed(&self, peer: IpAddr, via: &str) {
+        let banned = self.limiter.fail(peer);
+        if !self.log.errors() {
+            return;
+        }
+        self.log.emit(self.log.line().kv("client", peer).kv("event", "auth-fail").kv("via", via));
+        if banned {
+            self.log.emit(
+                self.log
+                    .line()
+                    .kv("client", peer)
+                    .kv("event", "ban")
+                    .kv("failures", self.cfg.auth.max_failures)
+                    .kv("for", format_args!("{}s", self.cfg.auth.ban_duration.as_secs())),
+            );
+        }
+    }
+
+    /// Tunnel closed (all level).
+    pub(crate) fn log_tunnel(
+        &self,
+        peer: IpAddr,
+        via: &str,
+        kind: &str,
+        target: &str,
+        (up, down): (u64, u64),
+        t0: std::time::Instant,
+    ) {
+        self.log.emit(
+            self.log
+                .line()
+                .kv("client", peer)
+                .kv("via", via)
+                .kv("kind", kind)
+                .kv("target", target)
+                .kv("status", 200)
+                .kv("up", up)
+                .kv("down", down)
+                .kv("ms", t0.elapsed().as_millis()),
+        );
+    }
+}
+
+/// A connection that became a CONNECT tunnel.
+struct Tunnel {
+    up: TcpStream,
+    /// `host:port`, kept only when every tunnel is logged.
+    target: Option<String>,
+    t0: std::time::Instant,
 }
 
 const RESP_407: &[u8] = b"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"myproxy\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
@@ -64,9 +147,12 @@ pub async fn handle_conn<C: ClientStream>(mut client: C, peer: IpAddr, svc: Arc<
     match serve(&mut client, peer, &svc).await {
         // Tunnel: relay both directions until one side closes.
         // Inactivity-bounded internally (no absolute cap).
-        Some(up) => match relay::bidirectional(client, up, idle).await {
+        Some(t) => match relay::bidirectional(client, t.up, idle).await {
             Ok((c2u, u2c)) => {
                 tracing::trace!(c2u, u2c, "tunnel closed");
+                if let Some(target) = t.target {
+                    svc.log_tunnel(peer, C::VIA, "connect", &target, (c2u, u2c), t.t0);
+                }
             }
             Err(e) => tracing::trace!(error = %e, "tunnel error"),
         },
@@ -86,7 +172,7 @@ async fn serve<C: ClientStream>(
     client: &mut C,
     peer: IpAddr,
     svc: &Services,
-) -> Option<TcpStream> {
+) -> Option<Tunnel> {
     let cfg: &Config = &svc.cfg;
     let idle = cfg.timeouts.idle;
     let head_timeout = cfg.timeouts.request_head;
@@ -122,10 +208,12 @@ async fn serve<C: ClientStream>(
                 return None;
             }
             Err(HeadError::TooLarge) => {
+                svc.log_fail(peer, C::VIA, "http", "-", 431, None);
                 reply(client, RESP_431).await;
                 return None;
             }
             Err(HeadError::Invalid) => {
+                svc.log_fail(peer, C::VIA, "http", "-", 400, None);
                 reply(client, RESP_400).await;
                 return None;
             }
@@ -136,7 +224,7 @@ async fn serve<C: ClientStream>(
             // Wrong credentials count towards a ban; none at all is the
             // normal first challenge of a browser.
             if head.auth.is_some() {
-                svc.limiter.fail(peer);
+                svc.auth_failed(peer, C::VIA);
             }
             reply(client, RESP_407).await;
             return None;
@@ -145,6 +233,7 @@ async fn serve<C: ClientStream>(
         let target = match classify(&head, &buf) {
             Ok(t) => t,
             Err(_) => {
+                svc.log_fail(peer, C::VIA, "http", "-", 400, None);
                 reply(client, RESP_400).await;
                 return None;
             }
@@ -184,18 +273,25 @@ async fn serve<C: ClientStream>(
                         if !early.is_empty() {
                             let _ = timeout(idle, up.write_all(&early)).await;
                         }
-                        Some(up)
+                        Some(Tunnel {
+                            up,
+                            target: svc.log.all().then(|| origin_key.clone()),
+                            t0: std::time::Instant::now(),
+                        })
                     }
                     Err(UpstreamError::Timeout) => {
+                        svc.log_fail(peer, C::VIA, "connect", &origin_key, 504, None);
                         reply(client, RESP_504).await;
                         None
                     }
-                    Err(UpstreamError::Forbidden) => {
+                    Err(UpstreamError::Forbidden(reason)) => {
+                        svc.log_fail(peer, C::VIA, "connect", &origin_key, 403, Some(reason));
                         reply(client, RESP_403).await;
                         None
                     }
                     Err(UpstreamError::Other(e)) => {
                         tracing::debug!(error = %e, "upstream connect failed");
+                        svc.log_fail(peer, C::VIA, "connect", &origin_key, 502, None);
                         reply(client, RESP_502).await;
                         None
                     }
@@ -205,6 +301,7 @@ async fn serve<C: ClientStream>(
                 let keep_going = pipeline::http(
                     client,
                     svc,
+                    peer,
                     &mut buf,
                     &head,
                     &target,

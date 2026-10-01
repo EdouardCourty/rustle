@@ -60,12 +60,16 @@ pub async fn handle_socks5(mut client: TcpStream, peer: IpAddr, svc: Arc<Service
     let up = match pipeline::connect_upstream(&host, port, cfg.timeouts.connect, &svc.dns, &key, &svc.dest).await {
         Ok(up) => up,
         Err(e) => {
-            let rep = match e {
-                UpstreamError::Forbidden => REP_NOT_ALLOWED,
-                UpstreamError::Timeout => REP_TTL_EXPIRED,
-                UpstreamError::Other(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => REP_REFUSED,
-                UpstreamError::Other(_) => REP_HOST_UNREACHABLE,
+            // Access log speaks HTTP status codes for every transport.
+            let (rep, status, reason) = match e {
+                UpstreamError::Forbidden(r) => (REP_NOT_ALLOWED, 403, Some(r)),
+                UpstreamError::Timeout => (REP_TTL_EXPIRED, 504, None),
+                UpstreamError::Other(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
+                    (REP_REFUSED, 502, Some("refused"))
+                }
+                UpstreamError::Other(_) => (REP_HOST_UNREACHABLE, 502, None),
             };
+            svc.log_fail(peer, "socks5", "connect", &key, status, reason);
             let _ = reply(&mut client, rep, None).await;
             return;
         }
@@ -74,8 +78,14 @@ pub async fn handle_socks5(mut client: TcpStream, peer: IpAddr, svc: Arc<Service
     if reply(&mut client, REP_OK, up.local_addr().ok()).await.is_err() {
         return;
     }
+    let t0 = std::time::Instant::now();
     match relay::bidirectional(client, up, cfg.timeouts.idle).await {
-        Ok((c2u, u2c)) => tracing::trace!(c2u, u2c, "socks5 tunnel closed"),
+        Ok((c2u, u2c)) => {
+            tracing::trace!(c2u, u2c, "socks5 tunnel closed");
+            if svc.log.all() {
+                svc.log_tunnel(peer, "socks5", "connect", &key, (c2u, u2c), t0);
+            }
+        }
         Err(e) => tracing::trace!(error = %e, "socks5 tunnel error"),
     }
 }
@@ -118,7 +128,7 @@ async fn negotiate(
         let ok = svc.auth.check_key(pass);
         c.write_all(&[1, if ok { 0 } else { 1 }]).await?;
         if !ok {
-            svc.limiter.fail(peer);
+            svc.auth_failed(peer, "socks5");
             return Ok(None);
         }
     }

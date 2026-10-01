@@ -24,6 +24,7 @@ services:
     environment:
       AUTH: ${AUTH:-on}
       WORKERS: ${WORKERS:-1}
+      ACCESS_LOG: ${ACCESS_LOG:-off}
     cpuset: "${PROXY_CPU:-0}"
     sysctls:
       - net.core.somaxconn=65535

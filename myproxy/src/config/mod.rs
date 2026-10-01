@@ -23,6 +23,19 @@ pub struct Config {
     pub tls: TlsConfig,
     pub filter: FilterConfig,
     pub socks5: Socks5Config,
+    pub log: LogConfig,
+}
+
+/// Access log (see `accesslog`).
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct LogConfig {
+    /// off | errors | all.
+    pub access: crate::accesslog::Level,
+    /// Log file (empty = no access log).
+    pub file: String,
+    /// host | url: how a plain-HTTP request target is written.
+    pub target: crate::accesslog::TargetMode,
 }
 
 /// Destination policy (see `policy`).

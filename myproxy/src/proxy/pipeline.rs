@@ -9,6 +9,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
+use crate::accesslog::TargetMode;
 use crate::config::Config;
 use crate::dns::DnsCache;
 use crate::policy::DestPolicy;
@@ -21,8 +22,8 @@ use super::{RESP_502, RESP_504};
 
 pub(crate) enum UpstreamError {
     Timeout,
-    /// Refused by the destination policy (port or address).
-    Forbidden,
+    /// Refused by the destination policy: "port" | "private" | "deny".
+    Forbidden(&'static str),
     Other(std::io::Error),
 }
 
@@ -40,6 +41,7 @@ pub(crate) const RESP_413: &[u8] =
 pub(super) async fn http<C: ClientStream>(
     client: &mut C,
     svc: &super::Services,
+    peer: std::net::IpAddr,
     buf: &mut [u8],
     head: &RequestHead,
     target: &Target,
@@ -68,28 +70,61 @@ pub(super) async fn http<C: ClientStream>(
     origin_key.push(':');
     push_u16(origin_key, port);
     let key: &str = origin_key;
+    // Access log: start time only when every request is logged; the
+    // target string is built only when a line is actually written.
+    let t0 = svc.log.all().then(std::time::Instant::now);
+    let method_bytes = head.method.slice(buf);
+    let log_target = || match svc.log.target_mode() {
+        TargetMode::Host => key.to_string(),
+        TargetMode::Url => {
+            let origin = origin_span.slice(buf);
+            let origin = if origin.is_empty() { &b"/"[..] } else { origin };
+            format!("http://{key}{}", String::from_utf8_lossy(origin))
+        }
+    };
+    let log_fail = |status: u16, reason: Option<&str>| {
+        if svc.log.errors() {
+            let mut l = svc
+                .log
+                .line()
+                .kv("client", peer)
+                .kv("via", C::VIA)
+                .kv("kind", "http")
+                .kv_bytes("method", method_bytes)
+                .kv("target", log_target())
+                .kv("status", status);
+            if let Some(r) = reason {
+                l = l.kv("reason", r);
+            }
+            svc.log.emit(l);
+        }
+    };
 
     // Upstream connection: pooled reuse when possible, fresh otherwise. A
     // pooled connection that died while idle is retried once on a fresh
     // one (safe: no response byte has reached the client at that point).
     let mut attempt = 0;
     let mut close_after;
+    let mut sent: u64;
     let (mut up, _from_pool, mut rhead) = loop {
         attempt += 1;
         let (mut up, from_pool) = match pool.take(key) {
             Some(s) => (s, true),
             None => match connect_upstream(host_str, port, connect, &svc.dns, key, &svc.dest).await {
                 Ok(s) => (s, false),
-                Err(UpstreamError::Forbidden) => {
+                Err(UpstreamError::Forbidden(reason)) => {
+                    log_fail(403, Some(reason));
                     super::reply(client, super::RESP_403).await;
                     return false;
                 }
                 Err(UpstreamError::Timeout) => {
+                    log_fail(504, None);
                     super::reply(client, RESP_504).await;
                     return false;
                 }
                 Err(UpstreamError::Other(e)) => {
                     tracing::debug!(error = %e, "upstream connect failed");
+                    log_fail(502, None);
                     super::reply(client, RESP_502).await;
                     return false;
                 }
@@ -117,14 +152,17 @@ pub(super) async fn http<C: ClientStream>(
             max_request_body: cfg.http.max_request_body_bytes,
             body_rejected: false,
             close_after: false,
+            sent: 0,
             rewrite_buf,
         };
         let forwarded = forward_request(client, &mut up, buf, head, origin_span, &mut ctx).await;
         close_after = ctx.close_after;
+        sent = ctx.sent;
         if !forwarded {
             // Body over budget: answer 413 and drop (the client may still
             // be uploading — the close aborts it, like nginx does).
             if ctx.body_rejected {
+                log_fail(413, None);
                 super::reply(client, RESP_413).await;
             }
             return false;
@@ -146,8 +184,14 @@ pub(super) async fn http<C: ClientStream>(
             Ok(Err(RespError::Closed)) if from_pool && attempt == 1 => {
                 continue; // stale pooled socket: retry, fresh this time
             }
-            Ok(Err(_)) => return false,
-            Err(_) => return false, // idle timeout on the response head
+            Ok(Err(_)) => {
+                log_fail(502, Some("no-response"));
+                return false;
+            }
+            Err(_) => {
+                log_fail(504, Some("no-response")); // idle timeout on the response head
+                return false;
+            }
         }
     };
 
@@ -218,6 +262,7 @@ pub(super) async fn http<C: ClientStream>(
             .map(|l| l > cfg.http.max_response_body_bytes)
             .unwrap_or(false);
     if over_declared {
+        log_fail(502, Some("over-budget"));
         super::reply(client, RESP_502).await;
         return false;
     }
@@ -251,6 +296,7 @@ pub(super) async fn http<C: ClientStream>(
             Ok(end) => (end.body, end.over_read),
             Err(e) => {
                 tracing::debug!(upstream = %key, error = %e, "chunked relay aborted");
+                log_fail(rhead.status, Some("truncated"));
                 return false; // close: truncated stream is the honest signal
             }
         }
@@ -279,7 +325,23 @@ pub(super) async fn http<C: ClientStream>(
                 left = ?body_left, got = relaid
             );
         }
+        log_fail(rhead.status, Some(if over_budget { "over-budget" } else { "truncated" }));
         return false; // close: truncated stream is the honest signal
+    }
+    if let Some(t0) = t0 {
+        svc.log.emit(
+            svc.log
+                .line()
+                .kv("client", peer)
+                .kv("via", C::VIA)
+                .kv("kind", "http")
+                .kv_bytes("method", method_bytes)
+                .kv("target", log_target())
+                .kv("status", rhead.status)
+                .kv("up", sent)
+                .kv("down", forward_n as u64 + relaid)
+                .kv("ms", t0.elapsed().as_millis()),
+        );
     }
     if rhead.keep_alive && !over_read {
         pool.put(key, up);
@@ -302,6 +364,8 @@ struct UpWriteCtx<'a> {
     /// Bytes followed the chunked body (a pipelined request, unsupported):
     /// close after the response.
     close_after: bool,
+    /// Request body bytes forwarded (access log).
+    sent: u64,
     rewrite_buf: &'a mut Vec<u8>,
 }
 
@@ -380,6 +444,7 @@ async fn forward_request<C: ClientStream>(
         // longer die at the absolute cap.
         let _ = crate::relay::copy_limited(&mut limited, up, None, ctx.idle).await;
     }
+    ctx.sent = content_length;
     true
 }
 
@@ -402,6 +467,7 @@ async fn forward_chunked<C: ClientStream>(
     match relay::chunked(client, up, ctx.rewrite_buf, 0, ctx.max_request_body, ctx.idle).await {
         Ok(end) => {
             ctx.close_after = end.over_read;
+            ctx.sent = end.body;
             true
         }
         Err(e) => {
@@ -425,13 +491,13 @@ pub(super) async fn connect_upstream(
     dest: &DestPolicy,
 ) -> Result<TcpStream, UpstreamError> {
     if !dest.port_allowed(port) {
-        return Err(UpstreamError::Forbidden);
+        return Err(UpstreamError::Forbidden("port"));
     }
     if let Ok(ip) = host.parse::<std::net::IpAddr>() {
         // Fast path: numeric IP target, skip the blocking DNS pool entirely.
         let addr = std::net::SocketAddr::from((ip, port));
-        if !dest.addr_allowed(addr) {
-            return Err(UpstreamError::Forbidden);
+        if let Some(reason) = dest.addr_verdict(addr) {
+            return Err(UpstreamError::Forbidden(reason));
         }
         match timeout(connect, TcpStream::connect(addr)).await {
             Ok(Ok(s)) => {
@@ -466,7 +532,8 @@ pub(super) async fn connect_upstream(
         // Policy on the resolved addresses (a public name pointing at a
         // private address is refused too): disallowed ones are skipped.
         if !addrs.iter().any(|&a| dest.addr_allowed(a)) {
-            return Err(UpstreamError::Forbidden);
+            let reason = addrs.first().and_then(|&a| dest.addr_verdict(a)).unwrap_or("private");
+            return Err(UpstreamError::Forbidden(reason));
         }
         match timeout(connect, connect_first(&addrs, dest)).await {
             Ok(Ok(s)) => {

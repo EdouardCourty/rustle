@@ -26,6 +26,7 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 
 use super::pipeline::{self, UpstreamError};
+use crate::accesslog::TargetMode;
 use crate::config::Config;
 use crate::http::{read_response_head, HeadError, RespError};
 use crate::relay::{chunk_size, IdleTimer};
@@ -161,7 +162,7 @@ async fn serve_stream(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResp
         .map(|v| v.as_bytes());
     if !ctx.auth.check(auth) {
         if auth.is_some() {
-            ctx.limiter.fail(ctx.peer);
+            ctx.svc.auth_failed(ctx.peer, "h2");
         }
         reply(&mut respond, StatusCode::PROXY_AUTHENTICATION_REQUIRED);
         return;
@@ -183,17 +184,23 @@ fn target(req: &Request<RecvStream>, default_port: u16) -> Option<(String, u16)>
     Some((host.to_string(), a.port_u16().unwrap_or(default_port)))
 }
 
-async fn dial(ctx: &Ctx, host: &str, port: u16, key: &str) -> Result<TcpStream, StatusCode> {
+/// Error = (status for the client, refusal reason for the access log).
+async fn dial(
+    ctx: &Ctx,
+    host: &str,
+    port: u16,
+    key: &str,
+) -> Result<TcpStream, (StatusCode, Option<&'static str>)> {
     match pipeline::connect_upstream(host, port, ctx.cfg.timeouts.connect, &ctx.dns, key, &ctx.dest).await {
         Ok(up) => {
             let _ = up.set_nodelay(true);
             Ok(up)
         }
-        Err(UpstreamError::Timeout) => Err(StatusCode::GATEWAY_TIMEOUT),
-        Err(UpstreamError::Forbidden) => Err(StatusCode::FORBIDDEN),
+        Err(UpstreamError::Timeout) => Err((StatusCode::GATEWAY_TIMEOUT, None)),
+        Err(UpstreamError::Forbidden(r)) => Err((StatusCode::FORBIDDEN, Some(r))),
         Err(UpstreamError::Other(e)) => {
             tracing::debug!(error = %e, "upstream connect failed");
-            Err(StatusCode::BAD_GATEWAY)
+            Err((StatusCode::BAD_GATEWAY, None))
         }
     }
 }
@@ -210,12 +217,15 @@ fn origin_key(host: &str, port: u16) -> String {
 
 async fn connect(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<Bytes>) {
     let Some((host, port)) = target(&req, 443) else {
+        ctx.svc.log_fail(ctx.peer, "h2", "connect", "-", 400, None);
         reply(&mut respond, StatusCode::BAD_REQUEST);
         return;
     };
-    let up = match dial(ctx, &host, port, &origin_key(&host, port)).await {
+    let key = origin_key(&host, port);
+    let up = match dial(ctx, &host, port, &key).await {
         Ok(up) => up,
-        Err(status) => {
+        Err((status, reason)) => {
+            ctx.svc.log_fail(ctx.peer, "h2", "connect", &key, status.as_u16(), reason);
             reply(&mut respond, status);
             return;
         }
@@ -223,8 +233,12 @@ async fn connect(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
     let Ok(send) = respond.send_response(Response::new(()), false) else {
         return;
     };
+    let t0 = std::time::Instant::now();
     let (c2u, u2c) = tunnel(req.into_body(), send, up, ctx.cfg.timeouts.idle).await;
     tracing::trace!(c2u, u2c, "h2 tunnel closed");
+    if ctx.log.all() {
+        ctx.svc.log_tunnel(ctx.peer, "h2", "connect", &key, (c2u, u2c), t0);
+    }
 }
 
 /// Both directions of an h2 tunnel; half-close propagated (END_STREAM ->
@@ -346,12 +360,41 @@ fn request_head(req: &Request<RecvStream>, authority: &str, body: Option<Option<
 async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<Bytes>) {
     let cfg = &ctx.cfg;
     let idle = cfg.timeouts.idle;
+    let t0 = ctx.log.all().then(std::time::Instant::now);
+    let method = req.method().clone();
+    let log_target = match ctx.log.target_mode() {
+        TargetMode::Url => req.uri().to_string(),
+        TargetMode::Host => req
+            .uri()
+            .authority()
+            .map(|a| a.as_str().to_string())
+            .unwrap_or_else(|| "-".into()),
+    };
+    // Failure: access-log line + status to the client.
+    let fail = |respond: &mut SendResponse<Bytes>, status: StatusCode, reason: Option<&str>| {
+        if ctx.log.errors() {
+            let mut l = ctx
+                .log
+                .line()
+                .kv("client", ctx.peer)
+                .kv("via", "h2")
+                .kv("kind", "http")
+                .kv("method", &method)
+                .kv("target", &log_target)
+                .kv("status", status.as_u16());
+            if let Some(r) = reason {
+                l = l.kv("reason", r);
+            }
+            ctx.log.emit(l);
+        }
+        reply(respond, status);
+    };
     if req.uri().scheme_str() != Some("http") {
-        reply(&mut respond, StatusCode::BAD_REQUEST);
+        fail(&mut respond, StatusCode::BAD_REQUEST, Some("scheme"));
         return;
     }
     let Some((host, port)) = target(&req, 80) else {
-        reply(&mut respond, StatusCode::BAD_REQUEST);
+        fail(&mut respond, StatusCode::BAD_REQUEST, None);
         return;
     };
     let authority = req
@@ -368,7 +411,7 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
         Some(v) => match v.to_str().ok().and_then(|s| s.trim().parse::<u64>().ok()) {
             Some(n) => Some(n),
             None => {
-                reply(&mut respond, StatusCode::BAD_REQUEST);
+                fail(&mut respond, StatusCode::BAD_REQUEST, Some("content-length"));
                 return;
             }
         },
@@ -378,7 +421,7 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
     let body_len = if has_body { declared } else { Some(0) };
     let budget = cfg.http.max_request_body_bytes;
     if budget > 0 && body_len.is_some_and(|n| n > budget) {
-        reply(&mut respond, StatusCode::PAYLOAD_TOO_LARGE);
+        fail(&mut respond, StatusCode::PAYLOAD_TOO_LARGE, None);
         return;
     }
     let head = request_head(&req, &authority, has_body.then_some(body_len));
@@ -389,14 +432,15 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
     // is bodiless, hence replayable) or a fresh dial.
     let mut resp_buf: Vec<u8> = Vec::new();
     let mut attempt = 0;
+    let mut sent: u64 = 0;
     let (mut up, rhead) = loop {
         attempt += 1;
         let (mut up, pooled) = match ctx.pool.take(&key) {
             Some(s) => (s, true),
             None => match dial(ctx, &host, port, &key).await {
                 Ok(s) => (s, false),
-                Err(status) => {
-                    reply(&mut respond, status);
+                Err((status, reason)) => {
+                    fail(&mut respond, status, reason);
                     return;
                 }
             },
@@ -409,12 +453,17 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
             if pooled && attempt == 1 && !has_body {
                 continue;
             }
-            reply(&mut respond, StatusCode::BAD_GATEWAY);
+            fail(&mut respond, StatusCode::BAD_GATEWAY, None);
             return;
         }
-        if has_body && !upload(&mut body, &mut up, body_len, budget, idle).await {
-            respond.send_reset(Reason::CANCEL);
-            return;
+        if has_body {
+            match upload(&mut body, &mut up, body_len, budget, idle).await {
+                Some(n) => sent = n,
+                None => {
+                    respond.send_reset(Reason::CANCEL);
+                    return;
+                }
+            }
         }
         match read_head_final(&mut up, &mut resp_buf, cfg, idle).await {
             Ok(h) => break (up, h),
@@ -424,7 +473,7 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
                 continue
             }
             Err(_) => {
-                reply(&mut respond, StatusCode::BAD_GATEWAY);
+                fail(&mut respond, StatusCode::BAD_GATEWAY, Some("no-response"));
                 return;
             }
         }
@@ -454,13 +503,32 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
     let budget = cfg.http.max_response_body_bytes;
     let zero_body = rhead.no_body_status || method_head;
     if !zero_body && budget > 0 && rhead.content_length.is_some_and(|l| l > budget) {
-        reply(&mut respond, StatusCode::BAD_GATEWAY);
+        fail(&mut respond, StatusCode::BAD_GATEWAY, Some("over-budget"));
         return;
     }
     let Ok(mut send) = respond.send_response(resp, zero_body) else {
         return;
     };
+    // Success line (all level), with the response body bytes relayed.
+    let log_ok = |down: u64| {
+        if let Some(t0) = t0 {
+            ctx.log.emit(
+                ctx.log
+                    .line()
+                    .kv("client", ctx.peer)
+                    .kv("via", "h2")
+                    .kv("kind", "http")
+                    .kv("method", &method)
+                    .kv("target", &log_target)
+                    .kv("status", rhead.status)
+                    .kv("up", sent)
+                    .kv("down", down)
+                    .kv("ms", t0.elapsed().as_millis()),
+            );
+        }
+    };
     if zero_body {
+        log_ok(0);
         if rhead.keep_alive && resp_buf.len() == rhead.raw_len {
             ctx.pool.put(&key, up);
         }
@@ -472,6 +540,7 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
         buf: resp_buf.split_off(rhead.raw_len),
         pos: 0,
         timer: IdleTimer::new(idle),
+        given: 0,
     };
     let result = if rhead.chunked {
         dechunk(&mut src, &mut send, budget).await
@@ -483,11 +552,25 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
     let clean = match result {
         Ok(()) => {
             let _ = send.send_data(Bytes::new(), true);
+            log_ok(src.given);
             !src.leftover()
         }
         Err(e) => {
             tracing::debug!(upstream = %key, error = %e, "h2 response relay aborted");
             send.send_reset(Reason::INTERNAL_ERROR);
+            if ctx.log.errors() {
+                ctx.log.emit(
+                    ctx.log
+                        .line()
+                        .kv("client", ctx.peer)
+                        .kv("via", "h2")
+                        .kv("kind", "http")
+                        .kv("method", &method)
+                        .kv("target", &log_target)
+                        .kv("status", rhead.status)
+                        .kv("reason", "truncated"),
+                );
+            }
             false
         }
     };
@@ -506,7 +589,7 @@ async fn upload(
     len: Option<u64>,
     budget: u64,
     idle: Duration,
-) -> bool {
+) -> Option<u64> {
     let mut t = IdleTimer::new(idle);
     let mut sent: u64 = 0;
     loop {
@@ -514,7 +597,7 @@ async fn upload(
             Some(Some(Ok(chunk))) => {
                 sent += chunk.len() as u64;
                 if len.is_some_and(|l| sent > l) || (budget > 0 && sent > budget) {
-                    return false;
+                    return None;
                 }
                 let n = chunk.len();
                 let ok = match len {
@@ -532,18 +615,19 @@ async fn upload(
                     }
                 };
                 if !ok {
-                    return false;
+                    return None;
                 }
                 let _ = body.flow_control().release_capacity(n);
                 t.reset();
             }
             Some(None) => {
-                return match len {
+                let ok = match len {
                     Some(l) => sent == l,
                     None => matches!(t.park(up.write_all(b"0\r\n\r\n")).await, Some(Ok(()))),
                 };
+                return ok.then_some(sent);
             }
-            _ => return false,
+            _ => return None,
         }
     }
 }
@@ -578,6 +662,8 @@ struct Src<'a> {
     buf: Vec<u8>,
     pos: usize,
     timer: IdleTimer,
+    /// Body bytes handed to the client (access log).
+    given: u64,
 }
 
 impl Src<'_> {
@@ -622,6 +708,7 @@ impl Src<'_> {
         let k = (self.buf.len() - self.pos).min(max);
         let b = Bytes::copy_from_slice(&self.buf[self.pos..self.pos + k]);
         self.pos += k;
+        self.given += k as u64;
         Ok(b)
     }
 
