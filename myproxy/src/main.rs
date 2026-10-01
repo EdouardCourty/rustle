@@ -3,6 +3,7 @@ mod auth;
 mod config;
 mod dns;
 mod http;
+mod ktls_offload;
 mod policy;
 mod proxy;
 mod relay;

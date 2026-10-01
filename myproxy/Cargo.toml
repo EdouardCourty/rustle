@@ -9,6 +9,7 @@ anyhow = "1"
 base64 = "0.22"
 bytes = "1"
 h2 = "0.4"
+ktls = { version = "6", default-features = false, features = ["ring", "tls12"] }
 http = "1"
 httparse = "1.9"
 humantime = "2"

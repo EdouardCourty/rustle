@@ -36,9 +36,9 @@ COPY --from=build /build/target/release/myproxy /usr/local/bin/myproxy
 COPY --from=cert /cert.pem /key.pem /etc/myproxy/
 COPY bench/dut/myproxy/myproxy-on.toml /etc/myproxy/on.toml
 COPY bench/dut/myproxy/myproxy-off.toml /etc/myproxy/off.toml
-ENV AUTH=on WORKERS=1 ACCESS_LOG=off
+ENV AUTH=on WORKERS=1 ACCESS_LOG=off KTLS=false
 # bench-ports: tls=8443 h2=8443 (HTTP/2 via ALPN on the HTTPS listener)
 EXPOSE 8080 8443
-# WORKERS (multi-core runs) and ACCESS_LOG (access log cost) are patched
-# into the config by the harness.
-ENTRYPOINT ["sh", "-c", "sed -e \"s/^workers = .*/workers = ${WORKERS:-1}/\" -e \"s/^access = .*/access = \\\"${ACCESS_LOG:-off}\\\"/\" /etc/myproxy/${AUTH:-on}.toml > /tmp/myproxy.toml && exec myproxy /tmp/myproxy.toml"]
+# WORKERS (multi-core runs), ACCESS_LOG (access log cost) and KTLS
+# (kernel TLS A/B) are patched into the config by the harness.
+ENTRYPOINT ["sh", "-c", "sed -e \"s/^workers = .*/workers = ${WORKERS:-1}/\" -e \"s/^access = .*/access = \\\"${ACCESS_LOG:-off}\\\"/\" -e \"s/^ktls = .*/ktls = ${KTLS:-false}/\" /etc/myproxy/${AUTH:-on}.toml > /tmp/myproxy.toml && exec myproxy /tmp/myproxy.toml"]

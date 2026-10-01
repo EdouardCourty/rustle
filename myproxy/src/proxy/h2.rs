@@ -30,7 +30,6 @@ use crate::accesslog::TargetMode;
 use crate::config::Config;
 use crate::http::{read_response_head, HeadError, RespError};
 use crate::relay::{chunk_size, IdleTimer};
-use crate::stream::TlsClient;
 
 /// Streams in flight per client connection.
 const MAX_CONCURRENT_STREAMS: u32 = 256;
@@ -88,7 +87,10 @@ impl Drop for StreamSlot {
     }
 }
 
-pub async fn handle_h2(client: TlsClient, peer: IpAddr, svc: Arc<super::Services>) {
+pub async fn handle_h2<T>(client: T, peer: IpAddr, svc: Arc<super::Services>)
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
     let cfg = svc.cfg.clone();
     let idle = cfg.timeouts.idle;
     let mut builder = h2::server::Builder::new();

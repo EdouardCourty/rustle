@@ -87,6 +87,11 @@ pub struct TlsConfig {
     pub handshake_timeout: Duration,
     /// Offer HTTP/2 through ALPN (clients that do not ask keep HTTP/1.1).
     pub http2: bool,
+    /// Kernel TLS after the handshake (when the kernel supports it, probed
+    /// at startup). Off by default: measured faster for CONNECT tunnels
+    /// and lighter in memory, slower for HTTP bulk and per connection
+    /// (bench/RESULTS.md, M17).
+    pub ktls: bool,
 }
 
 impl Default for TlsConfig {
@@ -97,6 +102,7 @@ impl Default for TlsConfig {
             key: String::new(),
             handshake_timeout: Duration::from_secs(10),
             http2: true,
+            ktls: false,
         }
     }
 }

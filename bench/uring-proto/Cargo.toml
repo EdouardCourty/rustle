@@ -1,0 +1,17 @@
+[package]
+name = "uring-proto"
+version = "0.1.0"
+edition = "2021"
+description = "Prototype: myproxy's HTTP/1 keep-alive hot path on io_uring (monoio), to measure the ceiling before any migration"
+
+# Standalone (not a member of the main workspace).
+[workspace]
+
+[dependencies]
+monoio = { version = "0.2", default-features = false, features = ["iouring", "macros", "utils"] }
+httparse = "1.9"
+base64 = "0.22"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1

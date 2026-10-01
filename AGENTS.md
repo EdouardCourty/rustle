@@ -17,7 +17,8 @@ myproxy/              le proxy
     config/mod.rs     TOML → structs (humantime pour les durées)
     server/mod.rs     shards (thread + runtime current_thread + listeners SO_REUSEPORT clair + TLS + pool), handshake TLS puis dispatch h2/h1 selon ALPN, compteur global max_connections, admin /health, trim, shutdown gracieux 5 s
     stream.rs         trait ClientStream (TcpStream | TlsStream) : tcp()/into_tcp() = chemins splice/QUICKACK, TLS = copie user-space
-    tls.rs            rustls (ring) : cert/clé PEM, ALPN h2 + http/1.1
+    tls.rs            rustls (ring) : cert/clé PEM, ALPN h2 + http/1.1, extraction des secrets si kTLS
+    ktls_offload.rs   kTLS : sonde au démarrage (TCP_ULP), vidage rustls (CorkStream), clés → SOL_TLS ; KtlsClient (octets déjà déchiffrés d'abord, EIO = record de contrôle = fin, close_notify par sendmsg) ; tcp()/into_tcp() dès que plus rien n'est en buffer → splice sur le port TLS
     proxy/mod.rs      handle_conn<C: ClientStream> : boucle keep-alive serve() (read_head → auth → classify → CONNECT | HTTP), tunnel monté après
     proxy/socks5.rs   SOCKS5 (RFC 1928/1929) : CONNECT (relais splice) + UDP ASSOCIATE, mot de passe = clé API, BIND refusé
     proxy/socks5_udp.rs UDP ASSOCIATE (QUIC/HTTP3, DNS) : socket côté client + socket dual-stack sortante ; datagrammes acceptés de l'IP du contrôle TCP seulement, réponses seulement des destinations contactées, même policy que TCP ; vit tant que le contrôle TCP
@@ -42,6 +43,8 @@ bench/
   dut/<proxy>/                             Dockerfiles + configs on/off (user bench / clé secret1, port 8080) ; ligne `# bench-ports: tls=<p> h2=<p>` = modes supportés (cert ECDSA P-256 auto-signé généré au build) ; WORKERS lu à l'entrypoint (myproxy, squid) ; myproxy/Dockerfile.debug = strace
   upstream/                                nginx (objets 1kb/10kb/1mb/10mb)
   tools/local-upstream-http11.py           upstream HTTP/1.1 keep-alive local (up11.py)
+  uring-proto/                             prototype io_uring (monoio) du chemin HTTP/1 keep-alive, DUT `uring-proto` — mesure seulement (M18 : pas de gain net)
+  docker-compose.seccomp.yml               overlay `SECCOMP=unconfined` (io_uring ; l'appliquer à tous les DUT comparés)
   RESULTS.md                               synthèse publiée, historique des milestones
   results/                                 sorties brutes (gitignored)
 ```
@@ -73,7 +76,7 @@ bench/
 | `http.upstream_keepalive` / `max_idle_per_origin` | true / 32 (cap global 1024 en dur) |
 | `http.max_request_body_bytes` / `max_response_body_bytes` | 0 = illimité |
 | `tls.listen` / `cert` / `key` | `""` (off) / PEM |
-| `tls.handshake_timeout` / `http2` | 10s / true (ALPN h2) |
+| `tls.handshake_timeout` / `http2` / `ktls` | 10s / true (ALPN h2) / **false** (opt-in : +13 % tunnels, −30 % RAM, mais −37 % bulk HTTP ; M17) |
 | `auth.allow_clients` | [] (vide = tous ; CIDR, fermé à l'accept sur tous les listeners) |
 | `auth.max_failures` / `failure_window` / `ban_duration` | 5 / 1m / 15m (0 = off ; sans credentials ne compte pas) |
 | `timeouts.request_head` | 10s (total head / handshake SOCKS5, anti-slowloris) |
@@ -101,6 +104,7 @@ Features optionnelles : `jemalloc`, `mimalloc` (exclusives ; défaut = malloc gl
 - Tests : http-1kb (64 conns), http-10kb (16), http-1mb (16), http-10mb (8), http-1kb-short (sans keep-alive), flood-8, hold 1k/5k/10k/25k.
 - Sortie : lignes `RESULT median ...` (rps, mbps, p50, errors, `err_kinds`, `reconnects`, CPU proxy/generator/upstream, `rss_mb` = résiduel après le test, `peak_rss_mb` = VmHWM = coût réel). CPU proxy = cgroup du conteneur, RSS = somme des processus (DUT multi-process comme Squid SMP inclus).
 - Transports : `PROXY_TLS=1` (HTTPS proxy) / `PROXY_H2=1` (HTTP/2 via TLS) → résultats sous `results/<proxy>-tls|-h2/`. TLS : myproxy, Squid, gost. h2 : myproxy, gost (3proxy/Tinyproxy : clair seulement). Générateur : `--proxy-tls`, `--proxy-h2` (1 connexion h2 par conn, requêtes séquentielles ; CONNECT = 1 stream sur sa propre connexion), certificat non vérifié mais signatures du handshake vérifiées.
+- `KTLS=true|false` (myproxy, port TLS), `SECCOMP=unconfined` (io_uring).
 - Multi-core : `PROXY_NCPU=<n>` (n premiers CPU au proxy, le reste au harnais) ou `PROXY_CPU`/`BENCH_CPU` explicites ; `WORKERS=<n>` ; `GEN_THREADS` = threads du générateur (à dimensionner sur BENCH_CPU). En-tête de results.txt = paramètres du run.
 - Générateur : honore `Connection: close`/HTTP/1.0 (reconnexion) et rejoue une fois un GET sur connexion réutilisée fermée avant tout octet (RFC 9112 §9.3.1) → `reconnects` (Tinyproxy : 1 par requête, il ferme sans l'annoncer).
 - Métrique à suivre : **CPU proxy par requête** (`cpu_s_per_run / (rps × durée)`), le débit étant plafonné par le harnais. Bruit entre deux matrices identiques : jusqu'à ±7 % CPU, ±15 % sur flood.
@@ -128,6 +132,7 @@ Features optionnelles : `jemalloc`, `mimalloc` (exclusives ; défaut = malloc gl
 4. **Retry** : idempotent + body rejouable uniquement (B7). Ne pas élargir.
 5. Pool : n'accepter qu'une réponse complète, keep-alive, framée, sans sur-lecture.
 6. `m11.1-fsm` = FSM epoll abandonné (CPU/req identique à tokio, rps pire). Ne pas merger, ne pas y revenir sans donnée nouvelle.
+8. io_uring (M18, prototype monoio) : ±8 % selon la taille, pas de gain net sur 1 core ; kTLS (M17) : opt-in, gagnant tunnels/RAM, perdant bulk HTTP. Ne pas changer ces décisions sans nouvelle mesure (VPS multi-core).
 7. Gains < 5 % = bruit. Toute affirmation perf passe par la matrice au seed fixe.
 
 ## État connu (2026-09-29, branche `m10.4-syscalls`)
