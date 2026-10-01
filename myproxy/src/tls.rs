@@ -13,7 +13,8 @@ use tokio_rustls::TlsAcceptor;
 use crate::config::TlsConfig;
 
 /// Builds the acceptor from the PEM certificate chain and private key.
-pub fn acceptor(cfg: &TlsConfig) -> anyhow::Result<TlsAcceptor> {
+/// `ktls`: the session secrets must be extractable for the kernel offload.
+pub fn acceptor(cfg: &TlsConfig, ktls: bool) -> anyhow::Result<TlsAcceptor> {
     let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_file_iter(&cfg.cert)
         .with_context(|| format!("reading certificate {}", cfg.cert))?
         .collect::<Result<_, _>>()
@@ -27,6 +28,7 @@ pub fn acceptor(cfg: &TlsConfig) -> anyhow::Result<TlsAcceptor> {
         .with_no_client_auth()
         .with_single_cert(certs, key)
         .context("certificate/key mismatch")?;
+    server.enable_secret_extraction = ktls;
     server.alpn_protocols = if cfg.http2 {
         vec![b"h2".to_vec(), b"http/1.1".to_vec()]
     } else {

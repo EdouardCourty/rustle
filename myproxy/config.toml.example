@@ -68,6 +68,12 @@ key = "/etc/myproxy/key.pem"
 handshake_timeout = "10s"
 # Offer HTTP/2 through ALPN (CONNECT and plain requests as h2 streams).
 http2 = true
+# Kernel TLS: after the rustls handshake, the session keys go to the kernel
+# (module `tls`, probed at startup; userspace TLS otherwise). Measured: CONNECT
+# tunnels +13 % throughput and -30 % memory at 25k tunnels, but HTTP bulk
+# -37 % (1 MB) and +15 % CPU per new connection. Worth it for a mostly-HTTPS
+# (CONNECT) workload with many tunnels.
+ktls = false
 
 [filter]
 # Refuse non-public destinations: loopback, private networks, link-local

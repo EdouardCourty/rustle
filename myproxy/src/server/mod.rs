@@ -72,6 +72,10 @@ struct Shared {
     log: Arc<AccessLog>,
     /// HTTPS proxy listener's acceptor (None = plain only).
     tls: Option<tokio_rustls::TlsAcceptor>,
+    /// Hand TLS sessions to the kernel after the handshake.
+    ktls: bool,
+    /// Sessions offloaded to the kernel (stats, tests).
+    ktls_sessions: AtomicU64,
     /// Live client connections, all shards (enforces `max_connections`).
     active: AtomicUsize,
     /// High-water mark of `active` since the last heap trim.
@@ -136,11 +140,16 @@ struct ShardListeners {
 pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
     let n = shard_count(cfg.server.workers);
     let (addr, plain) = bind_group(&cfg.server.listen, n, "listen")?;
+    // kTLS: wanted and supported by this kernel (probed once).
+    let ktls = !cfg.tls.listen.is_empty() && cfg.tls.ktls && crate::ktls_offload::available();
+    if !cfg.tls.listen.is_empty() && cfg.tls.ktls && !ktls {
+        tracing::warn!("kTLS unavailable (kernel module `tls` not loaded?): userspace TLS");
+    }
     // HTTPS proxy and SOCKS5 listeners: same sharding.
     let (tls, tls_addr, mut tls_listeners) = if cfg.tls.listen.is_empty() {
         (None, None, Vec::new())
     } else {
-        let acceptor = crate::tls::acceptor(&cfg.tls)?;
+        let acceptor = crate::tls::acceptor(&cfg.tls, ktls)?;
         let (a, v) = bind_group(&cfg.tls.listen, n, "tls")?;
         (Some(acceptor), Some(a), v)
     };
@@ -178,6 +187,8 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
             cfg.auth.ban_duration,
         )),
         tls,
+        ktls,
+        ktls_sessions: AtomicU64::new(0),
         active: AtomicUsize::new(0),
         peak: AtomicUsize::new(0),
         accepted: (0..n).map(|_| AtomicU64::new(0)).collect(),
@@ -186,6 +197,7 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
     tracing::info!(
         %addr,
         tls = ?tls_addr,
+        ktls,
         socks5 = ?socks_addr,
         shards = n,
         pinned = !cpus.is_empty(),
@@ -241,6 +253,12 @@ impl Server {
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn local_addr(&self) -> SocketAddr {
         self.addr
+    }
+
+    /// TLS sessions handed to the kernel so far.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn ktls_sessions(&self) -> u64 {
+        self.shared.ktls_sessions.load(Relaxed)
     }
 
     /// SOCKS5 listen address, when enabled.
@@ -419,9 +437,31 @@ async fn run_shard(
                 let Some(acceptor) = shared.tls.clone() else {
                     continue;
                 };
+                let shared = shared.clone();
                 tokio::spawn(async move {
                     let _slot = slot;
                     let hs = svc.cfg.tls.handshake_timeout;
+                    if shared.ktls {
+                        // Handshake in rustls, then the kernel takes over.
+                        let accept = async {
+                            let tls = acceptor.accept(ktls::CorkStream::new(sock)).await?;
+                            let h2 = tls.get_ref().1.alpn_protocol() == Some(b"h2");
+                            Ok::<_, std::io::Error>((crate::ktls_offload::offload(tls).await?, h2))
+                        };
+                        match tokio::time::timeout(hs, accept).await {
+                            Ok(Ok((k, h2))) => {
+                                shared.ktls_sessions.fetch_add(1, Relaxed);
+                                if h2 {
+                                    proxy::handle_h2(k, ip, svc).await
+                                } else {
+                                    proxy::handle_conn(k, ip, svc).await
+                                }
+                            }
+                            Ok(Err(e)) => tracing::debug!(error = %e, "tls handshake / ktls offload failed"),
+                            Err(_) => tracing::debug!("tls handshake timed out"),
+                        }
+                        return;
+                    }
                     match tokio::time::timeout(hs, acceptor.accept(sock)).await {
                         Ok(Ok(tls)) => {
                             if tls.get_ref().1.alpn_protocol() == Some(b"h2") {
@@ -828,13 +868,44 @@ mod tests {
     #[tokio::test]
     async fn https_proxy_serves_keepalive_http_and_chunked() {
         let (cfg, der) = tls_config();
+        let mut cfg = (*cfg).clone();
+        cfg.tls.ktls = true; // opt-in; this box has the `tls` module
         let up = origin().await;
-        let srv = start(cfg).unwrap();
+        let srv = start(Arc::new(cfg)).unwrap();
         let mut c = tls_connect(srv.tls_addr().unwrap(), der).await;
+        https_keepalive_round(&mut c, up).await;
+        // The kernel took the session (module `tls` present on this box).
+        assert_eq!(srv.ktls_sessions(), 1, "kTLS not engaged");
+        drop(c);
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn https_proxy_userspace_tls_when_ktls_off() {
+        let (cfg, der) = tls_config();
+        let mut cfg = (*cfg).clone();
+        cfg.tls.ktls = false;
+        let up = origin().await;
+        let srv = start(Arc::new(cfg)).unwrap();
+        let mut c = tls_connect(srv.tls_addr().unwrap(), der).await;
+        https_keepalive_round(&mut c, up).await;
+        assert_eq!(srv.ktls_sessions(), 0);
+        drop(c);
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    /// Keep-alive GETs (CL + chunked) and a flushed 400 over one TLS session.
+    async fn https_keepalive_round<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(c: &mut S, up: SocketAddr) {
         for path in ["/a", "/chunked", "/b"] {
             let req = format!("GET http://{up}{path} HTTP/1.1\r\nHost: {up}\r\n\r\n");
             c.write_all(req.as_bytes()).await.unwrap();
-            let (status, body) = read_resp(&mut c).await;
+            let (status, body) = read_resp(c).await;
             assert!(status.starts_with("HTTP/1.1 200"), "{path}: {status}");
             if path == "/chunked" {
                 assert_eq!(body, b"5\r\nhello\r\n0\r\n\r\n");
@@ -844,13 +915,8 @@ mod tests {
         }
         // Errors are flushed through TLS too (not stuck in the session).
         c.write_all(b"garbage\r\n\r\n").await.unwrap();
-        let (status, _) = read_resp(&mut c).await;
+        let (status, _) = read_resp(c).await;
         assert!(status.starts_with("HTTP/1.1 400"), "{status}");
-        drop(c);
-        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
-            .await
-            .unwrap()
-            .unwrap();
     }
 
     #[tokio::test]

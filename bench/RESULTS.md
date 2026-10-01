@@ -340,3 +340,42 @@ La v1 envoyait chaque ligne au thread writer via le canal : un réveil (futex + 
 contexte sur le même core) par requête coûtait plus que tout le traitement user-space (~9 µs).
 Version retenue : lignes accumulées dans un buffer local au thread du shard (sans verrou), remises
 au writer par lots de 64 KB ou toutes les 200 ms. `off` : aucune régression vs M15.
+
+## M17 — kTLS (kernel TLS) — 2026-10-01, seed 2004113323, auth on, 1 core, proxy HTTPS
+
+rustls fait le handshake, les clés passent au noyau (`TCP_ULP tls` + `SOL_TLS`), le splice
+revient sur le port TLS. Testé en réel : TLS 1.3, TLS 1.2 AES-128/256-GCM et ChaCha20, 10 MB
+via GET et via tunnel CONNECT identiques au direct.
+
+| µs CPU proxy/req (débit) | rustls userspace | kTLS | kTLS + TX_ZEROCOPY_RO / RX_NO_PAD |
+|---|---|---|---|
+| 1 KB | 56,8 | 60,1 (+6 %) | — |
+| 10 KB | 62,5 | 67,5 (+8 %) | — |
+| 1 MB | 819 (1 287 rps) | 1 010 (815 rps, **−37 %**) | 1 126 (813 rps) |
+| 10 MB | 10 033 (108 rps) | 11 796 (86 rps) | 10 378 (93 rps) |
+| 1 KB short (handshake/req) | 276 | 326 (+18 %) | 319 |
+| flood (CONNECT) | 945 ms/GB (9,2 Gbps) | **824 ms/GB (10,4 Gbps, +13 %)** | 826 (10,3 Gbps) |
+| holds | — | +14 à +18 % CPU | — |
+| pic RAM hold-25k | 814 MB | **569 MB (−30 %)** | — |
+
+h2 sur kTLS : −40 % sur 1 MB / 10 MB. **Décision** : `tls.ktls = false` par défaut, option
+documentée — gagnant pour les tunnels CONNECT (navigation HTTPS) et la mémoire, perdant sur le
+bulk HTTP et par connexion (mise en place : vidage rustls + ULP + clés).
+
+## M18 — io_uring, prototype mesuré avant migration — 2026-10-01, seed 2004113323
+
+Prototype monoio (`bench/uring-proto`, DUT `uring-proto`) du chemin HTTP/1 keep-alive (même
+réécriture, auth, upstream gardé, réponses Content-Length, timeout par opération). Comparé à
+myproxy avec seccomp levé pour les deux (`SECCOMP=unconfined` : le profil Docker bloque
+io_uring et le filtre coûte par syscall). Runs alternés :
+
+| µs CPU proxy/req | io_uring (proto) | Tokio (myproxy) |
+|---|---|---|
+| 1 KB ×64 | 53,7 | **49,8** |
+| 10 KB ×16 (2 runs) | **57,1 / 57,5** | 62,4 / 62,0 |
+
+Sans les timeouts, le proto semblait −10 à −14 % sur 10 KB : une partie venait de l'absence de
+timers, pas d'io_uring. 1 MB / 10 MB / short non comparables (proto sans splice ni pool
+partagé). **Verdict** : ±8 % selon la taille, pas de gain net — même conclusion que M11 (FSM
+epoll) : sur un core, le coût est dans la pile TCP du noyau. Pas de migration ; à retester sur
+le VPS multi-core (batching des soumissions).
