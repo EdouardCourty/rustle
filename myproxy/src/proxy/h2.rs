@@ -34,8 +34,8 @@ use crate::relay::{chunk_size, IdleTimer};
 /// Streams in flight per client connection.
 const MAX_CONCURRENT_STREAMS: u32 = 256;
 /// h2 flow-control windows: per stream, and per connection.
-const STREAM_WINDOW: u32 = 1 << 20;
-const CONN_WINDOW: u32 = 8 << 20;
+const STREAM_WINDOW: u32 = 4 << 20;
+const CONN_WINDOW: u32 = 16 << 20;
 /// Largest DATA payload handed to h2 at once (it splits into frames).
 const DATA_CHUNK: usize = 64 * 1024;
 /// Largest frame the client may send us (SETTINGS_MAX_FRAME_SIZE; the 16 KB
@@ -268,10 +268,13 @@ async fn tunnel(
         let mut n: u64 = 0;
         while let Some(Some(Ok(chunk))) = t.park(body.data()).await {
             let len = chunk.len();
+            // Reopen the window as soon as the frame is ours (not after the
+            // upstream write): the client keeps sending while we write.
+            // Still bounded: h2 never buffers more than the window.
+            let _ = body.flow_control().release_capacity(len);
             if !matches!(t.park(uw.write_all(&chunk)).await, Some(Ok(()))) {
                 break;
             }
-            let _ = body.flow_control().release_capacity(len);
             n += len as u64;
             t.reset();
         }

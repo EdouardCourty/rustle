@@ -238,7 +238,7 @@ Débit · CPU du proxy par requête. Tous les tests sans erreur.
 | 1 KB | **14 018 · 57 µs** | 7 837 · 141 µs | 1 566 · 676 µs |
 | 1 MB | **1 297** | 182 | 464 |
 | Connexions courtes (handshake) | **2 722 · 278 µs** | 1 618 · 669 µs | 1 603 · 661 µs |
-| Tunnels CONNECT (flood) | **9,3 Gbps** | 4,8 | 6,6 |
+| Tunnels CONNECT (flood) | **9,6 Gbps** | 4,8 | 6,6 |
 | 25 000 tunnels (pic RAM) | **25 000 · 802 MB** | 25 000 · 2 028 MB | 0² |
 
 **HTTP/2**
@@ -247,11 +247,13 @@ Débit · CPU du proxy par requête. Tous les tests sans erreur.
 |---|---|---|
 | 1 KB | **13 028 · 70 µs** | 3 922 · 281 µs |
 | 1 MB | **739** | 324 |
-| Tunnels CONNECT (flood) | 6,6 Gbps | **7,7 Gbps** |
+| Tunnels CONNECT (flood)³ | **7,6 Gbps · 0,97 s CPU/GB** | 7,5 Gbps · 1,08 s CPU/GB |
 
 ¹ 3proxy sur 1 KB : plombé par son delayed-ACK de 40 ms (artefact connu, voir RESULTS.md).
 ² gost dépasse la RAM de la machine (4 GB) : conteneur tué pendant le test.
-myproxy est premier partout sauf sur les tunnels en HTTP/2 face à gost.
+³ Après correction des fenêtres HTTP/2 (M20) : moyenne de 3 passes alternées avec gost ; le
+débit est borné par le core du harnais, l'écart se lit surtout sur le CPU par Go (−11 %).
+myproxy est premier sur toutes les lignes.
 Tableaux complets : [`bench/RESULTS.md`](bench/RESULTS.md) (section M19).
 
 ## Décisions mesurées

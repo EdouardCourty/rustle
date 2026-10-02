@@ -16,7 +16,7 @@ myproxy/              le proxy
     main.rs           tracing (RUST_LOG, sur stderr), config = argv[1] (défaut config.toml), server::start puis attente SIGTERM/SIGINT
     config/mod.rs     TOML → structs (humantime pour les durées)
     server/mod.rs     shards (thread + runtime current_thread + listeners SO_REUSEPORT clair + TLS + pool), handshake TLS puis dispatch h2/h1 selon ALPN, compteur global max_connections, admin /health, trim, shutdown gracieux 5 s
-    stream.rs         trait ClientStream (TcpStream | TlsStream) : tcp()/into_tcp() = chemins splice/QUICKACK, TLS = copie user-space
+    stream.rs         trait ClientStream (TcpStream | TlsStream) : tcp()/into_tcp() = chemins splice/QUICKACK, TLS = copie user-space ; ReadAhead sous rustls (qui lit par 4 KB) : buffer 64 KB adaptatif, seulement pour les flux soutenus
     tls.rs            rustls (ring) : cert/clé PEM, ALPN h2 + http/1.1, extraction des secrets si kTLS
     ktls_offload.rs   kTLS : sonde au démarrage (TCP_ULP), vidage rustls (CorkStream), clés → SOL_TLS ; KtlsClient (octets déjà déchiffrés d'abord, EIO = record de contrôle = fin, close_notify par sendmsg) ; tcp()/into_tcp() dès que plus rien n'est en buffer → splice sur le port TLS
     proxy/mod.rs      handle_conn<C: ClientStream> : boucle keep-alive serve() (read_head → auth → classify → CONNECT | HTTP), tunnel monté après
@@ -123,7 +123,7 @@ Features optionnelles : `jemalloc`, `mimalloc` (exclusives ; défaut = malloc gl
 - Commits : `M<major>.<minor>[-<n>]: <résumé> — <détails chiffrés>`, en français, gated par une matrice au seed fixe. Attribution Claude en trailer.
 - Tags baseline : `m10.3-tokio`, `m11.1-fsm`. Labels de review dans le code/commits : B1–B8, R3, O1, O2.
 - Pas de tags de milestone (`M10.x`) dans les commentaires du code : ils vont dans les commits et RESULTS.md.
-- `unsafe` cantonné à libc/fd (commentaire `SAFETY` attendu sur tout nouveau bloc) : `relay/splice.rs` (pipes, splice, dup), `server/mod.rs` (setsockopt, affinité CPU, malloc_trim), `ktls_offload.rs` (TCP_ULP, SOL_TLS, sendmsg close_notify), `http/request.rs::span_of` (`offset_from`).
+- `unsafe` cantonné à libc/fd (commentaire `SAFETY` attendu sur tout nouveau bloc) : `relay/splice.rs` (pipes, splice, dup), `server/mod.rs` (setsockopt, affinité CPU, malloc_trim), `ktls_offload.rs` (TCP_ULP, SOL_TLS, sendmsg close_notify), `stream.rs` (ReadAhead : set_len après lecture), `http/request.rs::span_of` (`offset_from`).
 - Erreurs : réponses statiques (`&[u8]` 400/407/413/431/502/504), I/O errors largement ignorées (`let _ =`), `anyhow` uniquement au démarrage.
 
 ## Invariants — ne pas casser
@@ -148,7 +148,7 @@ Features optionnelles : `jemalloc`, `mimalloc` (exclusives ; défaut = malloc gl
 
 **Perf**
 - **Multi-core : mesurer** (`make bench-scaling` sur une machine ≥ 2 × N cores) — rien n'est mesuré au-delà d'un core. Retester io_uring et kTLS dans ce cadre.
-- Chemin h2 : plus lent que TLS+HTTP/1.1 sur le bulk (copie `Bytes` par chunk, framing) ; flood h2 −14 % vs gost.
+- Chemin h2 : plus lent que TLS+HTTP/1.1 sur le bulk (copie `Bytes` par chunk, framing). Flood h2 devant gost depuis M20 (fenêtres 4/16 MB), borné par le core du harnais.
 - kTLS : comprendre la perte sur le bulk HTTP (−37 % à 1 MB) — `perf` indisponible sur la box actuelle.
 - Pool : pas de reaper d'inactifs, cap 1024/shard en dur. DNS : vidage complet à saturation, pas de cache négatif ni de coalescing.
 - PGO/BOLT, `panic=abort` (écarté : une panique tuerait tout le shard), `target-cpu=native` hors Docker.
