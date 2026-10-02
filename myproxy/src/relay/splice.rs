@@ -1,317 +1,362 @@
 //! Zero-copy relay (Linux): `splice()` moves data socket -> pipe -> socket
-//! entirely in the kernel. Versus the adaptive relay this removes both
-//! user-space copies per chunk; measured on this bench, 3proxy (which uses
-//! the same technique) sustains 4.4 Gbps/core where read+write managed
-//! 1.53 Gbps/core at equal saturation.
+//! entirely in the kernel, both user-space copies per chunk gone.
+//!
+//! - Pipes come from a per-shard pool (thread-local, bounded) and go back
+//!   only when empty. A pipe is 1 MB when the kernel allows it; the
+//!   per-user pipe budget (`fs.pipe-user-pages-soft`, ~60 pipes of 1 MB
+//!   without CAP_SYS_RESOURCE) silently shrinks further pipes to 8 KB —
+//!   worse than copying — so a pipe below 64 KB is refused and the relay
+//!   keeps copying (counted: [`degraded_pipes`]).
+//! - Tunnels start copying and take a pipe only once a direction proves
+//!   bulk: an idle tunnel holds no pipe at all.
+//! - Splice runs on the tokio sockets themselves (`try_io`): no `dup`, no
+//!   second epoll registration, readiness cleared by tokio on EAGAIN.
 
+use std::cell::RefCell;
 use std::os::unix::io::AsRawFd;
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
-use tokio::io::unix::AsyncFd;
+use tokio::io::Interest;
 use tokio::net::TcpStream;
 
-use super::IdleTimer;
+use super::{IdleTimer, RELAY_BUF0, RELAY_BUF_MAX};
 
-/// Kernel pipe buffer size for relay pipes. Default is 64 KB; enlarging
-/// to 1 MB cuts the fill/drain iteration rate by ~16x on bulk flows
-/// (10 MB responses: 45k -> 3k pump iterations/s) — measured as the last
-/// CPU-side gap vs 3proxy on 10 MB objects (-13%). Requires root or
-/// CAP_SYS_RESOURCE above `/proc/sys/fs/pipe-max-size`; on failure the
-/// pipe keeps its default capacity (performance loss, not a breakage).
+/// Wanted pipe capacity: one fill/drain pair per MB of bulk.
 const PIPE_CAPACITY: libc::c_int = 1024 * 1024;
+/// Below this, splice costs more syscalls than the 64 KB copy relay.
+const PIPE_MIN_USEFUL: libc::c_int = 64 * 1024;
+/// Idle pipes kept per shard.
+const POOL_MAX: usize = 16;
 
-/// One fill call may request up to the pipe capacity; the kernel caps at
-/// the pipe's free space anyway.
-const SPLICE_CHUNK: usize = PIPE_CAPACITY as usize;
-
-/// Create a non-blocking pipe sized to [`PIPE_CAPACITY`] (`F_SETPIPE_SZ`,
-/// best effort): returns `None` and no allocations on failure.
-fn sized_pipe() -> Option<[std::ffi::c_int; 2]> {
-    let mut p = [0 as std::ffi::c_int; 2];
-    if unsafe { libc::pipe2(p.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC) } != 0 {
-        return None;
-    }
-    unsafe {
-        // Best effort: the kernel may clamp to fs.pipe-max-size; failures
-        // keep the default 64 KB capacity, which still works correctly.
-        libc::fcntl(p[0], libc::F_SETPIPE_SZ, PIPE_CAPACITY);
-        libc::fcntl(p[1], libc::F_SETPIPE_SZ, PIPE_CAPACITY);
-    }
-    Some(p)
+thread_local! {
+    static POOL: RefCell<Vec<PipePair>> = const { RefCell::new(Vec::new()) };
 }
 
-/// RAII around a raw pipe fd so cancellation (idle timeout dropping the
-/// relay future mid-flight) can never leak it.
-struct PipeFd(std::ffi::c_int);
-impl Drop for PipeFd {
-    fn drop(&mut self) {
-        unsafe { libc::close(self.0) };
-    }
+/// Pipes refused because the kernel would not size them (budget hit).
+static DEGRADED: AtomicU64 = AtomicU64::new(0);
+
+/// Pipes refused so far (pipe budget exhausted): logged at shutdown.
+pub fn degraded_pipes() -> u64 {
+    DEGRADED.load(Relaxed)
 }
 
-/// Reusable pipe pair for HTTP keep-alive connections: created once (on
-/// the first bulk response) and reused across responses, saving ~6
-/// syscalls per request (`pipe2` + `F_SETPIPE_SZ` + teardown). The pair
-/// is owned by the connection FSM and dropped with it.
+/// A non-blocking pipe sized for bulk relaying, pooled per shard.
 pub struct PipePair {
-    r: PipeFd,
-    w: PipeFd,
+    r: libc::c_int,
+    w: libc::c_int,
+    cap: usize,
 }
 
 impl PipePair {
-    /// Sized pipe pair, or `None` when the kernel refuses (the caller
-    /// keeps the adaptive engine — performance loss only).
-    pub fn new() -> Option<Self> {
-        let p = sized_pipe()?;
-        Some(Self {
-            r: PipeFd(p[0]),
-            w: PipeFd(p[1]),
-        })
+    /// A pooled pipe, or a fresh one; `None` when the kernel cannot give a
+    /// useful size (the caller keeps copying).
+    pub fn take() -> Option<Self> {
+        if let Some(p) = POOL.with(|p| p.borrow_mut().pop()) {
+            return Some(p);
+        }
+        Self::create()
+    }
+
+    fn create() -> Option<Self> {
+        let mut p = [0 as libc::c_int; 2];
+        // SAFETY: plain pipe2/fcntl/close on fds we own.
+        unsafe {
+            if libc::pipe2(p.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC) != 0 {
+                return None;
+            }
+            // One call (both ends share the pipe); on refusal, read back
+            // what the kernel actually gave.
+            let mut cap = libc::fcntl(p[1], libc::F_SETPIPE_SZ, PIPE_CAPACITY);
+            if cap < 0 {
+                cap = libc::fcntl(p[1], libc::F_GETPIPE_SZ);
+            }
+            if cap < PIPE_MIN_USEFUL {
+                DEGRADED.fetch_add(1, Relaxed);
+                libc::close(p[0]);
+                libc::close(p[1]);
+                return None;
+            }
+            Some(Self {
+                r: p[0],
+                w: p[1],
+                cap: cap as usize,
+            })
+        }
     }
 }
 
-/// Bidirectional tunnel relay (both directions, half-close propagation).
-///
-/// Returns `Err` with the un-consumed streams when the zero-copy setup
-/// fails (no pipes available): the caller falls back to the adaptive
-/// engine without losing the sockets.
-pub(super) async fn bidirectional(
+impl Drop for PipePair {
+    fn drop(&mut self) {
+        // Back to the pool only when empty (an aborted relay may leave
+        // bytes in it); never during thread teardown.
+        let mut queued: libc::c_int = 0;
+        // SAFETY: FIONREAD into a c_int on our own fd.
+        let empty = unsafe { libc::ioctl(self.r, libc::FIONREAD, &mut queued) } == 0 && queued == 0;
+        if empty {
+            // The slot is borrowed, never moved into the closure: if the
+            // pool is already gone (thread teardown) nothing is dropped
+            // inside `try_with` (that would recurse into this Drop).
+            let mut slot = Some(PipePair {
+                r: self.r,
+                w: self.w,
+                cap: self.cap,
+            });
+            let pooled = POOL
+                .try_with(|p| {
+                    let mut p = p.borrow_mut();
+                    if p.len() < POOL_MAX {
+                        p.extend(slot.take());
+                        true
+                    } else {
+                        false
+                    }
+                })
+                .unwrap_or(false);
+            if pooled {
+                return;
+            }
+            if let Some(p) = slot {
+                std::mem::forget(p); // same fds as `self`: closed below, once
+            }
+        }
+        // SAFETY: closing fds we own, once.
+        unsafe {
+            libc::close(self.r);
+            libc::close(self.w);
+        }
+    }
+}
+
+fn splice(from: libc::c_int, to: libc::c_int, len: usize) -> std::io::Result<usize> {
+    const SPLICE_F_MOVE: libc::c_uint = 1;
+    const SPLICE_F_NONBLOCK: libc::c_uint = 2;
+    // SAFETY: splice between fds we hold, no offsets.
+    let n = unsafe {
+        libc::splice(
+            from,
+            std::ptr::null_mut(),
+            to,
+            std::ptr::null_mut(),
+            len,
+            SPLICE_F_MOVE | SPLICE_F_NONBLOCK,
+        )
+    };
+    if n < 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(n as usize)
+    }
+}
+
+/// Bulk HTTP response, upstream -> client, through `pipe` (no half-close:
+/// the client connection lives on for keep-alive).
+pub(super) async fn response(
+    up: &TcpStream,
+    client: &TcpStream,
+    limit: Option<u64>,
+    pipe: &PipePair,
+    idle: std::time::Duration,
+) -> u64 {
+    let mut timer = IdleTimer::new(idle);
+    dir(up, client, pipe, false, limit, &mut timer).await
+}
+
+/// Tunnel relay, both directions, half-close propagated.
+pub(super) async fn tunnel(
     client: TcpStream,
     up: TcpStream,
     idle: std::time::Duration,
-) -> Result<(u64, u64), (TcpStream, TcpStream)> {
-    let Some(pair_ab) = PipePair::new() else {
-        return Err((client, up));
-    };
-    let Some(pair_ba) = PipePair::new() else {
-        return Err((client, up)); // pair_ab's raw fds closed by its Drop
-    };
-
-    // into_std() keeps O_NONBLOCK, which AsyncFd registration requires.
-    let (client_std, up_std) = match (client.into_std(), up.into_std()) {
-        (Ok(c), Ok(u)) => (c, u),
-        _ => return Ok((0, 0)), // dead sockets: nothing was relayed
-    };
-    let (client_fd, up_fd) = match (AsyncFd::new(client_std), AsyncFd::new(up_std)) {
-        (Ok(c), Ok(u)) => (c, u),
-        _ => return Ok((0, 0)),
-    };
-    let mut timer_a = IdleTimer::new(idle);
-    let mut timer_b = IdleTimer::new(idle);
-    let (a2b, b2a) = tokio::join!(
-        dir(
-            &client_fd,
-            &up_fd,
-            &pair_ab.r,
-            &pair_ab.w,
-            true,
-            None,
-            &mut timer_a
-        ),
-        dir(
-            &up_fd,
-            &client_fd,
-            &pair_ba.r,
-            &pair_ba.w,
-            true,
-            None,
-            &mut timer_b
-        )
-    );
-    Ok((a2b, b2a))
-}
-
-/// Zero-copy HTTP response relay. Dups both fds (the originals stay with
-/// tokio: the client socket lives on for keep-alive, the upstream is
-/// closed by the connection loop). A dup shares the file description, so
-/// O_NONBLOCK and the underlying socket state are shared with the
-/// original.
-///
-/// Uses the caller's reusable [`PipePair`]. Returns `None` when the
-/// zero-copy setup fails (caller keeps copying adaptively — and should
-/// consider the pair dirty/unknown only if the relay already started,
-/// which cannot happen before `Some` is returned).
-pub(super) async fn response(
-    up: &mut TcpStream,
-    client: &mut TcpStream,
-    limit: Option<u64>,
-    pair: &PipePair,
-    idle: std::time::Duration,
-) -> Option<u64> {
-    use std::os::unix::io::FromRawFd;
-
-    let up_fd_raw = unsafe { libc::dup(up.as_raw_fd()) };
-    if up_fd_raw < 0 {
-        return None;
-    }
-    let client_fd_raw = unsafe { libc::dup(client.as_raw_fd()) };
-    if client_fd_raw < 0 {
-        unsafe { libc::close(up_fd_raw) };
-        return None;
-    }
-    // from_raw_fd objects own their fd and close it on drop: nothing leaks
-    // below even when registration fails.
-    let up_dup = unsafe { std::net::TcpStream::from_raw_fd(up_fd_raw) };
-    let client_dup = unsafe { std::net::TcpStream::from_raw_fd(client_fd_raw) };
-    let (up_fd, client_fd) = match (AsyncFd::new(up_dup), AsyncFd::new(client_dup)) {
-        (Ok(u), Ok(c)) => (u, c),
-        _ => return None,
-    };
-    // No half-close of the client on EOF: keep-alive must survive.
-    let mut timer = IdleTimer::new(idle);
-    Some(
-        dir(
-            &up_fd, &client_fd, &pair.r, &pair.w, false, limit, &mut timer,
-        )
-        .await,
+) -> (u64, u64) {
+    tokio::join!(
+        tunnel_dir(&client, &up, idle),
+        tunnel_dir(&up, &client, idle)
     )
 }
 
-/// One direction of the zero-copy relay: `src` -> pipe -> `dst`.
-/// Returns the number of bytes moved. On EOF from `src`, half-closes `dst`
-/// when `shutdown_on_eof` (tunnels propagate half-close; the HTTP response
-/// relay keeps the client open for keep-alive).
+/// One tunnel direction: adaptive copy (8 -> 64 KB) until the flow proves
+/// bulk, then splice through a pooled pipe for the rest.
+async fn tunnel_dir(src: &TcpStream, dst: &TcpStream, idle: std::time::Duration) -> u64 {
+    let mut timer = IdleTimer::new(idle);
+    // Allocated only once data is ready: an idle tunnel (most of them)
+    // holds no buffer at all.
+    let mut buf: Vec<u8> = Vec::new();
+    let mut moved: u64 = 0;
+    loop {
+        if buf.capacity() == 0 {
+            match timer.park(src.readable()).await {
+                Some(Ok(())) => buf.reserve_exact(RELAY_BUF0),
+                _ => return moved,
+            }
+        }
+        buf.clear();
+        let n = loop {
+            match src.try_read_buf(&mut buf) {
+                Ok(n) => break n,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    match timer.park(src.readable()).await {
+                        Some(Ok(())) => {}
+                        _ => return moved, // inactivity / reactor gone
+                    }
+                }
+                Err(_) => break 0, // reset: ends this direction like EOF
+            }
+        };
+        if n == 0 {
+            half_close(dst);
+            return moved;
+        }
+        let mut off = 0;
+        while off < n {
+            match dst.try_write(&buf[off..n]) {
+                Ok(k) => off += k,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    match timer.park(dst.writable()).await {
+                        Some(Ok(())) => {}
+                        _ => return moved,
+                    }
+                }
+                Err(_) => return moved,
+            }
+        }
+        moved += n as u64;
+        timer.reset();
+        if n == buf.capacity() {
+            if buf.capacity() < RELAY_BUF_MAX {
+                buf.reserve(buf.capacity()); // bulk: grow
+            } else if let Some(pipe) = PipePair::take() {
+                drop(buf);
+                return moved + dir(src, dst, &pipe, true, None, &mut timer).await;
+            }
+        }
+    }
+}
+
+fn half_close(s: &TcpStream) {
+    // SAFETY: shutdown(SHUT_WR) on a socket we hold.
+    unsafe {
+        libc::shutdown(s.as_raw_fd(), libc::SHUT_WR);
+    }
+}
+
+/// One direction of the zero-copy relay: `src` -> pipe -> `dst`, at most
+/// `limit` bytes. On EOF from `src`, half-closes `dst` when
+/// `shutdown_on_eof`. Returns the bytes moved.
 ///
-/// Fill-then-drain: the pipe is filled to capacity (or socket-drained)
-/// before each drain, minimizing readable/writable wait pairs per byte.
-/// An attempt is also made *before* any readiness wait — under sustained
-/// bulk the socket is already readable and one park per MB is saved.
+/// Fill-then-drain: the pipe is filled until the socket is dry (a short
+/// splice says so — no extra EAGAIN probe) or the pipe full, then drained.
+/// Invariant: never park on `src.readable()` while the pipe holds data
+/// (the far end may be waiting for exactly those bytes: deadlock).
 async fn dir(
-    src: &AsyncFd<std::net::TcpStream>,
-    dst: &AsyncFd<std::net::TcpStream>,
-    pipe_r: &PipeFd,
-    pipe_w: &PipeFd,
+    src: &TcpStream,
+    dst: &TcpStream,
+    pipe: &PipePair,
     shutdown_on_eof: bool,
     limit: Option<u64>,
     timer: &mut IdleTimer,
 ) -> u64 {
-    const SPLICE_F_MOVE: u32 = 1;
-    const SPLICE_F_NONBLOCK: u32 = 2;
-    let flags: u32 = SPLICE_F_MOVE | SPLICE_F_NONBLOCK;
-
-    let src_fd = src.get_ref().as_raw_fd();
-    let dst_fd = dst.get_ref().as_raw_fd();
+    let src_fd = src.as_raw_fd();
+    let dst_fd = dst.as_raw_fd();
     let mut moved: u64 = 0;
     let mut left: u64 = limit.unwrap_or(u64::MAX);
-
     'outer: loop {
         if left == 0 {
             return moved; // body fully relayed, no over-splice
         }
-
-        // Phase 1: FILL the pipe (kernel copies only, no user-space turn).
+        // Phase 1: fill. `want` never exceeds the free pipe space, so an
+        // EAGAIN means the socket is dry (tokio then clears its readiness).
         let mut in_pipe: usize = 0;
-        let mut pending_eof = false;
+        let mut eof = false;
         loop {
-            let want = SPLICE_CHUNK.min(left as usize).saturating_sub(in_pipe);
+            let want = (pipe.cap as u64).min(left) as usize - in_pipe;
             if want == 0 {
-                break; // pipe full or limit reached: go drain
-            }
-            // Attempt 1: without any readiness wait (data often queued).
-            let n = unsafe {
-                libc::splice(
-                    src_fd,
-                    std::ptr::null_mut(),
-                    pipe_w.0,
-                    std::ptr::null_mut(),
-                    want,
-                    flags,
-                )
-            };
-            if n > 0 {
-                in_pipe += n as usize;
-                timer.reset();
-                continue; // keep filling without parking
-            }
-            if n == 0 {
-                pending_eof = true;
                 break;
             }
-            let err = std::io::Error::last_os_error();
-            if err.kind() != std::io::ErrorKind::WouldBlock {
-                break 'outer; // connection error: stop this direction
+            match src.try_io(Interest::READABLE, || splice(src_fd, pipe.w, want)) {
+                Ok(0) => {
+                    eof = true;
+                    break;
+                }
+                Ok(n) => {
+                    in_pipe += n;
+                    timer.reset();
+                    if n < want {
+                        break; // socket drained (or pipe slots full): drain now
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    if in_pipe > 0 {
+                        break; // drain what we hold before waiting (invariant)
+                    }
+                    match timer.park(src.readable()).await {
+                        Some(Ok(())) => {}
+                        _ => break 'outer,
+                    }
+                }
+                Err(_) => break 'outer,
             }
-            // Socket dry. CRITICAL: if the pipe holds data, DRAIN it now —
-            // parking on src.readable() with a loaded pipe deadlocks the
-            // relay (upstream waits for our window, client waits for our
-            // pipe, 0 % CPU everywhere). Park only when empty.
-            if in_pipe > 0 {
-                break; // go drain the pipe into dst
-            }
-            // Socket empty: park until readable (inactivity-bounded),
-            // then one guarded attempt.
-            let mut ready = match timer.park(src.readable()).await {
-                Some(Ok(g)) => g,
-                _ => break 'outer, // reactor gone or idle timeout
-            };
-            let n = unsafe {
-                libc::splice(
-                    src_fd,
-                    std::ptr::null_mut(),
-                    pipe_w.0,
-                    std::ptr::null_mut(),
-                    want,
-                    flags,
-                )
-            };
-            if n > 0 {
-                in_pipe += n as usize;
-                break; // got data: go drain the pipe into dst
-            }
-            if n == 0 {
-                pending_eof = true;
-                break;
-            }
-            let err = std::io::Error::last_os_error();
-            if err.kind() == std::io::ErrorKind::WouldBlock {
-                ready.clear_ready(); // spurious readiness: park again
-                continue;
-            }
-            break 'outer; // connection error: stop this direction
         }
-
-        // Phase 2: drain the pipe into dst (still zero-copy).
+        // Phase 2: drain into dst.
         while in_pipe > 0 {
-            let mut ready = match timer.park(dst.writable()).await {
-                Some(Ok(g)) => g,
-                _ => break 'outer, // inactivity or reactor gone
-            };
-            let n = unsafe {
-                libc::splice(
-                    pipe_r.0,
-                    std::ptr::null_mut(),
-                    dst_fd,
-                    std::ptr::null_mut(),
-                    in_pipe,
-                    flags,
-                )
-            };
-            if n > 0 {
-                in_pipe -= n as usize;
-                moved += n as u64;
-                left -= n as u64;
-                timer.reset();
-            } else if n < 0 {
-                let err = std::io::Error::last_os_error();
-                if err.kind() == std::io::ErrorKind::WouldBlock {
-                    ready.clear_ready();
-                    continue;
+            match dst.try_io(Interest::WRITABLE, || splice(pipe.r, dst_fd, in_pipe)) {
+                Ok(0) => break 'outer, // dst closed for writing
+                Ok(n) => {
+                    in_pipe -= n;
+                    moved += n as u64;
+                    left -= n as u64;
+                    timer.reset();
                 }
-                break 'outer;
-            } else {
-                break 'outer; // n == 0: dst closed for writing
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    match timer.park(dst.writable()).await {
+                        Some(Ok(())) => {}
+                        _ => break 'outer,
+                    }
+                }
+                Err(_) => break 'outer,
             }
         }
-
-        if pending_eof {
-            // EOF from src after draining the last pipe-full: half-close
-            // dst so the far end sees it (when allowed).
+        if eof {
             if shutdown_on_eof {
-                unsafe {
-                    libc::shutdown(dst_fd, libc::SHUT_WR);
-                }
+                half_close(dst);
             }
             return moved;
         }
     }
     moved
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pooled() -> usize {
+        POOL.with(|p| p.borrow().len())
+    }
+
+    #[test]
+    fn empty_pipes_return_to_the_pool_dirty_ones_do_not() {
+        let base = pooled();
+        let a = PipePair::take().expect("pipe");
+        assert!(a.cap >= PIPE_MIN_USEFUL as usize);
+        drop(a);
+        assert_eq!(pooled(), base + 1, "empty pipe pooled");
+        // Reused, not recreated.
+        let b = PipePair::take().unwrap();
+        assert_eq!(pooled(), base);
+        // Bytes left inside (aborted relay): closed, not pooled.
+        // SAFETY: write into our own pipe.
+        unsafe { libc::write(b.w, b"x".as_ptr().cast(), 1) };
+        drop(b);
+        assert_eq!(pooled(), base);
+    }
+
+    #[test]
+    fn pool_is_bounded() {
+        let pipes: Vec<_> = (0..POOL_MAX + 4).filter_map(|_| PipePair::take()).collect();
+        let n = pipes.len();
+        drop(pipes);
+        assert!(
+            pooled() <= POOL_MAX,
+            "pool grew past its cap ({n} pipes made)"
+        );
+    }
 }

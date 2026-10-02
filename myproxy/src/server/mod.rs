@@ -304,6 +304,8 @@ impl Server {
         tracing::info!(
             remaining = self.shared.active.load(Relaxed),
             accepted = ?per_shard,
+            // > 0: the kernel pipe budget was hit, those relays copied.
+            degraded_pipes = crate::relay::degraded_pipes(),
             "shutdown complete"
         );
         result

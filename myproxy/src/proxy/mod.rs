@@ -187,10 +187,6 @@ async fn serve<C: ClientStream>(client: &mut C, peer: IpAddr, svc: &Services) ->
     // read_head holds the vector's *capacity*, whose untouched pages cost
     // nothing; capacity is reused across requests on the same connection.
     let mut buf: Vec<u8> = Vec::new();
-    // Connection-owned reusable relay pipe pair (created lazily on the
-    // first bulk response, reused across keep-alive requests, dropped with
-    // the connection).
-    let mut resp_pipes: Option<relay::PipePair> = None;
     // Zero-alloc hot path — connection-owned scratches reused
     // across keep-alive requests (response head+body buffer, rewrite
     // buffer, origin key). Virtual capacity, dropped with the connection.
@@ -309,7 +305,6 @@ async fn serve<C: ClientStream>(client: &mut C, peer: IpAddr, svc: &Services) ->
                     &mut buf,
                     &head,
                     &target,
-                    &mut resp_pipes,
                     &mut resp_buf,
                     &mut rewrite_buf,
                     &mut origin_key,

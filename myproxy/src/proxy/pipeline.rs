@@ -15,7 +15,6 @@ use crate::dns::DnsCache;
 use crate::http::{read_response_head, HeadError, RequestHead, RespError, Span, Target};
 use crate::policy::DestPolicy;
 use crate::relay;
-use crate::relay::PipePair;
 use crate::stream::ClientStream;
 
 use super::{RESP_502, RESP_504};
@@ -45,7 +44,6 @@ pub(super) async fn http<C: ClientStream>(
     buf: &mut [u8],
     head: &RequestHead,
     target: &Target,
-    pipes: &mut Option<PipePair>,
     // Connection-owned scratches: zero alloc in the hot path — reused
     // across keep-alive requests, dropped with the connection.
     resp_buf: &mut Vec<u8>,
@@ -302,7 +300,7 @@ pub(super) async fn http<C: ClientStream>(
             }
         }
     } else {
-        let n = relay::response(&mut up, client, remaining_capped, pipes, idle).await;
+        let n = relay::response(&mut up, client, remaining_capped, idle).await;
         // B4: bytes buffered beyond the body belong to a backend-pipelined
         // response — the stream is desynchronized, never pool it.
         (n, resp_buf.len() > window_end)
