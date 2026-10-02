@@ -469,7 +469,12 @@ async fn run_shard(
                         }
                         return;
                     }
-                    match tokio::time::timeout(hs, acceptor.accept(sock)).await {
+                    match tokio::time::timeout(
+                        hs,
+                        acceptor.accept(crate::stream::ReadAhead::new(sock)),
+                    )
+                    .await
+                    {
                         Ok(Ok(tls)) => {
                             if tls.get_ref().1.alpn_protocol() == Some(b"h2") {
                                 proxy::handle_h2(tls, ip, svc).await

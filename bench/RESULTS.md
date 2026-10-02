@@ -439,3 +439,21 @@ par manque de RAM à 25k (clair et TLS) et dès la fin de hold-10k en h2 (pic 0)
 hold-25k limité par le générateur (une connexion TLS+h2 par tunnel), comme en M13. Écarts à
 M13 dans le bruit.
 
+## M20 — tunnels HTTP/2 : rattraper puis dépasser gost — 2026-10-02, seed 2004113323
+
+Constat (M19) : flood h2 6,6 Gbps vs gost 7,7, à CPU/GB égal — myproxy n'utilisait que 87 % de
+son core (gost 104 %) : il attendait. Mesures pas à pas (flood-8, PROXY_H2=1) :
+
+| Étape | Débit | CPU proxy | Lecture |
+|---|---|---|---|
+| départ | 6,6 Gbps | 87 % | contrôle de flux : le client attend des WINDOW_UPDATE |
+| A. fenêtre rouverte dès réception (pas après l'écriture amont) | 6,6 | 84 % | sans effet seul, conservé (logique, borné par la fenêtre) |
+| B. fenêtres 1 → 4 MB par stream, 8 → 16 MB par connexion | **7,86** | 101 % | goulot levé ; le générateur dépense 7,7 → 6,2 s CPU |
+| C. lecture anticipée sous rustls (rustls lit par 4 KB : ~4 recv par record de 16 KB ; buffer 64 KB adaptatif, libéré quand le flux redevient faible) | ≈ | −3 % CPU/GB | h2 borné par le core du harnais ; en TLS HTTP/1 : flood 9,3 → 9,6 Gbps, −5 % CPU/GB |
+
+A/B final alterné (3 passes chacun) : **myproxy 7,64 / 7,54 / 7,58 Gbps (0,97 s CPU/GB) vs gost
+7,40 / 7,41 / 7,55 (1,08 s/GB)** — devant à chaque paire, −11 % de CPU par Go. Le débit h2 est
+plafonné par le core du harnais (générateur + sink) : l'écart de débit reste serré, celui
+d'efficacité est net. Matrices TLS et h2 complètes : aucune régression (tous les autres tests dans
+le bruit), pic RAM inchangé (les fenêtres ne réservent rien d'avance), `err_kinds` vides.
+
