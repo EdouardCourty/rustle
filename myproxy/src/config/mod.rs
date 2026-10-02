@@ -239,7 +239,7 @@ impl Default for HttpConfig {
     fn default() -> Self {
         Self {
             upstream_keepalive: true,
-            max_idle_per_origin: 32,
+            max_idle_per_origin: 256,
             max_request_body_bytes: 0,
             max_response_body_bytes: 0,
         }

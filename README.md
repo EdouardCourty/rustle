@@ -119,7 +119,7 @@ Une requête **sans** identifiants (premier 407 d'un navigateur) ne compte pas c
 | Clé | Défaut | Rôle |
 |---|---|---|
 | `upstream_keepalive` | `true` | réutiliser les connexions vers les origines |
-| `max_idle_per_origin` | `32` | connexions inactives gardées par origine **et par shard** (plafond global 1024 par shard) |
+| `max_idle_per_origin` | `256` | connexions inactives gardées par origine **et par shard** (plafond global 1024 par shard) |
 | `max_request_body_bytes` | `0` | taille max d'un body de requête (413) ; `0` = illimité |
 | `max_response_body_bytes` | `0` | taille max d'une réponse (502 si déclarée, coupure sinon) ; `0` = illimité |
 

@@ -3,6 +3,10 @@ use std::sync::Mutex;
 
 use tokio::net::TcpStream;
 
+/// Distinct origins kept in the map (empty entries included) before
+/// emptied ones are pruned.
+const MAX_ORIGINS: usize = 1024;
+
 /// Idle-upstream connection pool, keyed by origin (`host:port`).
 ///
 /// Rationale (profiled): the HTTP path used to open and close an upstream
@@ -47,11 +51,11 @@ impl UpstreamPool {
             .and_then(|idle| idle.pop_back());
         if sock.is_some() {
             pool.current_total -= 1;
-            if pool
-                .by_origin
-                .get(origin)
-                .map(|i| i.is_empty())
-                .unwrap_or(false)
+            // An emptied origin keeps its entry (the next put would
+            // reallocate key + deque on the keep-alive hot path); entries
+            // are only pruned when many distinct origins pile up.
+            if pool.by_origin.len() > MAX_ORIGINS
+                && pool.by_origin.get(origin).is_some_and(|i| i.is_empty())
             {
                 pool.by_origin.remove(origin);
             }

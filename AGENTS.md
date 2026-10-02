@@ -74,7 +74,7 @@ bench/
 | `limits.max_connections` / `max_header_bytes` | 10000 / 65536 |
 | `timeouts.connect` / `idle` | 5s / 60s |
 | `dns.ttl` / `max_entries` | 60s (0 = off) / 4096 |
-| `http.upstream_keepalive` / `max_idle_per_origin` | true / 32 (cap global 1024 en dur) |
+| `http.upstream_keepalive` / `max_idle_per_origin` | true / 256 (cap global 1024 par shard en dur) |
 | `http.max_request_body_bytes` / `max_response_body_bytes` | 0 = illimité |
 | `tls.listen` / `cert` / `key` | `""` (off) / PEM |
 | `tls.handshake_timeout` / `http2` / `ktls` | 10s / true (ALPN h2) / **false** (opt-in : +13 % tunnels, −30 % RAM, mais −37 % bulk HTTP ; M17) |
