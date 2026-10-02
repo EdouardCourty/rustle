@@ -378,14 +378,16 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
     let idle = cfg.timeouts.idle;
     let t0 = ctx.log.all().then(std::time::Instant::now);
     let method = req.method().clone();
-    let log_target = match ctx.log.target_mode() {
+    // Built only when a line can be written (no allocation per stream
+    // with the access log off).
+    let log_target = ctx.log.errors().then(|| match ctx.log.target_mode() {
         TargetMode::Url => req.uri().to_string(),
         TargetMode::Host => req
             .uri()
             .authority()
             .map(|a| a.as_str().to_string())
             .unwrap_or_else(|| "-".into()),
-    };
+    });
     // Failure: access-log line + status to the client.
     let fail = |respond: &mut SendResponse<Bytes>, status: StatusCode, reason: Option<&str>| {
         if ctx.log.errors() {
@@ -396,7 +398,7 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
                 .kv("via", "h2")
                 .kv("kind", "http")
                 .kv("method", &method)
-                .kv("target", &log_target)
+                .kv("target", log_target.as_deref().unwrap_or("-"))
                 .kv("status", status.as_u16());
             if let Some(r) = reason {
                 l = l.kv("reason", r);
@@ -539,7 +541,7 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
                     .kv("via", "h2")
                     .kv("kind", "http")
                     .kv("method", &method)
-                    .kv("target", &log_target)
+                    .kv("target", log_target.as_deref().unwrap_or("-"))
                     .kv("status", rhead.status)
                     .kv("up", sent)
                     .kv("down", down)
@@ -557,8 +559,7 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
 
     let mut src = Src {
         up: &mut up,
-        buf: resp_buf.split_off(rhead.raw_len),
-        pos: 0,
+        buf: BytesMut::from(&resp_buf[rhead.raw_len..]),
         timer: IdleTimer::new(idle),
         given: 0,
     };
@@ -586,7 +587,7 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
                         .kv("via", "h2")
                         .kv("kind", "http")
                         .kv("method", &method)
-                        .kv("target", &log_target)
+                        .kv("target", log_target.as_deref().unwrap_or("-"))
                         .kv("status", rhead.status)
                         .kv("reason", "truncated"),
                 );
@@ -679,8 +680,9 @@ async fn read_head_final(
 /// Upstream bytes: what was read along with the head, then the socket.
 struct Src<'a> {
     up: &'a mut TcpStream,
-    buf: Vec<u8>,
-    pos: usize,
+    /// Unconsumed upstream bytes. Chunks handed to h2 are split off this
+    /// buffer (`split_to().freeze()`): no copy per DATA frame.
+    buf: BytesMut,
     timer: IdleTimer,
     /// Body bytes handed to the client (access log).
     given: u64,
@@ -688,8 +690,6 @@ struct Src<'a> {
 
 impl Src<'_> {
     async fn fill(&mut self) -> std::io::Result<()> {
-        self.buf.drain(..self.pos);
-        self.pos = 0;
         self.buf.reserve(DATA_CHUNK);
         match self.timer.park(self.up.read_buf(&mut self.buf)).await {
             Some(Ok(0)) => Err(std::io::ErrorKind::UnexpectedEof.into()),
@@ -705,12 +705,10 @@ impl Src<'_> {
     /// Next line (through `\n`), at most `cap` bytes.
     async fn line(&mut self, cap: usize) -> std::io::Result<Vec<u8>> {
         loop {
-            if let Some(i) = self.buf[self.pos..].iter().position(|&b| b == b'\n') {
-                let l = self.buf[self.pos..self.pos + i + 1].to_vec();
-                self.pos += i + 1;
-                return Ok(l);
+            if let Some(i) = self.buf.iter().position(|&b| b == b'\n') {
+                return Ok(self.buf.split_to(i + 1).to_vec());
             }
-            if self.buf.len() - self.pos > cap {
+            if self.buf.len() > cap {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "line too long",
@@ -722,18 +720,16 @@ impl Src<'_> {
 
     /// Up to `max` bytes (reads when nothing is buffered).
     async fn take(&mut self, max: usize) -> std::io::Result<Bytes> {
-        if self.pos == self.buf.len() {
+        if self.buf.is_empty() {
             self.fill().await?;
         }
-        let k = (self.buf.len() - self.pos).min(max);
-        let b = Bytes::copy_from_slice(&self.buf[self.pos..self.pos + k]);
-        self.pos += k;
+        let k = self.buf.len().min(max);
         self.given += k as u64;
-        Ok(b)
+        Ok(self.buf.split_to(k).freeze())
     }
 
     fn leftover(&self) -> bool {
-        self.pos < self.buf.len()
+        !self.buf.is_empty()
     }
 }
 
