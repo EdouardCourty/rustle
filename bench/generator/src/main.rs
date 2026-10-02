@@ -55,6 +55,10 @@ struct Cli {
     /// Disable the warmup run.
     #[arg(long)]
     no_warmup: bool,
+    /// Run the warmup only, then exit (the harness measures the proxy's
+    /// CPU over the measured runs alone).
+    #[arg(long)]
+    warmup_only: bool,
     /// Runtime worker threads (size to the cores given to the generator,
     /// or it saturates before a multi-core proxy does).
     #[arg(long, default_value_t = 2)]
@@ -158,6 +162,9 @@ async fn amain(cli: Cli) {
                 eprintln!("--- warmup");
                 let _ = modes::run_once(&cli, &w).await;
             }
+        }
+        if cli.warmup_only {
+            return;
         }
         // Generator CPU over the measured runs only (warmup excluded),
         // attributed per run like the proxy's cpu_s_per_run.

@@ -85,6 +85,23 @@ rss_mb() { _sum_status VmRSS; }
 # Peak RSS of the test (VmHWM; the proxy restarts before each test). rss_mb
 # is sampled after the load ended = memory still held, not the live cost.
 peak_rss_mb() { _sum_status VmHWM; }
+# TCP counters of the proxy's network namespace (/proc/net/snmp, netstat):
+# segments sent, connections opened upstream (pool churn), retransmits,
+# delayed ACKs, accept-queue overflows/drops.
+tcp_counters() {
+    docker compose exec -T proxy cat /proc/net/snmp /proc/net/netstat 2>/dev/null | awk '
+        /^(Tcp|TcpExt):/ { if (!(($1) in hdr)) { for (i=2;i<=NF;i++) k[$1,i]=$i; hdr[$1]=1 }
+                           else { for (i=2;i<=NF;i++) v[k[$1,i]]=$i } }
+        END { printf "%d %d %d %d %d %d", v["OutSegs"], v["ActiveOpens"], v["RetransSegs"],
+              v["DelayedACKs"], v["ListenOverflows"], v["ListenDrops"] }' || echo "0 0 0 0 0 0"
+}
+# Per measured run (segments, opens, retrans, delayed ACKs); accept-queue
+# overflows/drops as totals (any > 0 explains SYN retransmits, p99 ~1/3/5 s).
+tcp_delta() { # <before> <after> <repeat>
+    awk -v a="$1" -v b="$2" -v n="$3" 'BEGIN { split(a,x," "); split(b,y," ");
+        printf "segs_out_per_run=%d active_opens_per_run=%d retrans_per_run=%d delayed_acks_per_run=%d listen_overflows=%d listen_drops=%d",
+            (y[1]-x[1])/n, (y[2]-x[2])/n, (y[3]-x[3])/n, (y[4]-x[4])/n, y[5]-x[5], y[6]-x[6] }'
+}
 # Same, summed over all upstream processes (nginx master+workers): the
 # harness-side cost per test is the ceiling nobody sees.
 up_ticks() {
@@ -98,14 +115,21 @@ run_test() {
     echo "### $name"
     docker compose restart proxy >/dev/null  # fresh state + fresh CPU counters
     sleep 0.5
-    local tick0 tick1 median cpu_s_per_run up0 up1 up_cpu_s_per_run
+    local tick0 tick1 median cpu_s_per_run up0 up1 up_cpu_s_per_run tcp0 tcp1
+    # Warmup in its own generator run, before the counters are sampled:
+    # the proxy's CPU then covers the measured runs only (it used to
+    # include the warmup, amortized over REPEAT: ~+6 % on every figure).
+    docker compose --profile generator run --rm -T generator \
+        --warmup-only "${GEN_ARGS[@]}" "$@" >/dev/null 2>&1 || true
     tick0=$(cpu_ticks)
     up0=$(up_ticks)
+    tcp0=$(tcp_counters)
     docker compose --profile generator run --rm -T generator \
-        --repeat "$REPEAT" "${GEN_ARGS[@]}" "$@" | tee /dev/stderr | grep '^RESULT median' > "$out/.median.txt" \
+        --repeat "$REPEAT" --no-warmup "${GEN_ARGS[@]}" "$@" | tee /dev/stderr | grep '^RESULT median' > "$out/.median.txt" \
         || true  # no RESULT (generator/proxy died): reported below, the matrix goes on
     tick1=$(cpu_ticks)
     up1=$(up_ticks)
+    tcp1=$(tcp_counters)
     median=$(cat "$out/.median.txt")
     if [ -z "$median" ]; then
         echo "!! no RESULT median line for $name" | tee -a "$out/results.txt"
@@ -116,7 +140,7 @@ run_test() {
         'BEGIN{printf "%.3f", (a-b)/100/n}')
     up_cpu_s_per_run=$(awk -v a="$up1" -v b="$up0" -v n="$REPEAT" \
         'BEGIN{printf "%.2f", (a-b)/100/n}')
-    echo "$median cpu_s_per_run=$cpu_s_per_run up_cpu_s_per_run=$up_cpu_s_per_run rss_mb=$(rss_mb) peak_rss_mb=$(peak_rss_mb)" | tee -a "$out/results.txt"
+    echo "$median cpu_s_per_run=$cpu_s_per_run up_cpu_s_per_run=$up_cpu_s_per_run rss_mb=$(rss_mb) peak_rss_mb=$(peak_rss_mb) $(tcp_delta "$tcp0" "$tcp1" "$REPEAT")" | tee -a "$out/results.txt"
 }
 
 # Hold with optional 2-replica split (single client exhausts ephemeral ports).
