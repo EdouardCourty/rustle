@@ -12,7 +12,9 @@ use tokio::time::timeout;
 use crate::accesslog::TargetMode;
 use crate::config::Config;
 use crate::dns::DnsCache;
-use crate::http::{read_response_head, HeadError, RequestHead, RespError, Span, Target};
+use crate::http::{
+    read_response_head, HeadError, RequestHead, RespError, ResponseHead, Span, Target,
+};
 use crate::policy::DestPolicy;
 use crate::relay;
 use crate::stream::ClientStream;
@@ -166,12 +168,8 @@ pub(super) async fn http<C: ClientStream>(
             }
             return false;
         }
-        match timeout(
-            idle,
-            read_response_head(&mut up, resp_buf, max_head, idle, &[]),
-        )
-        .await
-        {
+        // The idle timeout is applied per read inside read_response_head.
+        match split_timeout(read_response_head(&mut up, resp_buf, max_head, idle, &[]).await) {
             Ok(Ok(h)) => break (up, from_pool, h),
             // B6: retry once on ANY I/O failure of a pooled socket — clean
             // EOF or RST — as long as the request is replayable (B7).
@@ -213,13 +211,8 @@ pub(super) async fn http<C: ClientStream>(
             return false;
         }
         let mut next: Vec<u8> = resp_buf[rhead.raw_len..].to_vec(); // residual = next head prefix
-        let head_res = timeout(
-            idle,
-            read_response_head(&mut up, &mut next, max_head, idle, &[]),
-        )
-        .await;
-        match head_res {
-            Ok(Ok(h)) => {
+        match read_response_head(&mut up, &mut next, max_head, idle, &[]).await {
+            Ok(h) => {
                 rhead = h;
                 *resp_buf = next;
             }
@@ -609,4 +602,19 @@ async fn connect_first(
     Err(last.unwrap_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "no address to try")
     }))
+}
+
+/// Splits an idle timeout (outer `Err`, answered 504) from the other head
+/// errors, the shape the former outer `timeout()` gave.
+fn split_timeout(
+    r: Result<ResponseHead, RespError>,
+) -> Result<Result<ResponseHead, RespError>, ()> {
+    match r {
+        Err(RespError::Head(HeadError::Io(ref io)))
+            if io.kind() == std::io::ErrorKind::TimedOut =>
+        {
+            Err(())
+        }
+        r => Ok(r),
+    }
 }

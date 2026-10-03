@@ -643,6 +643,22 @@ fn bind(addr: SocketAddr, reuse_port: bool) -> anyhow::Result<std::net::TcpListe
     // options): no setsockopt per connection. SO_RCVBUF before listen()
     // also sizes the window scale advertised in the SYN-ACK.
     socket.set_nodelay(true)?;
+    // Every protocol served here (HTTP, TLS, SOCKS5) is client-speaks-first:
+    // the kernel wakes accept() only once the first bytes are in, so the
+    // first read never hits EAGAIN + an extra epoll round.
+    let secs: libc::c_int = 1;
+    // SAFETY: valid listening fd owned by `socket`, option value is a c_int
+    // that outlives the call.
+    unsafe {
+        use std::os::unix::io::AsRawFd;
+        libc::setsockopt(
+            socket.as_raw_fd(),
+            libc::IPPROTO_TCP,
+            libc::TCP_DEFER_ACCEPT,
+            &secs as *const libc::c_int as *const libc::c_void,
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        );
+    }
     let _ = socket.set_send_buffer_size(SOCK_BUF_BYTES as usize);
     let _ = socket.set_recv_buffer_size(SOCK_BUF_BYTES as usize);
     socket.bind(&addr.into())?;

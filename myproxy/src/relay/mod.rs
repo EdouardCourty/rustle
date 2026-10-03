@@ -53,7 +53,9 @@ impl IdleTimer {
     where
         F: std::future::Future,
     {
+        // biased: poll the I/O first, no RNG draw per park.
         tokio::select! {
+            biased;
             out = fut => Some(out),
             _ = tokio::time::sleep_until(self.deadline) => None,
         }

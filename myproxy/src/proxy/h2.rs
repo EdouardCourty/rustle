@@ -662,17 +662,14 @@ async fn read_head_final(
     idle: Duration,
 ) -> Result<crate::http::ResponseHead, RespError> {
     let max = cfg.limits.max_header_bytes;
-    let mut h = timeout(idle, read_response_head(up, resp_buf, max, idle, &[]))
-        .await
-        .map_err(|_| RespError::Head(HeadError::Io(std::io::ErrorKind::TimedOut.into())))??;
+    // The idle timeout is applied per read inside read_response_head.
+    let mut h = read_response_head(up, resp_buf, max, idle, &[]).await?;
     for _ in 0..3 {
         if !(100..200).contains(&h.status) || h.status == 101 {
             return Ok(h);
         }
         let rest = resp_buf[h.raw_len..].to_vec();
-        h = timeout(idle, read_response_head(up, resp_buf, max, idle, &rest))
-            .await
-            .map_err(|_| RespError::Head(HeadError::Io(std::io::ErrorKind::TimedOut.into())))??;
+        h = read_response_head(up, resp_buf, max, idle, &rest).await?;
     }
     Err(RespError::Head(HeadError::Invalid))
 }
