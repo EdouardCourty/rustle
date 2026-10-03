@@ -28,21 +28,53 @@ use crate::policy::{AuthLimiter, ClientPolicy, DestPolicy};
 use crate::proxy;
 use crate::upstream::UpstreamPool;
 
-/// One MB of kernel socket buffer: the first in-flight burst before TCP
-/// autotuning catches up was throttled by the 16 KB default (10 MB
-/// responses were -11 % vs 3proxy). Applied best-effort on both sides of
-/// every proxied socket. Kernel memory is allocated on demand (skb) — an
-/// idle connection pays nothing.
-const SOCK_BUF_BYTES: libc::c_int = 1024 * 1024;
+/// Kernel socket buffer size (`server.socket_buffer_bytes`, 0 = autotuning).
+/// One MB by default: the first in-flight burst before TCP autotuning
+/// catches up was throttled by the 16 KB default (10 MB responses were
+/// -11 % vs 3proxy). Applied best-effort on both sides of every proxied
+/// socket. Kernel memory is allocated on demand (skb) — an idle connection
+/// pays nothing. Process-wide: set once by `start`, read per upstream connect.
+static SOCK_BUF: AtomicUsize = AtomicUsize::new(1024 * 1024);
 
 /// Blocking-pool budget (getaddrinfo) split across shards.
 const BLOCKING_THREADS_TOTAL: usize = 512;
 
+/// Records the configured buffer size; warns when the kernel caps it (the
+/// fixed size then both shrinks and disables autotuning: on a stock
+/// rmem_max of 208 KB it bounds a 100 ms path to ~33 Mbit/s).
+fn set_socket_buffers(bytes: usize) {
+    SOCK_BUF.store(bytes, Relaxed);
+    if bytes == 0 {
+        return;
+    }
+    for sysctl in ["rmem_max", "wmem_max"] {
+        let max = std::fs::read_to_string(format!("/proc/sys/net/core/{sysctl}"))
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok());
+        if let Some(max) = max.filter(|&m| m < bytes) {
+            tracing::warn!(
+                socket_buffer_bytes = bytes,
+                %sysctl,
+                max,
+                "socket buffer capped by the kernel and autotuning disabled: \
+                 raise net.core.{sysctl} or set socket_buffer_bytes = 0"
+            );
+        }
+    }
+}
+
 /// Widen SO_SNDBUF/SO_RCVBUF on a socket (best effort, silent).
 pub(crate) fn widen_buffers(sock: &TcpStream) {
     use std::os::unix::io::AsRawFd;
+    let Ok(buf) = libc::c_int::try_from(SOCK_BUF.load(Relaxed)) else {
+        return;
+    };
+    if buf == 0 {
+        return; // autotuning
+    }
     let fd = sock.as_raw_fd();
-    let buf: libc::c_int = SOCK_BUF_BYTES;
+    // SAFETY: valid connected fd borrowed from `sock`; the option value is
+    // a c_int that outlives both calls.
     unsafe {
         libc::setsockopt(
             fd,
@@ -139,6 +171,7 @@ struct ShardListeners {
 /// here, synchronously, so errors surface before any thread starts and an
 /// ephemeral port (`:0`) resolved by the first listener is shared by all.
 pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
+    set_socket_buffers(cfg.server.socket_buffer_bytes);
     let n = shard_count(cfg.server.workers);
     let (addr, plain) = bind_group(&cfg.server.listen, n, "listen")?;
     // kTLS: wanted and supported by this kernel (probed once).
@@ -669,8 +702,11 @@ fn bind(addr: SocketAddr, reuse_port: bool) -> anyhow::Result<std::net::TcpListe
             std::mem::size_of::<libc::c_int>() as libc::socklen_t,
         );
     }
-    let _ = socket.set_send_buffer_size(SOCK_BUF_BYTES as usize);
-    let _ = socket.set_recv_buffer_size(SOCK_BUF_BYTES as usize);
+    let buf = SOCK_BUF.load(Relaxed);
+    if buf > 0 {
+        let _ = socket.set_send_buffer_size(buf);
+        let _ = socket.set_recv_buffer_size(buf);
+    }
     socket.bind(&addr.into())?;
     // Capped by net.core.somaxconn (65535 in the benchmark harness).
     socket.listen(65535)?;
@@ -694,8 +730,8 @@ mod tests {
         let (s, _) = ln.accept().await.unwrap();
         assert!(s.nodelay().unwrap());
         let s = socket2::SockRef::from(&s);
-        assert!(s.send_buffer_size().unwrap() >= SOCK_BUF_BYTES as usize);
-        assert!(s.recv_buffer_size().unwrap() >= SOCK_BUF_BYTES as usize);
+        assert!(s.send_buffer_size().unwrap() >= SOCK_BUF.load(Relaxed));
+        assert!(s.recv_buffer_size().unwrap() >= SOCK_BUF.load(Relaxed));
     }
 
     fn test_config(workers: usize, max_connections: usize) -> Arc<Config> {

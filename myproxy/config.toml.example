@@ -9,6 +9,14 @@ pin_cores = false
 # Admin/health listener (GET /health -> 200, no auth). Bind 127.0.0.1 on
 # a public VPS. Empty string disables it.
 admin_listen = "127.0.0.1:8181"
+# SO_SNDBUF/SO_RCVBUF of every proxied socket (client and upstream), in
+# bytes. A fixed size disables kernel autotuning: a connection never has more
+# than this in flight (1 MB over a 100 ms path = ~80 Mbit/s), and it is capped
+# by net.core.rmem_max / wmem_max (208 KB on a stock kernel: 1 MB requested
+# gives ~416 KB, ~33 Mbit/s at 100 ms; logged at startup). 0 = kernel
+# autotuning (tcp_rmem / tcp_wmem, up to 4-6 MB): better for distant
+# clients and fast links.
+socket_buffer_bytes = 1048576
 
 [auth]
 # API keys accepted as Basic auth passwords: Proxy-Authorization: Basic <base64(user:key)>.
