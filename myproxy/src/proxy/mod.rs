@@ -154,7 +154,10 @@ async fn reply<C: ClientStream>(client: &mut C, resp: &[u8]) {
 
 pub async fn handle_conn<C: ClientStream>(mut client: C, peer: IpAddr, svc: Arc<Services>) {
     let idle = svc.cfg.timeouts.idle;
-    match serve(&mut client, peer, &svc).await {
+    // Boxed: the keep-alive state (~2 KB of future) lives on the heap and
+    // is freed when the connection turns into a tunnel. Inline, the task
+    // kept the size of the larger branch for the tunnel's whole life.
+    match Box::pin(serve(&mut client, peer, &svc)).await {
         // Tunnel: relay both directions until one side closes.
         // Inactivity-bounded internally (no absolute cap).
         Some(t) => match relay::bidirectional(client, t.up, idle).await {
@@ -317,5 +320,24 @@ async fn serve<C: ClientStream>(client: &mut C, peer: IpAddr, svc: &Services) ->
                 }
             }
         }
+    }
+}
+#[cfg(test)]
+mod size_tests {
+    use super::*;
+
+    fn future_size<F, Fut>(_: F) -> usize
+    where
+        F: Fn(tokio::net::TcpStream, IpAddr, Arc<Services>) -> Fut,
+    {
+        std::mem::size_of::<Fut>()
+    }
+
+    /// A held tunnel costs its task's future: keep it close to the relay's
+    /// own state (the keep-alive state is boxed, see handle_conn).
+    #[test]
+    fn connection_future_stays_small() {
+        let n = future_size(handle_conn::<tokio::net::TcpStream>);
+        assert!(n < 2560, "handle_conn future = {n} bytes");
     }
 }
