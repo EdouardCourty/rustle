@@ -138,6 +138,10 @@ pub struct ServerConfig {
     /// Admin/health listener (GET /health -> 200, no auth). Bind to
     /// 127.0.0.1 on a public VPS. Empty string disables it.
     pub admin_listen: String,
+    /// SO_SNDBUF/SO_RCVBUF on every proxied socket (client and upstream).
+    /// 0 = kernel autotuning (tcp_rmem/tcp_wmem). A fixed size disables
+    /// autotuning and is capped by net.core.rmem_max/wmem_max.
+    pub socket_buffer_bytes: usize,
 }
 
 impl Default for ServerConfig {
@@ -147,6 +151,7 @@ impl Default for ServerConfig {
             workers: 1,
             pin_cores: false,
             admin_listen: "127.0.0.1:8181".to_string(),
+            socket_buffer_bytes: 1024 * 1024,
         }
     }
 }
