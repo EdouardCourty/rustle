@@ -2,4 +2,3 @@
 bench/client/target
 bench/results/
 results/
-/bench/uring-proto/target

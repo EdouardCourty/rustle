@@ -364,7 +364,7 @@ bulk HTTP et par connexion (mise en place : vidage rustls + ULP + clés).
 
 ## M18 — io_uring, prototype mesuré avant migration — 2026-10-01, seed 2004113323
 
-Prototype monoio (`bench/uring-proto`, DUT `uring-proto`) du chemin HTTP/1 keep-alive (même
+Prototype monoio (`bench/uring-proto`, DUT `uring-proto` ; retirés du repo depuis, récupérables au commit `a2b11e3`) du chemin HTTP/1 keep-alive (même
 réécriture, auth, upstream gardé, réponses Content-Length, timeout par opération). Comparé à
 myproxy avec seccomp levé pour les deux (`SECCOMP=unconfined` : le profil Docker bloque
 io_uring et le filtre coûte par syscall). Runs alternés :

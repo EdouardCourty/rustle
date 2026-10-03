@@ -44,7 +44,6 @@ bench/
   dut/<proxy>/                             Dockerfiles + configs on/off (user bench / clé secret1, port 8080) ; ligne `# bench-ports: tls=<p> h2=<p>` = modes supportés (cert ECDSA P-256 auto-signé généré au build) ; WORKERS lu à l'entrypoint (myproxy, squid) ; myproxy/Dockerfile.debug = strace
   upstream/                                nginx (objets 1kb/10kb/1mb/10mb)
   tools/local-upstream-http11.py           upstream HTTP/1.1 keep-alive local (up11.py)
-  uring-proto/                             prototype io_uring (monoio) du chemin HTTP/1 keep-alive, DUT `uring-proto` — mesure seulement (M18 : pas de gain net)
   docker-compose.seccomp.yml               overlay `SECCOMP=unconfined` (io_uring ; l'appliquer à tous les DUT comparés)
   RESULTS.md                               synthèse publiée, historique des milestones
   results/                                 sorties brutes (gitignored)
@@ -138,13 +137,13 @@ Features optionnelles : `jemalloc`, `mimalloc` (exclusives ; défaut = malloc gl
 5. Pool : n'accepter qu'une réponse complète, keep-alive, framée, sans sur-lecture.
 6. `m11.1-fsm` = FSM epoll abandonné (CPU/req identique à tokio, rps pire). Ne pas merger, ne pas y revenir sans donnée nouvelle.
 7. Gains < 5 % = bruit. Toute affirmation perf passe par la matrice au seed fixe.
-8. io_uring (M18, prototype monoio) : ±8 % selon la taille, pas de gain net sur 1 core ; kTLS (M17) : opt-in, gagnant tunnels/RAM, perdant bulk HTTP. Ne pas changer ces décisions sans nouvelle mesure (multi-core).
+8. io_uring (M18, prototype monoio, supprimé du repo — récupérable au commit `a2b11e3`) : ±8 % selon la taille, pas de gain net sur 1 core ; kTLS (M17) : opt-in, gagnant tunnels/RAM, perdant bulk HTTP. Ne pas changer ces décisions sans nouvelle mesure (multi-core).
 
 ## État connu (2026-10-03, branche `m10.4-syscalls`)
 
-- `make check` vert : fmt, clippy `-D warnings` (workspace + `bench/uring-proto`), `cargo test -p myproxy` 62/62 (unitaires + bout en bout : HTTP keep-alive, chunked, uploads, TLS, kTLS, h2, SOCKS5 TCP/UDP, policy, bans, slowloris, logs). Pas de CI.
+- `make check` vert : fmt, clippy `-D warnings` (workspace), `cargo test -p myproxy` 63/63 (unitaires + bout en bout : HTTP keep-alive, chunked, uploads, TLS, kTLS, h2, SOCKS5 TCP/UDP, policy, bans, slowloris, logs). Pas de CI.
 - Fait depuis M10.4 : correctifs chunked, current_thread + shards SO_REUSEPORT (M12), proxy HTTPS + HTTP/2 (M13), policy/allowlist/bans/slowloris/SOCKS5 (M14), uploads chunked + SOCKS5 UDP (M15), log d'accès (M16), kTLS opt-in (M17), prototype io_uring sans gain (M18), fenêtres h2 (M20), passe d'optimisations M21 (splice/pipes, TLS AES-128, h2 sans copie, pool 256, DEFER_ACCEPT, correctifs multi-core, buffers configurables, protocole de bench M21.5).
-- La dernière campagne complète (M19) précède le changement de protocole M21.5 : à refaire pour le README.
+- Campagne de référence : 2026-10-03 (`results/campaign-20261003-015025.txt`), protocole M21.5.
 - Le bench (nginx statique, Content-Length) n'exerce ni le chunked, ni SOCKS5, ni les uploads : couverts par les tests seulement.
 - Campagne de référence : `bench/run-campaign.sh` (5 proxies × clair/TLS/h2), tableaux par `bench/tools/campaign-table.py`, synthèse dans `bench/RESULTS.md` et le README.
 
