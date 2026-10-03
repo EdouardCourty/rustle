@@ -158,24 +158,32 @@ pub(super) async fn response(
     idle: std::time::Duration,
 ) -> u64 {
     let mut timer = IdleTimer::new(idle);
-    dir(up, client, pipe, false, limit, &mut timer).await
+    dir(up, client, pipe, Eof::Keep, limit, &mut timer).await
 }
 
-/// Tunnel relay, both directions, half-close propagated.
+/// Tunnel relay, both directions, half-close propagated. `client_ktls`:
+/// the client socket carries a kTLS session, whose end is a close_notify
+/// record before the FIN.
 pub(super) async fn tunnel(
     client: TcpStream,
     up: TcpStream,
     idle: std::time::Duration,
+    client_ktls: bool,
 ) -> (u64, u64) {
     tokio::join!(
-        tunnel_dir(&client, &up, idle),
-        tunnel_dir(&up, &client, idle)
+        tunnel_dir(&client, &up, idle, false),
+        tunnel_dir(&up, &client, idle, client_ktls)
     )
 }
 
 /// One tunnel direction: adaptive copy (8 -> 64 KB) until the flow proves
 /// bulk, then splice through a pooled pipe for the rest.
-async fn tunnel_dir(src: &TcpStream, dst: &TcpStream, idle: std::time::Duration) -> u64 {
+async fn tunnel_dir(
+    src: &TcpStream,
+    dst: &TcpStream,
+    idle: std::time::Duration,
+    dst_ktls: bool,
+) -> u64 {
     let mut timer = IdleTimer::new(idle);
     // Allocated only once data is ready: an idle tunnel (most of them)
     // holds no buffer at all.
@@ -202,7 +210,7 @@ async fn tunnel_dir(src: &TcpStream, dst: &TcpStream, idle: std::time::Duration)
             }
         };
         if n == 0 {
-            half_close(dst);
+            half_close(dst, dst_ktls);
             return moved;
         }
         let mut off = 0;
@@ -225,22 +233,35 @@ async fn tunnel_dir(src: &TcpStream, dst: &TcpStream, idle: std::time::Duration)
                 buf.reserve(buf.capacity()); // bulk: grow
             } else if let Some(pipe) = PipePair::take() {
                 drop(buf);
-                return moved + dir(src, dst, &pipe, true, None, &mut timer).await;
+                let eof = Eof::HalfClose { ktls: dst_ktls };
+                return moved + dir(src, dst, &pipe, eof, None, &mut timer).await;
             }
         }
     }
 }
 
-fn half_close(s: &TcpStream) {
+fn half_close(s: &TcpStream, ktls: bool) {
+    if ktls {
+        let _ = crate::ktls_offload::send_close_notify(s.as_raw_fd());
+    }
     // SAFETY: shutdown(SHUT_WR) on a socket we hold.
     unsafe {
         libc::shutdown(s.as_raw_fd(), libc::SHUT_WR);
     }
 }
 
+/// What a direction does with `dst` on EOF from `src`.
+#[derive(Clone, Copy)]
+enum Eof {
+    /// HTTP response relay: the client connection lives on.
+    Keep,
+    /// Tunnel: half-close `dst` (close_notify first on a kTLS session).
+    HalfClose { ktls: bool },
+}
+
 /// One direction of the zero-copy relay: `src` -> pipe -> `dst`, at most
-/// `limit` bytes. On EOF from `src`, half-closes `dst` when
-/// `shutdown_on_eof`. Returns the bytes moved.
+/// `limit` bytes. On EOF from `src`, `on_eof` says whether to half-close
+/// `dst`. Returns the bytes moved.
 ///
 /// Fill-then-drain: the pipe is filled until the socket is dry (a short
 /// splice says so — no extra EAGAIN probe) or the pipe full, then drained.
@@ -250,7 +271,7 @@ async fn dir(
     src: &TcpStream,
     dst: &TcpStream,
     pipe: &PipePair,
-    shutdown_on_eof: bool,
+    on_eof: Eof,
     limit: Option<u64>,
     timer: &mut IdleTimer,
 ) -> u64 {
@@ -292,7 +313,13 @@ async fn dir(
                         _ => break 'outer,
                     }
                 }
-                Err(_) => break 'outer,
+                // Reset, or a kTLS control record (close_notify: EIO): ends
+                // this direction like EOF, as in the copy path — what the
+                // pipe holds is still delivered, then `on_eof` applies.
+                Err(_) => {
+                    eof = true;
+                    break;
+                }
             }
         }
         // Phase 2: drain into dst.
@@ -315,8 +342,8 @@ async fn dir(
             }
         }
         if eof {
-            if shutdown_on_eof {
-                half_close(dst);
+            if let Eof::HalfClose { ktls } = on_eof {
+                half_close(dst, ktls);
             }
             return moved;
         }

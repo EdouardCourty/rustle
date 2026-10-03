@@ -159,7 +159,7 @@ impl KtlsClient {
 
 /// close_notify: an alert record (level warning, description 0) sent
 /// through the kernel with the record type in a control message.
-fn send_close_notify(fd: RawFd) -> std::io::Result<()> {
+pub(crate) fn send_close_notify(fd: RawFd) -> std::io::Result<()> {
     let mut payload = [1u8, 0u8];
     // u64 storage keeps the control buffer aligned for cmsghdr.
     let mut cbuf = [0u64; 8];

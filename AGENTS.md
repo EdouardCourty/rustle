@@ -8,8 +8,8 @@ Langue : commentaires, commits, README et RESULTS.md en **français** ; identifi
 ## Layout
 
 ```
-Cargo.toml            workspace (myproxy + bench/generator), [profile.release] lto=fat, codegen-units=1 (partagé par les 2 binaires)
-Makefile              help build test fmt check clippy images up down smoke bench bench-all bench-scaling latest clean
+Cargo.toml            workspace (myproxy + bench/generator + e2e), [profile.release] lto=fat, codegen-units=1 ; [profile.e2e] (release sans LTO) pour le harnais e2e
+Makefile              help build test e2e e2e-quick fmt check clippy images up down smoke bench bench-all bench-scaling latest clean
 myproxy/              le proxy
   config.toml.example
   src/
@@ -35,6 +35,10 @@ myproxy/              le proxy
     policy.rs         DestPolicy (ports autorisés avant DNS, plages non publiques + deny CIDR sur l'adresse résolue) ; ClientPolicy (allowlist d'IP clientes, à l'accept) ; AuthLimiter (bans par IP après N mauvaises clés, sans verrou tant que personne n'échoue)
     dns.rs            cache positif, TTL (hors verrou), Mutex<HashMap>
     upstream.rs       pool keep-alive par origine (LIFO)
+e2e/                  tests fonctionnels boîte noire (voir e2e/README.md) : le binaire release lancé par scénario (config générée, ports lus sur la ligne `myproxy listening`), origines/cibles locales programmables, clients HTTP/1.1, TLS, h2, SOCKS5, curl
+  src/harness/        proxy.rs (Config, Proxy : spawn, /proc, signaux, finish = fuite CLOSE_WAIT + SIGTERM propre), origin.rs, targets.rs, payload.rs, certs.rs
+  src/clients/        http1.rs, h2.rs, socks5.rs, curl.rs
+  src/suites/         un fichier par feature : matrix http connect h2 socks5 uploads limits security robustness process logs interop_curl
 bench/
   run-bench.sh <proxy> <on|off>            matrice (proxy = myproxy|3proxy|squid|gost|tinyproxy)
   run-campaign.sh                          campagne complète (5 proxies × clair/TLS/h2) → results/campaign-<ts>.txt ; tables : tools/campaign-table.py
@@ -92,7 +96,9 @@ bench/
 ```bash
 cargo build --release -p myproxy         # pas de target-cpu=native en local (seulement dans le Dockerfile bench)
 cargo test -p myproxy                    # tests inline (#[cfg(test)]) dont bout en bout dans server/mod.rs
-make check                               # fmt + clippy -D warnings + tests (avant chaque commit)
+make check                               # fmt + clippy -D warnings + tests + e2e --quick (~20 s) — avant chaque commit
+make e2e [F="filtre"]                    # suite e2e complète (~2 min, ~530 scénarios) — avant chaque milestone
+cargo run --profile e2e -p e2e -- --list # scénarios ; --keep garde les répertoires (config, logs)
 make bench P=myproxy A=off R=3           # matrice complète (voir ci-dessous)
 BENCH_ONLY=<test> BENCH_SEED=2004113323 bench/run-bench.sh myproxy off
 ```
@@ -123,6 +129,7 @@ Features optionnelles : `jemalloc`, `mimalloc` (exclusives ; défaut = malloc gl
 ## Conventions
 
 - Commits : `M<major>.<minor>[-<n>]: <résumé> — <détails chiffrés>`, en français, gated par une matrice au seed fixe. Attribution Claude en trailer.
+- Tests : `make check` (e2e rapide inclus) avant chaque commit, `make e2e` complet avant chaque milestone et après tout changement du proxy (relais, pipeline, policy, TLS). Nouvelle feature = nouveau scénario dans `e2e/src/suites/<feature>.rs` (et dans la matrice si elle dépend d'une config).
 - Tags baseline : `m10.3-tokio`, `m11.1-fsm`. Labels de review dans le code/commits : B1–B8, R3, O1, O2.
 - Pas de tags de milestone (`M10.x`) dans les commentaires du code : ils vont dans les commits et RESULTS.md.
 - `unsafe` cantonné à libc/fd (commentaire `SAFETY` attendu sur tout nouveau bloc) : `relay/splice.rs` (pipes, splice, dup), `server/mod.rs` (setsockopt, affinité CPU, malloc_trim), `ktls_offload.rs` (TCP_ULP, SOL_TLS, sendmsg close_notify), `stream.rs` (ReadAhead : set_len après lecture), `http/request.rs::span_of` (`offset_from`).
@@ -141,10 +148,11 @@ Features optionnelles : `jemalloc`, `mimalloc` (exclusives ; défaut = malloc gl
 
 ## État connu (2026-10-03, branche `m10.4-syscalls`)
 
-- `make check` vert : fmt, clippy `-D warnings` (workspace), `cargo test -p myproxy` 63/63 (unitaires + bout en bout : HTTP keep-alive, chunked, uploads, TLS, kTLS, h2, SOCKS5 TCP/UDP, policy, bans, slowloris, logs). Pas de CI.
+- `make check` vert : fmt, clippy `-D warnings` (workspace, e2e compris), `cargo test -p myproxy` 63/63 (unitaires + bout en bout dans le process), e2e `--quick` 62 scénarios. `make e2e` : 524 OK + 3 SKIP (curl 7.88 sans `--proxy-http2`) sur 527, ~2 min, 3 runs d'affilée sans flake. Pas de CI.
 - Fait depuis M10.4 : correctifs chunked, current_thread + shards SO_REUSEPORT (M12), proxy HTTPS + HTTP/2 (M13), policy/allowlist/bans/slowloris/SOCKS5 (M14), uploads chunked + SOCKS5 UDP (M15), log d'accès (M16), kTLS opt-in (M17), prototype io_uring sans gain (M18), fenêtres h2 (M20), passe d'optimisations M21 (splice/pipes, TLS AES-128, h2 sans copie, pool 256, DEFER_ACCEPT, correctifs multi-core, buffers configurables, protocole de bench M21.5).
 - Campagne de référence : 2026-10-03 (`results/campaign-20261003-015025.txt`), protocole M21.5.
-- Le bench (nginx statique, Content-Length) n'exerce ni le chunked, ni SOCKS5, ni les uploads : couverts par les tests seulement.
+- Le bench (nginx statique, Content-Length) n'exerce ni le chunked, ni SOCKS5, ni les uploads : couverts par les tests et la suite e2e.
+- Suite e2e (M22) : un comportement attendu = un scénario. Un bug trouvé → scénario qui le reproduit d'abord (il doit échouer), puis correctif. Mutations vérifiées : half-close du splice, suppression de `Proxy-Authorization`, `allowed_ports` → détectées.
 - Campagne de référence : `bench/run-campaign.sh` (5 proxies × clair/TLS/h2), tableaux par `bench/tools/campaign-table.py`, synthèse dans `bench/RESULTS.md` et le README.
 
 ## Backlog / points d'amélioration

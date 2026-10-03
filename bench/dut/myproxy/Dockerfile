@@ -16,13 +16,16 @@ ENV RUSTFLAGS="-C target-cpu=native"
 COPY Cargo.toml ./
 COPY myproxy ./myproxy
 COPY bench/generator ./bench/generator
+# Workspace member, not built here: its manifest and a stub main suffice.
+COPY e2e/Cargo.toml ./e2e/Cargo.toml
 # jemalloc-sys compiles C from source: needs autoconf/make.
 RUN if echo "$ALLOCATOR" | grep -q jemalloc; then \
         apt-get update && apt-get install -y --no-install-recommends autoconf make && \
         rm -rf /var/lib/apt/lists/*; fi
-RUN mkdir -p myproxy/src bench/generator/src && \
+RUN mkdir -p myproxy/src bench/generator/src e2e/src && \
     printf 'fn main() {}\n' > myproxy/src/main.rs && \
     printf 'fn main() {}\n' > bench/generator/src/main.rs && \
+    printf 'fn main() {}\n' > e2e/src/main.rs && \
     cargo build --release -p myproxy
 COPY myproxy/src ./myproxy/src
 COPY bench/generator/src ./bench/generator/src

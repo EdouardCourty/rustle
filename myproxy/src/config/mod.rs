@@ -65,11 +65,12 @@ impl Default for FilterConfig {
     }
 }
 
-/// SOCKS5 listener (CONNECT only; the API key is the password).
+/// SOCKS5 listener (TCP CONNECT and UDP ASSOCIATE; the API key is the
+/// password).
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct Socks5Config {
-    /// Empty = disabled.
+    /// `"IP:port"` (literal IP, e.g. `"127.0.0.1:1080"`). Empty = disabled.
     pub listen: String,
 }
 

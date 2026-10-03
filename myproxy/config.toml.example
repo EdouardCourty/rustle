@@ -68,7 +68,10 @@ max_response_body_bytes = 0
 
 [tls]
 # HTTPS proxy listener (TLS between client and proxy), next to the plain
-# one; empty disables it. Browsers use it via PAC "HTTPS host:port";
+# one. Format "IP:port" (literal IP, no host name); "" disables it.
+#   listen = "0.0.0.0:8443"      # every interface (IPv6: "[::]:8443")
+#   listen = "127.0.0.1:8443"    # this machine only
+# Needs cert and key below. Browsers use it via PAC "HTTPS host:port";
 # curl via --proxy https://host:port (add --proxy-http2 for HTTP/2).
 listen = ""
 cert = "/etc/myproxy/cert.pem"
@@ -96,9 +99,15 @@ deny = []
 allowed_ports = []
 
 [socks5]
-# SOCKS5 listener: CONNECT and UDP ASSOCIATE (QUIC/HTTP3, DNS through
-# SOCKS). Password = one of the api_keys, username ignored; no auth when
-# api_keys is empty. Empty disables it.
+# SOCKS5 listener (TCP CONNECT and UDP ASSOCIATE: QUIC/HTTP3, DNS through
+# SOCKS), next to the HTTP one. Format "IP:port" (literal IP, no host
+# name), usually port 1080; "" disables it.
+#   listen = "127.0.0.1:1080"    # this machine only (or behind a VPN)
+#   listen = "0.0.0.0:1080"      # every interface: keep api_keys set, and
+#                                # allow_clients if you can
+# Password = one of the api_keys, username ignored (no auth when api_keys
+# is empty). UDP relay sockets are opened on demand, not on this port.
+#   curl --socks5-hostname me:secret1@host:1080 https://example.com
 listen = ""
 
 [log]

@@ -448,10 +448,13 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
     }
     let head = request_head(&req, &authority, has_body.then_some(body_len));
     let method_head = req.method() == Method::HEAD;
+    // B7: only an idempotent request without body may be replayed on a
+    // fresh connection (same rule as the HTTP/1 pipeline).
+    let replayable = !has_body && (method_head || req.method() == Method::GET);
     let mut body = req.into_body();
 
     // Upstream: pooled socket (one retry on a stale one when the request
-    // is bodiless, hence replayable) or a fresh dial.
+    // is replayable) or a fresh dial.
     let mut resp_buf: Vec<u8> = Vec::new();
     let mut attempt = 0;
     let mut sent: u64 = 0;
@@ -472,7 +475,7 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
             .map(|r| r.is_err())
             .unwrap_or(true)
         {
-            if pooled && attempt == 1 && !has_body {
+            if pooled && attempt == 1 && replayable {
                 continue;
             }
             fail(&mut respond, StatusCode::BAD_GATEWAY, None);
@@ -489,8 +492,16 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
         }
         match read_head_final(&mut up, &mut resp_buf, cfg, idle).await {
             Ok(h) => break (up, h),
+            Err(RespError::Head(HeadError::Io(e))) if e.kind() == std::io::ErrorKind::TimedOut => {
+                fail(
+                    &mut respond,
+                    StatusCode::GATEWAY_TIMEOUT,
+                    Some("no-response"),
+                );
+                return;
+            }
             Err(RespError::Closed) | Err(RespError::Head(HeadError::Io(_)))
-                if pooled && attempt == 1 && !has_body =>
+                if pooled && attempt == 1 && replayable =>
             {
                 continue
             }

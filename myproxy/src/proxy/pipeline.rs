@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
@@ -152,6 +152,8 @@ pub(super) async fn http<C: ClientStream>(
             idle,
             max_request_body: cfg.http.max_request_body_bytes,
             body_rejected: false,
+            bad_request: false,
+            client_gone: false,
             close_after: false,
             sent: 0,
             rewrite_buf,
@@ -165,7 +167,24 @@ pub(super) async fn http<C: ClientStream>(
             if ctx.body_rejected {
                 log_fail(413, None);
                 super::reply(client, RESP_413).await;
+                return false;
             }
+            if ctx.bad_request {
+                log_fail(400, Some("chunked"));
+                super::reply(client, super::RESP_400).await;
+                return false;
+            }
+            if ctx.client_gone {
+                log_fail(400, Some("body-incomplete"));
+                return false;
+            }
+            // Upstream write failed: a pooled socket that died while idle
+            // is retried like a failed read (B6/B7).
+            if from_pool && attempt == 1 && replayable {
+                continue;
+            }
+            log_fail(502, Some("upstream-write"));
+            super::reply(client, RESP_502).await;
             return false;
         }
         // The idle timeout is applied per read inside read_response_head.
@@ -178,15 +197,18 @@ pub(super) async fn http<C: ClientStream>(
             {
                 continue; // stale/rst pooled socket: retry, fresh this time
             }
-            Ok(Err(RespError::Closed)) if from_pool && attempt == 1 => {
+            Ok(Err(RespError::Closed)) if from_pool && attempt == 1 && replayable => {
                 continue; // stale pooled socket: retry, fresh this time
             }
+            // Nothing reached the client yet: answer, then close.
             Ok(Err(_)) => {
                 log_fail(502, Some("no-response"));
+                super::reply(client, RESP_502).await;
                 return false;
             }
             Err(_) => {
                 log_fail(504, Some("no-response")); // idle timeout on the response head
+                super::reply(client, RESP_504).await;
                 return false;
             }
         }
@@ -210,12 +232,12 @@ pub(super) async fn http<C: ClientStream>(
         {
             return false;
         }
-        let mut next: Vec<u8> = resp_buf[rhead.raw_len..].to_vec(); // residual = next head prefix
-        match read_response_head(&mut up, &mut next, max_head, idle, &[]).await {
-            Ok(h) => {
-                rhead = h;
-                *resp_buf = next;
-            }
+        // Bytes read past the 1xx head (often the final head, same
+        // segment) start the next head: passed as prefix, since
+        // read_response_head clears its buffer.
+        let residual = resp_buf[rhead.raw_len..].to_vec();
+        match read_response_head(&mut up, resp_buf, max_head, idle, &residual).await {
+            Ok(h) => rhead = h,
             _ => return false, // backend died after a 1xx: drop safely
         }
     }
@@ -345,7 +367,10 @@ pub(super) async fn http<C: ClientStream>(
     if rhead.keep_alive && !over_read {
         pool.put(key, up);
     }
-    !(head.close || head.version_minor == 0 || close_after)
+    // A body delimited by the upstream's EOF is delimited the same way for
+    // the client: only the close tells it the response is over.
+    let eof_delimited = body_left.is_none() && !chunked;
+    !(head.close || head.version_minor == 0 || close_after || eof_delimited)
 }
 
 /// Writes the rewritten request head plus the request body to the upstream.
@@ -357,9 +382,13 @@ pub(super) async fn http<C: ClientStream>(
 struct UpWriteCtx<'a> {
     idle: Duration,
     max_request_body: u64,
-    /// Set when the declared request-body budget was exceeded (caller
-    /// answers 413).
+    /// Set when the request-body budget was exceeded (caller answers 413).
     body_rejected: bool,
+    /// Set when the client's chunked framing was invalid (caller answers
+    /// 400).
+    bad_request: bool,
+    /// Set when the client stopped sending its body (nobody to answer).
+    client_gone: bool,
     /// Bytes followed the chunked body (a pipelined request, unsupported):
     /// close after the response.
     close_after: bool,
@@ -396,10 +425,14 @@ async fn forward_request<C: ClientStream>(
     if head.chunked {
         return forward_chunked(client, up, buf, head, ctx).await;
     }
-    let body = &buf[head.raw_len..];
+    let mut body = &buf[head.raw_len..];
     if body.len() as u64 > content_length {
-        // Pipelined bytes beyond the body are not supported in V1.
-        return false;
+        // Bytes beyond the body: a pipelined request (unsupported). This
+        // one is forwarded and answered, then the connection closes; the
+        // client retries the rest on a new one (RFC 9112 §9.3.2), as for
+        // bytes after a chunked body.
+        body = &body[..content_length as usize];
+        ctx.close_after = true;
     }
     if body.is_empty() {
         // Fast path (GET/HEAD, the keep-alive hot path): one write, no
@@ -438,13 +471,52 @@ async fn forward_request<C: ClientStream>(
     }
     let remaining = content_length - body.len() as u64;
     if remaining > 0 {
-        let mut limited = (&mut *client).take(remaining);
+        let mut limited = EndWatch {
+            inner: (&mut *client).take(remaining),
+            ended: false,
+        };
         // Inactivity-bounded (idle resets on progress): slow uploads no
         // longer die at the absolute cap.
-        let _ = crate::relay::copy_limited(&mut limited, up, None, ctx.idle).await;
+        let copied = crate::relay::copy_limited(&mut limited, up, None, ctx.idle).await;
+        if copied < remaining && limited.ended {
+            // The client closed mid-body: the origin would wait for the
+            // rest until its own timeout. Abort both sides now. (A short
+            // copy on the upstream side goes on: the origin may have
+            // answered early.)
+            ctx.client_gone = true;
+            return false;
+        }
     }
     ctx.sent = content_length;
     true
+}
+
+/// Reader wrapper recording whether the client side ended (EOF or error)
+/// before its declared body was complete.
+struct EndWatch<R> {
+    inner: R,
+    ended: bool,
+}
+
+impl<R: AsyncRead + Unpin> AsyncRead for EndWatch<R> {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let before = buf.filled().len();
+        let r = std::pin::Pin::new(&mut self.inner).poll_read(cx, buf);
+        match &r {
+            std::task::Poll::Ready(Ok(()))
+                if buf.filled().len() == before && buf.remaining() > 0 =>
+            {
+                self.ended = true
+            }
+            std::task::Poll::Ready(Err(_)) => self.ended = true,
+            _ => {}
+        }
+        r
+    }
 }
 
 /// Chunked request body: head first, then the body relayed verbatim
@@ -483,6 +555,11 @@ async fn forward_chunked<C: ClientStream>(
         }
         Err(e) => {
             tracing::debug!(error = %e, "chunked request body aborted");
+            match e.kind() {
+                std::io::ErrorKind::FileTooLarge => ctx.body_rejected = true,
+                std::io::ErrorKind::InvalidData => ctx.bad_request = true,
+                _ => {}
+            }
             false
         }
     }
