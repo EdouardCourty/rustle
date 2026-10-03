@@ -11,6 +11,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 use super::{IdleTimer, RELAY_BUF0, RELAY_BUF_MAX};
+
+/// Remaining declared body from which the response goes straight to splice.
+const SPLICE_EARLY: u64 = 128 * 1024;
 use crate::stream::ClientStream;
 
 /// `write_all` + `flush`: TLS may keep ciphertext buffered after
@@ -53,6 +56,16 @@ pub(super) async fn response<C: ClientStream>(
 ) -> u64 {
     if remaining == Some(0) {
         return 0; // whole body arrived with the head: no buffer, no timer
+    }
+    // Known large body: zero-copy from the first byte (the copy ramp
+    // 8 -> 64 KB moved ~120 KB of a 1 MB body through user space, with
+    // four reallocations, before handing over).
+    if remaining.is_some_and(|r| r >= SPLICE_EARLY) {
+        if let Some(tcp) = client.tcp() {
+            if let Some(pipe) = super::splice::PipePair::take() {
+                return super::splice::response(up, tcp, remaining, &pipe, idle).await;
+            }
+        }
     }
     let mut buf: Vec<u8> = Vec::with_capacity(RELAY_BUF0);
     let mut timer = IdleTimer::new(idle);
