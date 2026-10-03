@@ -89,7 +89,7 @@ placée fait échouer le démarrage. Durées au format `"5s"`, `"1m"`, `"15m"`.
 |---|---|---|
 | `listen` | `"0.0.0.0:8080"` | port en clair (HTTP + CONNECT), adresse IP littérale |
 | `workers` | `1` | nombre de shards (un thread + un listener `SO_REUSEPORT` chacun) ; `0` = un par CPU |
-| `pin_cores` | `false` | épingle le shard *i* sur le *i*-ème CPU autorisé |
+| `pin_cores` | `false` | épingle le shard *i* sur le *i*-ème CPU autorisé ; avec un shard par CPU, chaque connexion est dirigée vers le shard du CPU qui a reçu son SYN (`SO_ATTACH_REUSEPORT_CBPF`) |
 | `admin_listen` | `"127.0.0.1:8181"` | `GET /health` sans auth ; `""` désactive |
 | `socket_buffer_bytes` | `1048576` | `SO_SNDBUF`/`SO_RCVBUF` de chaque socket relayée ; `0` = autotuning du noyau. Une taille fixe coupe l'autotuning et est plafonnée par `net.core.rmem_max`/`wmem_max` (avertissement au démarrage) : 1 MB en vol au plus par connexion, soit ~80 Mbit/s à 100 ms de RTT. Mettre `0` pour des clients lointains |
 

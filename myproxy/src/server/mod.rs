@@ -208,6 +208,18 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
     } else {
         Vec::new()
     };
+    // One pinned shard per CPU: steer each connection to the shard on the
+    // CPU that received its SYN (kernel processing and the proxy stay on
+    // the same core). Shards sharing CPUs keep the default hash.
+    if n > 1 && n <= cpus.len() {
+        for group in [&plain, &tls_listeners, &socks_listeners] {
+            if let Some(first) = group.first() {
+                if let Err(e) = steer_by_cpu(first, &cpus[..n]) {
+                    tracing::warn!(error = %e, "SO_ATTACH_REUSEPORT_CBPF failed: hash balancing");
+                }
+            }
+        }
+    }
 
     let shared = Arc::new(Shared {
         auth: Arc::new(Authenticator::new(&cfg.auth.api_keys)),
@@ -595,6 +607,57 @@ fn allowed_cpus() -> Vec<usize> {
     }
 }
 
+/// Attaches a classic BPF program to the SO_REUSEPORT group of `listener`:
+/// a connection whose SYN is processed on `cpus[i]` goes to the i-th socket
+/// of the group (bind order = shard order). Other CPUs return an
+/// out-of-range index, for which the kernel falls back to its hash.
+fn steer_by_cpu(listener: &std::net::TcpListener, cpus: &[usize]) -> std::io::Result<()> {
+    use std::os::unix::io::AsRawFd;
+    let insn = |code: u32, jt: u8, jf: u8, k: u32| libc::sock_filter {
+        code: code as u16,
+        jt,
+        jf,
+        k,
+    };
+    // A = current CPU.
+    let mut prog = vec![insn(
+        libc::BPF_LD | libc::BPF_W | libc::BPF_ABS,
+        0,
+        0,
+        (libc::SKF_AD_OFF + libc::SKF_AD_CPU) as u32,
+    )];
+    for (i, &cpu) in cpus.iter().enumerate() {
+        // if A == cpu { return i } (else skip the return)
+        prog.push(insn(
+            libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K,
+            0,
+            1,
+            cpu as u32,
+        ));
+        prog.push(insn(libc::BPF_RET | libc::BPF_K, 0, 0, i as u32));
+    }
+    prog.push(insn(libc::BPF_RET | libc::BPF_K, 0, 0, u32::MAX));
+    let fprog = libc::sock_fprog {
+        len: prog.len() as u16,
+        filter: prog.as_mut_ptr(),
+    };
+    // SAFETY: valid listening fd; `fprog` points into `prog`, alive for
+    // the call (the kernel copies the program).
+    let rc = unsafe {
+        libc::setsockopt(
+            listener.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_ATTACH_REUSEPORT_CBPF,
+            &fprog as *const libc::sock_fprog as *const libc::c_void,
+            std::mem::size_of::<libc::sock_fprog>() as libc::socklen_t,
+        )
+    };
+    if rc != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 /// Pins the calling thread to `cpu` (best effort).
 fn pin_to_cpu(cpu: usize) {
     // SAFETY: cpu_set_t is plain data; tid 0 = calling thread.
@@ -718,6 +781,36 @@ fn bind(addr: SocketAddr, reuse_port: bool) -> anyhow::Result<std::net::TcpListe
 mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// The CPU steering program is accepted by the kernel and a group
+    /// with it still accepts connections (on any CPU: unknown ones fall
+    /// back to the hash).
+    #[test]
+    fn cpu_steering_attaches() {
+        use std::io::Write;
+        let a = bind("127.0.0.1:0".parse().unwrap(), true).unwrap();
+        let addr = a.local_addr().unwrap();
+        let b = bind(addr, true).unwrap();
+        steer_by_cpu(&a, &[0, 1]).unwrap();
+        // A byte each: TCP_DEFER_ACCEPT holds silent connections back.
+        let clients: Vec<_> = (0..8)
+            .map(|_| {
+                let mut c = std::net::TcpStream::connect(addr).unwrap();
+                c.write_all(b"x").unwrap();
+                c
+            })
+            .collect();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut got = 0;
+        while got < clients.len() && std::time::Instant::now() < deadline {
+            let before = got;
+            got += [&a, &b].iter().filter(|l| l.accept().is_ok()).count();
+            if got == before {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        assert_eq!(got, clients.len());
+    }
 
     /// The per-connection setsockopts were dropped on the promise that
     /// accepted sockets inherit them from the listener: keep it checked.
