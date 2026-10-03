@@ -457,3 +457,47 @@ plafonné par le core du harnais (générateur + sink) : l'écart de débit rest
 d'efficacité est net. Matrices TLS et h2 complètes : aucune régression (tous les autres tests dans
 le bruit), pic RAM inchangé (les fenêtres ne réservent rien d'avance), `err_kinds` vides.
 
+
+## M21 — passe d'optimisations issue de deux recherches (autres proxies + vue d'ensemble) — 2026-10-02/03, seed 2004113323, auth on, 1 core
+
+Méthode : chaque piste est un A/B **alterné** (base / variante / base / variante…, image reconstruite à
+chaque changement, proxy redémarré avant chaque test), 2 à 3 passes, retenue seulement au-dessus du bruit.
+Métrique : CPU proxy par requête (ou par Go pour les floods).
+
+**Changement de protocole (M21.5)** : le warmup tourne désormais dans un run séparé du générateur avant
+l'échantillonnage. Auparavant son CPU était amorti dans chaque chiffre (~+6 à +8 % : 1 KB 49 → 45 µs/req).
+**Ne pas comparer les chiffres M21+ aux campagnes précédentes.** Le harnais relève aussi les compteurs TCP
+du netns du proxy par run : `segs_out_per_run`, `active_opens_per_run` (churn du pool amont),
+`retrans_per_run`, `delayed_acks_per_run`, `listen_overflows`, `listen_drops`. Nouveau test hors matrice
+`flood-128` (`BENCH_ONLY=flood-128`).
+
+| Étape | Changement | Résultat |
+|---|---|---|
+| M21.1 | Moteur de splice refait : pool de pipes par shard (16 max, retour si vide), refus des pipes < 64 KB (le budget `fs.pipe-user-pages-soft` réduit les pipes à 8 KB au-delà de ~60 : 256 splice/MB), splice via `try_io` sur les sockets tokio (plus de dup ni de réenregistrement epoll), tunnels paresseux (copie adaptative puis pipe si soutenu) | flood-128 **10,0 → 16,8–17,0 Gbps** (3proxy 10,9), CPU/GB 0,86 → 0,38 ; 1 MB −8 % ; holds −10 à −14 % CPU ; pic RAM hold-25k 125 → 121 MB |
+| M21.2 | Splice dès le premier octet si le corps restant déclaré ≥ 128 KB | 1 MB 300 → 253 µs/req (−16 %), 10 MB −4,5 % |
+| M21.3 | TLS : AES-128-GCM en tête, ordre du serveur prioritaire (les sessions tournaient en AES-256) | TLS 1 MB −7 % CPU/req (+7 % rps), flood TLS −4 % CPU/GB, flood h2 −6 % CPU/GB |
+| M21.4 | h2 : corps de réponse sans copie par frame (`split_to().freeze()` sur `BytesMut`) | h2 1 MB −5,7 % CPU/req (+4,5 % rps), 10 MB −2,7 % |
+| M21.5 | Harnais (voir ci-dessus) | constat : 0,0116 ouverture amont/req en 1 KB ×64 |
+| M21.6 | Pool amont `max_idle_per_origin` 32 → 256 (64 clients > 32 places : ~2 500 reconnexions amont par run) ; entrée d'origine vidée conservée | ouvertures amont/req → 0, 1 KB −2,7 % CPU/req |
+| M21.7 | `TCP_DEFER_ACCEPT` sur les listeners (tous les protocoles servis parlent en premier côté client) ; timers : `biased;`, timeout extérieur redondant retiré | short 79,8 → 73,9 µs/req (**−7,4 %**) ; timers seuls neutres |
+| M21.8 | Multi-core : AuthLimiter (bug : une IP en échec n'était jamais oubliée → verrou global à chaque accept), DNS 1 verrou, compteurs par shard sur leur ligne de cache, `ConnSlot` sur l'`Arc` du shard, tickets TLS stateless | non mesurable sur 1 core ; non-régression OK (bruit) |
+| M21.9 | `server.socket_buffer_bytes` (défaut 1 MB, 0 = autotuning) | voir ci-dessous |
+| M21.10 | État keep-alive de `serve` boxé (future de connexion 3 760 → < 2 560 octets : un tunnel tenu gardait la taille de la branche la plus grosse) | pic RAM hold-25k 118,5/120,6 → **81,7/79,4 MB (−33 %)**, hold-10k 51,4/51,7 → 36,1/35,3 MB (−31 %) ; CPU, 1 KB et short dans le bruit (1 malloc par connexion) |
+
+**Buffers socket : 1 MB fixe vs autotuning noyau** (A/B ×2, bench = LAN Docker) :
+
+| Test | 1 MB | autotuning |
+|---|---|---|
+| 1 KB | 44,1 / 44,6 µs/req | 48,5 / 49,3 |
+| 1 MB | 231 / 223 µs/req | 248 / 238 |
+| 10 MB | 319 / 362 rps | 247 / 249 |
+| flood-8 | 19,2 / 19,3 Gbps, 0,14 s CPU/GB | 17,1 / 17,2 Gbps, 0,32 |
+
+Défaut 1 MB conservé. Mais une taille fixe désactive l'autotuning : 1 MB en vol au plus par connexion
+(~80 Mbit/s à 100 ms de RTT), et elle est plafonnée par `net.core.rmem_max`/`wmem_max` (208 KB sur un noyau
+standard → ~416 KB effectifs, ~33 Mbit/s à 100 ms ; avertissement au démarrage). Pour des clients lointains :
+`socket_buffer_bytes = 0`.
+
+**Écartés (mesurés neutres)** : QUICKACK 1×/connexion vs aucun (1 KB, short, 10 KB dans le bruit : conservé
+tel quel) ; QUICKACK=0 sur le listener (« smart-accept » HAProxy) non testé : `inet_csk_clone_lock` remet
+l'état d'ACK à zéro sur le socket accepté, rien n'est hérité.

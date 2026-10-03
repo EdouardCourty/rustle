@@ -17,7 +17,7 @@ myproxy/              le proxy
     config/mod.rs     TOML → structs (humantime pour les durées)
     server/mod.rs     shards (thread + runtime current_thread + listeners SO_REUSEPORT clair + TLS + pool), handshake TLS puis dispatch h2/h1 selon ALPN, compteur global max_connections, admin /health, trim, shutdown gracieux 5 s
     stream.rs         trait ClientStream (TcpStream | TlsStream) : tcp()/into_tcp() = chemins splice/QUICKACK, TLS = copie user-space ; ReadAhead sous rustls (qui lit par 4 KB) : buffer 64 KB adaptatif, seulement pour les flux soutenus
-    tls.rs            rustls (ring) : cert/clé PEM, ALPN h2 + http/1.1, extraction des secrets si kTLS
+    tls.rs            rustls (ring) : cert/clé PEM, ALPN h2 + http/1.1, AES-128-GCM en tête + ordre serveur, tickets stateless, extraction des secrets si kTLS
     ktls_offload.rs   kTLS : sonde au démarrage (TCP_ULP), vidage rustls (CorkStream), clés → SOL_TLS ; KtlsClient (octets déjà déchiffrés d'abord, EIO = record de contrôle = fin, close_notify par sendmsg) ; tcp()/into_tcp() dès que plus rien n'est en buffer → splice sur le port TLS
     proxy/mod.rs      handle_conn<C: ClientStream> : boucle keep-alive serve() (read_head → auth → classify → CONNECT | HTTP), tunnel monté après
     proxy/socks5.rs   SOCKS5 (RFC 1928/1929) : CONNECT (relais splice) + UDP ASSOCIATE, mot de passe = clé API, BIND refusé
@@ -27,13 +27,13 @@ myproxy/              le proxy
     http/request.rs   RequestHead = Spans dans le buffer (parse zéro-alloc), classify, parse_authority
     http/response.rs  parse head réponse, keep_alive, framing
     relay/mod.rs      bidirectional (splice sur Linux), IdleTimer (timeout d'inactivité)
-    relay/adaptive.rs copy adaptatif 8→64 KB, puis bascule splice pour le reste du body
-    relay/splice.rs   pipe2 + splice, PipePair 1 MB, AsyncFd, dir() (fill-then-drain)
+    relay/adaptive.rs copy adaptatif 8→64 KB, puis bascule splice pour le reste du body ; splice immédiat si le corps restant déclaré ≥ 128 KB
+    relay/splice.rs   pipe2 + splice via TcpStream::try_io, PipePair 1 MB (pool par shard, 16 max, retour si vide ; pipes < 64 KB refusés → degraded_pipes), tunnel() paresseux (copie adaptative puis pipe si soutenu), dir() (fill-then-drain)
     relay/chunked.rs  relais chunked transparent (framing verbatim), dans les deux sens : réponses upstream→client et uploads client→upstream
     auth.rs           Basic auth, mot de passe ∈ api_keys (ct_eq sur toutes les clés, sans court-circuit), base64 sur pile
     accesslog.rs      log d'accès : niveaux off/errors/all, lignes clé=valeur horodatées, canal borné try_send (jamais bloquant, drops comptés), thread writer (flush 200 ms, refus à l'accept agrégés 1/s, réouverture SIGHUP)
     policy.rs         DestPolicy (ports autorisés avant DNS, plages non publiques + deny CIDR sur l'adresse résolue) ; ClientPolicy (allowlist d'IP clientes, à l'accept) ; AuthLimiter (bans par IP après N mauvaises clés, sans verrou tant que personne n'échoue)
-    dns.rs            cache positif, TTL, Mutex<HashMap>
+    dns.rs            cache positif, TTL (hors verrou), Mutex<HashMap>
     upstream.rs       pool keep-alive par origine (LIFO)
 bench/
   run-bench.sh <proxy> <on|off>            matrice (proxy = myproxy|3proxy|squid|gost|tinyproxy)
@@ -52,10 +52,10 @@ bench/
 
 ## Architecture (ce qu'il faut savoir)
 
-- **Threading** : shared-nothing. `workers` = N shards (0 = un par CPU) : chacun un thread OS, un runtime `current_thread`, un listener `SO_REUSEPORT` sur le même port (le noyau répartit), son pool amont. Une connexion reste sur son shard. Partagé : `Config`, `Authenticator`, `DnsCache` (Mutex, froid), compteurs atomiques (`active` = max_connections global, `peak`, `accepted` par shard loggé au shutdown). `pin_cores` optionnel. Shard 0 : admin + `malloc_trim` après rafales. NODELAY + buffers 1 MB posés sur le listener (hérités). Le main attend le signal puis `shutdown_and_join`.
+- **Threading** : shared-nothing. `workers` = N shards (0 = un par CPU) : chacun un thread OS, un runtime `current_thread`, un listener `SO_REUSEPORT` sur le même port (le noyau répartit), son pool amont. Une connexion reste sur son shard. Partagé : `Config`, `Authenticator`, `DnsCache` (Mutex, froid), compteurs atomiques (`active` = max_connections global, `peak`, `accepted` par shard loggé au shutdown). `pin_cores` optionnel. Shard 0 : admin + `malloc_trim` après rafales. NODELAY + `TCP_DEFER_ACCEPT` + buffers (`socket_buffer_bytes`) posés sur le listener (hérités). `accepted` par shard sur sa propre ligne de cache ; `ConnSlot` tient l'`Arc<Services>` du shard (pas de refcount partagé). Le main attend le signal puis `shutdown_and_join`.
 - **Transports client** : port clair (HTTP/1.1, splice) et port TLS optionnel (`[tls]`) : HTTP/1.1 via le même pipeline générique (`ClientStream`, monomorphisé : le chemin clair est compilé à l'identique) ou HTTP/2 si l'ALPN négocie `h2`. En TLS : pas de splice (le socket porte des records), `flush()` à chaque fin d'écriture (rustls peut garder du chiffré en buffer), `close_notify` en fin de connexion. Côté upstream : toujours TCP clair HTTP/1.1.
 - **Policy** : `connect_upstream` refuse (403 / SOCKS REP 0x02) un port hors allowlist puis toute adresse résolue non publique ou dans `deny` (protège du DNS rebinding) ; appliqué à CONNECT, HTTP, h2 et SOCKS5. Une IP hors `allow_clients` ou bannie (mauvaises clés) est fermée à l'accept, avant toute lecture. Une connexion = un `Arc<Services>` (config, auth, DNS, policy, limiter, pool du shard).
-- **CONNECT** : clé `host:port` → DNS → connect → `200` → early bytes → `relay::bidirectional` (2 PipePair splice, half-close via `shutdown(SHUT_WR)`).
+- **CONNECT** : clé `host:port` → DNS → connect → `200` → early bytes → `relay::bidirectional` (splice::tunnel : par sens, copie 8→64 KB puis PipePair du pool si soutenu ; half-close via `shutdown(SHUT_WR)`). L'état keep-alive de `serve` est boxé : la future d'un tunnel tenu ne garde que l'état du relais (test `connection_future_stays_small`).
 - **HTTP** : clé d'origine → `pool.take` ou connect → `forward_request` (réécriture du head dans `rewrite_buf`, `write_all` 1 syscall si sans body, `write_vectored` head+prefix sinon) → `read_response_head` (httparse, 64 headers) → body selon framing (CL borné / chunked / EOF) → remise au pool si complet + keep-alive.
 - **Retry** sur socket poolée périmée : GET/HEAD avec body entièrement bufferisé uniquement.
 - **Uploads** : `Transfer-Encoding: chunked` accepté (seul, sans Content-Length, pas en HTTP/1.0 → sinon 400) et relayé verbatim (staging = `rewrite_buf`), budget appliqué pendant le relais, octets après le chunk final → close après la réponse ; non rejouable. En h2, un body sans Content-Length part en chunked vers l'upstream.
@@ -70,6 +70,7 @@ bench/
 | `server.workers` / `pin_cores` | 1 (0 = un shard par CPU) / false |
 | pool amont | limites **par shard** |
 | `server.admin_listen` | `127.0.0.1:8181` (`""` = off, `GET /health` seulement) |
+| `server.socket_buffer_bytes` | 1048576 (0 = autotuning noyau ; taille fixe = autotuning off, plafonnée par `rmem_max`/`wmem_max`, warn au démarrage ; M21.9 : 1 MB gagne sur le bench LAN, 0 conseillé pour des clients lointains) |
 | `auth.api_keys` | `[]` → **auth off = open relay** |
 | `limits.max_connections` / `max_header_bytes` | 10000 / 65536 |
 | `timeouts.connect` / `idle` | 5s / 60s |
@@ -101,6 +102,8 @@ Features optionnelles : `jemalloc`, `mimalloc` (exclusives ; défaut = malloc gl
 
 ## Benchmarks — règles
 
+- **Protocole M21.5** : warmup dans un run séparé (`--warmup-only`) avant l'échantillonnage → chiffres ~6–8 % plus bas qu'avant, ne pas comparer aux campagnes antérieures. Compteurs TCP du netns par run : `segs_out_per_run`, `active_opens_per_run` (churn du pool), `retrans_per_run`, `delayed_acks_per_run`, `listen_overflows`, `listen_drops`. `flood-128` hors matrice (`BENCH_ONLY`) : au-delà du budget noyau de pipes 1 MB.
+- A/B : alterner base/variante (2–3 passes), jamais une variante seule ; ne rien modifier dans le repo pendant un A/B (l'image est reconstruite à chaque run).
 - Seed de référence **`2004113323`**. Ordre des tests mélangé (LCG), proxy redémarré avant chaque test. Bruit ±3–5 % : en dessous, pas de conclusion.
 - Tests : http-1kb (64 conns), http-10kb (16), http-1mb (16), http-10mb (8), http-1kb-short (sans keep-alive), flood-8, hold 1k/5k/10k/25k.
 - Sortie : lignes `RESULT median ...` (rps, mbps, p50, errors, `err_kinds`, `reconnects`, CPU proxy/generator/upstream, `rss_mb` = résiduel après le test, `peak_rss_mb` = VmHWM = coût réel). CPU proxy = cgroup du conteneur, RSS = somme des processus (DUT multi-process comme Squid SMP inclus).
@@ -128,7 +131,7 @@ Features optionnelles : `jemalloc`, `mimalloc` (exclusives ; défaut = malloc gl
 
 ## Invariants — ne pas casser
 
-1. **Hot path zéro-alloc** : réutiliser `buf`, `resp_buf`, `rewrite_buf`, `origin_key`, `resp_pipes` (locaux à la connexion). Pas de `setsockopt` par requête (régression M10.3 : `set_nodelay` par requête).
+1. **Hot path zéro-alloc** : réutiliser `buf`, `resp_buf`, `rewrite_buf`, `origin_key` (locaux à la connexion), pipes via le pool du shard. Pas de `setsockopt` par requête (régression M10.3 : `set_nodelay` par requête).
 2. **`RequestHead` = Spans dans `buf`** : `buf.clear()`, `take`, realloc entre parse et usage les invalident. `span_of` suppose que httparse renvoie des sous-slices du même buffer.
 3. **splice `dir()`** : toujours drainer le pipe s'il contient des données avant de parquer sur `src.readable()` (sinon deadlock). Sur le chemin HTTP, fds `dup`és partagent la file description : EOF ne doit pas half-close le client.
 4. **Retry** : idempotent + body rejouable uniquement (B7). Ne pas élargir.
@@ -137,10 +140,11 @@ Features optionnelles : `jemalloc`, `mimalloc` (exclusives ; défaut = malloc gl
 7. Gains < 5 % = bruit. Toute affirmation perf passe par la matrice au seed fixe.
 8. io_uring (M18, prototype monoio) : ±8 % selon la taille, pas de gain net sur 1 core ; kTLS (M17) : opt-in, gagnant tunnels/RAM, perdant bulk HTTP. Ne pas changer ces décisions sans nouvelle mesure (multi-core).
 
-## État connu (2026-10-01, branche `m10.4-syscalls`)
+## État connu (2026-10-03, branche `m10.4-syscalls`)
 
-- `make check` vert : fmt, clippy `-D warnings` (workspace + `bench/uring-proto`), `cargo test -p myproxy` 58/58 (unitaires + bout en bout : HTTP keep-alive, chunked, uploads, TLS, kTLS, h2, SOCKS5 TCP/UDP, policy, bans, slowloris, logs). Pas de CI.
-- Fait depuis M10.4 : correctifs chunked, current_thread + shards SO_REUSEPORT (M12), proxy HTTPS + HTTP/2 (M13), policy/allowlist/bans/slowloris/SOCKS5 (M14), uploads chunked + SOCKS5 UDP (M15), log d'accès (M16), kTLS opt-in (M17), prototype io_uring sans gain (M18).
+- `make check` vert : fmt, clippy `-D warnings` (workspace + `bench/uring-proto`), `cargo test -p myproxy` 62/62 (unitaires + bout en bout : HTTP keep-alive, chunked, uploads, TLS, kTLS, h2, SOCKS5 TCP/UDP, policy, bans, slowloris, logs). Pas de CI.
+- Fait depuis M10.4 : correctifs chunked, current_thread + shards SO_REUSEPORT (M12), proxy HTTPS + HTTP/2 (M13), policy/allowlist/bans/slowloris/SOCKS5 (M14), uploads chunked + SOCKS5 UDP (M15), log d'accès (M16), kTLS opt-in (M17), prototype io_uring sans gain (M18), fenêtres h2 (M20), passe d'optimisations M21 (splice/pipes, TLS AES-128, h2 sans copie, pool 256, DEFER_ACCEPT, correctifs multi-core, buffers configurables, protocole de bench M21.5).
+- La dernière campagne complète (M19) précède le changement de protocole M21.5 : à refaire pour le README.
 - Le bench (nginx statique, Content-Length) n'exerce ni le chunked, ni SOCKS5, ni les uploads : couverts par les tests seulement.
 - Campagne de référence : `bench/run-campaign.sh` (5 proxies × clair/TLS/h2), tableaux par `bench/tools/campaign-table.py`, synthèse dans `bench/RESULTS.md` et le README.
 
