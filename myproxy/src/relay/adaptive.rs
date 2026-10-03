@@ -8,7 +8,6 @@
 //! buffer completely, i.e. only a sustained bulk flow pays for big buffers.
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 
 use super::{IdleTimer, RELAY_BUF0, RELAY_BUF_MAX};
@@ -22,29 +21,6 @@ where
 {
     w.write_all(buf).await?;
     w.flush().await
-}
-
-/// One direction of the plain tunnel fallback. Returns the transferred
-/// byte count.
-pub(super) async fn relay(
-    mut r: OwnedReadHalf,
-    mut w: OwnedWriteHalf,
-    idle: std::time::Duration,
-) -> u64 {
-    let mut timer = IdleTimer::new(idle);
-    copy_loop(&mut r, &mut w, true, &mut timer).await
-}
-
-/// User-space adaptive relay (all platforms): both tunnel directions.
-pub(super) async fn bidirectional(
-    client: TcpStream,
-    up: TcpStream,
-    idle: std::time::Duration,
-) -> std::io::Result<(u64, u64)> {
-    let (ra, wa) = client.into_split();
-    let (rb, wb) = up.into_split();
-    let (a2b, b2a) = tokio::join!(relay(ra, wb, idle), relay(rb, wa, idle));
-    Ok((a2b, b2a))
 }
 
 /// Tunnel relay for a client that is not a plain socket (TLS): the client
@@ -68,13 +44,11 @@ where
 }
 
 /// HTTP response relay: upstream -> client, adaptive with spill-to-splice
-/// on sustained bulk (`limit` bounds the relayed body). `pipes` is the
-/// connection-owned reusable pair (`None` = create on first bulk).
+/// on sustained bulk (`limit` bounds the relayed body).
 pub(super) async fn response<C: ClientStream>(
     up: &mut TcpStream,
     client: &mut C,
     remaining: Option<u64>,
-    pipes: &mut Option<super::PipePair>,
     idle: std::time::Duration,
 ) -> u64 {
     if remaining == Some(0) {
@@ -114,31 +88,17 @@ pub(super) async fn response<C: ClientStream>(
             if buf.capacity() < RELAY_BUF_MAX {
                 buf.reserve(buf.capacity()); // double
             } else if remaining.is_none() || remaining.unwrap() > total {
-                // Zero-copy needs the client socket itself (plain TCP).
+                // Zero-copy needs the client socket itself (plain TCP) and
+                // a usefully sized pipe (pooled per shard); otherwise keep
+                // copying with the 64 KB buffer.
                 let Some(client) = client.tcp() else {
                     continue;
                 };
-                // Sustained bulk flow: hand the rest to the zero-copy relay
-                // with the connection's reusable pipe pair.
-                let limit = remaining.map(|l| l - total);
-                let result = match pipes {
-                    Some(pair) => super::splice::response(up, client, limit, pair, idle).await,
-                    None => match super::splice::PipePair::new() {
-                        Some(pair) => {
-                            let r = super::splice::response(up, client, limit, &pair, idle).await;
-                            *pipes = Some(pair);
-                            r
-                        }
-                        None => None, // kernel refused: adaptive continues
-                    },
+                let Some(pipe) = super::splice::PipePair::take() else {
+                    continue;
                 };
-                if let Some(extra) = result {
-                    return total + extra;
-                }
-                // Zero-copy failed mid-relay: the pipe state is unknown,
-                // drop the pair so the next response starts fresh.
-                *pipes = None;
-                // Zero-copy unavailable: keep copying adaptively.
+                let limit = remaining.map(|l| l - total);
+                return total + super::splice::response(up, client, limit, &pipe, idle).await;
             }
         }
     }

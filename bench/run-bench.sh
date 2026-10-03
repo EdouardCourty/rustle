@@ -203,6 +203,9 @@ if [[ -n "${BENCH_ONLY:-}" ]]; then
         "run_hold 5000 10"
         "run_hold 10000 10"
         "run_hold 25000 10"
+        # Hors matrice (BENCH_ONLY seulement) : 128 tunnels en flood, au-delà
+        # du plafond noyau des pipes de 1 MB (fs.pipe-user-pages-soft).
+        "run_test flood-128 flood sink:9000 --conns 128 --duration 10"
     )
     found=""
     for t in "${TESTS_ALL[@]}"; do

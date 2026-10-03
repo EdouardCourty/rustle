@@ -17,7 +17,7 @@ mod splice;
 pub(crate) use adaptive::{copy_limited, write_flush};
 pub(crate) use chunked::chunk_size;
 pub use chunked::chunked;
-pub use splice::PipePair;
+pub use splice::degraded_pipes;
 
 use std::time::Duration;
 use tokio::time::Instant;
@@ -90,19 +90,10 @@ pub async fn bidirectional<C: ClientStream>(
     up: tokio::net::TcpStream,
     idle: Duration,
 ) -> std::io::Result<(u64, u64)> {
-    let client = match client.into_tcp() {
-        Ok(tcp) => tcp,
-        Err(tls) => return Ok(adaptive::bidirectional_io(tls, up, idle).await),
-    };
-    #[cfg(target_os = "linux")]
-    {
-        match splice::bidirectional(client, up, idle).await {
-            Ok(res) => Ok(res),
-            Err((client, up)) => adaptive::bidirectional(client, up, idle).await,
-        }
+    match client.into_tcp() {
+        Ok(tcp) => Ok(splice::tunnel(tcp, up, idle).await),
+        Err(tls) => Ok(adaptive::bidirectional_io(tls, up, idle).await),
     }
-    #[cfg(not(target_os = "linux"))]
-    adaptive::bidirectional(client, up).await
 }
 
 /// HTTP response relay (upstream -> client): adaptive copy that spills to
@@ -118,10 +109,9 @@ pub async fn response<C: ClientStream>(
     up: &mut tokio::net::TcpStream,
     client: &mut C,
     remaining: Option<u64>,
-    pipes: &mut Option<PipePair>,
     idle: Duration,
 ) -> u64 {
-    adaptive::response(up, client, remaining, pipes, idle).await
+    adaptive::response(up, client, remaining, idle).await
 }
 
 #[cfg(test)]
