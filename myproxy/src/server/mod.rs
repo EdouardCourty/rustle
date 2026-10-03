@@ -77,11 +77,12 @@ struct Shared {
     /// Sessions offloaded to the kernel (stats, tests).
     ktls_sessions: AtomicU64,
     /// Live client connections, all shards (enforces `max_connections`).
-    active: AtomicUsize,
+    active: Arc<AtomicUsize>,
     /// High-water mark of `active` since the last heap trim.
     peak: AtomicUsize,
-    /// Connections accepted per shard (balance check, logged at shutdown).
-    accepted: Vec<AtomicU64>,
+    /// Connections accepted per shard (balance check, logged at shutdown);
+    /// one cache line each, shards do not share a line they write.
+    accepted: Vec<PerShard>,
 }
 
 /// A running server: one thread per shard.
@@ -194,9 +195,9 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
         tls,
         ktls,
         ktls_sessions: AtomicU64::new(0),
-        active: AtomicUsize::new(0),
+        active: Arc::new(AtomicUsize::new(0)),
         peak: AtomicUsize::new(0),
-        accepted: (0..n).map(|_| AtomicU64::new(0)).collect(),
+        accepted: (0..n).map(|_| PerShard(AtomicU64::new(0))).collect(),
         cfg,
     });
     tracing::info!(
@@ -299,7 +300,7 @@ impl Server {
             .shared
             .accepted
             .iter()
-            .map(|a| a.load(Relaxed))
+            .map(|a| a.0.load(Relaxed))
             .collect();
         tracing::info!(
             remaining = self.shared.active.load(Relaxed),
@@ -313,14 +314,18 @@ impl Server {
 }
 
 /// Decrements the global connection count when the connection task ends
-/// (normal return or panic).
-struct ConnSlot(Arc<Shared>);
+/// (normal return or panic). Holds the shard's `Services`: its refcount
+/// is touched by this shard only, unlike the process-wide `Shared`.
+struct ConnSlot(Arc<proxy::Services>);
 
 impl Drop for ConnSlot {
     fn drop(&mut self) {
         self.0.active.fetch_sub(1, Relaxed);
     }
 }
+
+#[repr(align(64))]
+struct PerShard(AtomicU64);
 
 /// One shard: accept loop, one task per connection, its own upstream pool.
 /// Shard 0 also serves the admin listener and the heap-trim task.
@@ -375,6 +380,7 @@ async fn run_shard(
         dest: shared.dest.clone(),
         limiter: shared.limiter.clone(),
         log: shared.log.clone(),
+        active: shared.active.clone(),
         pool: UpstreamPool::new(if cfg.http.upstream_keepalive {
             cfg.http.max_idle_per_origin
         } else {
@@ -420,12 +426,16 @@ async fn run_shard(
             reject(sock);
             continue;
         }
-        shared.peak.fetch_max(now, Relaxed);
-        shared.accepted[id].fetch_add(1, Relaxed);
+        // Plain load first: the RMW (exclusive cache line) only when the
+        // mark actually rises.
+        if now > shared.peak.load(Relaxed) {
+            shared.peak.fetch_max(now, Relaxed);
+        }
+        shared.accepted[id].0.fetch_add(1, Relaxed);
 
         // TCP_NODELAY and the 1 MB buffers are inherited from the listener
         // (set once in `bind`): no per-connection setsockopt.
-        let slot = ConnSlot(shared.clone());
+        let slot = ConnSlot(svc.clone());
         let svc = svc.clone();
         match kind {
             Kind::Plain => {
@@ -726,7 +736,7 @@ mod tests {
             .shared
             .accepted
             .iter()
-            .map(|a| a.load(Relaxed))
+            .map(|a| a.0.load(Relaxed))
             .collect();
         assert_eq!(per_shard.iter().sum::<u64>(), 64);
         assert!(

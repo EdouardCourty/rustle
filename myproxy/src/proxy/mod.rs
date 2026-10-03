@@ -41,6 +41,8 @@ pub struct Services {
     pub dest: Arc<DestPolicy>,
     pub limiter: Arc<AuthLimiter>,
     pub log: Arc<AccessLog>,
+    /// Live connections, all shards (decremented by the server's slot).
+    pub active: Arc<std::sync::atomic::AtomicUsize>,
     pub pool: UpstreamPool,
 }
 
