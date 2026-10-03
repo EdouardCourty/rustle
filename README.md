@@ -216,46 +216,51 @@ PROXY_TLS=1 ./bench/run-bench.sh squid on # un transport précis (PROXY_H2=1 pou
 NCPUS="1 2 4 8" make bench-scaling        # courbe multi-core (machine ≥ 2 × N cores)
 ```
 
-### Derniers chiffres (campagne du 2026-10-01, un core, auth activée)
+### Derniers chiffres (campagne du 2026-10-03, un core, auth activée)
 
-Débit · CPU du proxy par requête. Tous les tests sans erreur.
+Débit · CPU du proxy par requête. Tous les tests sans erreur côté proxy. Protocole de
+mesure M21.5 (warmup hors échantillon) : ne pas comparer aux campagnes antérieures.
 
 **Clair (HTTP/1.1)**
 
 | Test | **myproxy** | 3proxy | Squid | gost | Tinyproxy |
 |---|---|---|---|---|---|
-| 1 KB keep-alive | **14 332 rps · 49 µs** | 1 558¹ · 74 µs | 8 841 · 124 µs | 1 930 · 561 µs | 2 627 · 366 µs |
-| 10 KB | **14 024 · 61 µs** | 13 207 · 79 µs | 7 174 · 152 µs | 1 864 · 575 µs | 2 606 · 396 µs |
-| 1 MB | **2 622 · 336 µs** | 2 437 · 369 µs | 306 | 703 | 130 |
-| 10 MB | **347** | 279 | 32 | 104 | 14 |
-| Connexions courtes | **4 822 · 87 µs** | 3 345 · 261 µs | 3 775 · 237 µs | 1 927 · 567 µs | 2 802 · 356 µs |
-| Tunnels CONNECT (flood) | **19,0 Gbps** | 17,7 | 12,9 | 11,6 | 1,2 |
-| 25 000 tunnels (pic RAM) | **25 000 · 125 MB** | 24 959 · 385 MB | 25 000 · 875 MB | 18 656² | 16 765 · 314 MB |
+| 1 KB keep-alive | **14 594 rps · 44 µs** | 1 557¹ · 67 µs | 8 964 · 110 µs | 1 935 · 510 µs | 2 962 · 313 µs |
+| 10 KB | **14 211 · 54 µs** | 12 343 · 74 µs | 7 292 · 136 µs | 1 850 · 521 µs | 2 601 · 353 µs |
+| 1 MB | **2 453 · 224 µs** | 2 159 · 329 µs | 306 | 688 | 128 |
+| 10 MB | **319** | 264 | 31 | 104 | 14 |
+| Connexions courtes | **4 884 · 75 µs** | 3 403 · 230 µs | 3 795 · 212 µs | 1 916 · 507 µs | 2 996 · 306 µs |
+| Tunnels CONNECT (flood) | **19,3 Gbps** | 18,4 | 13,0 | 11,6 | 1,2 |
+| 25 000 tunnels (pic RAM) | **25 000 · 78 MB** | 17 154 · 380 MB | 25 000 · 896 MB | —² | 16 746 · 314 MB |
 
 **Proxy HTTPS (TLS)**
 
 | Test | **myproxy** | Squid | gost |
 |---|---|---|---|
-| 1 KB | **14 018 · 57 µs** | 7 837 · 141 µs | 1 566 · 676 µs |
-| 1 MB | **1 297** | 182 | 464 |
-| Connexions courtes (handshake) | **2 722 · 278 µs** | 1 618 · 669 µs | 1 603 · 661 µs |
-| Tunnels CONNECT (flood) | **9,6 Gbps** | 4,8 | 6,6 |
-| 25 000 tunnels (pic RAM) | **25 000 · 802 MB** | 25 000 · 2 028 MB | 0² |
+| 1 KB | **14 128 · 50 µs** | 7 826 · 126 µs | 1 611 · 601 µs |
+| 1 MB | **1 444 · 654 µs** | 178 | 468 |
+| Connexions courtes (handshake) | **2 727 · 233 µs** | 1 600 · 611 µs | 1 566 · 605 µs |
+| Tunnels CONNECT (flood) | **11,4 Gbps** | 4,8 | 6,7 |
+| 25 000 tunnels (pic RAM) | **25 000 · 788 MB** | 25 000 · 1 846 MB | 1 226² |
 
 **HTTP/2**
 
 | Test | **myproxy** | gost |
 |---|---|---|
-| 1 KB | **13 028 · 70 µs** | 3 922 · 281 µs |
-| 1 MB | **739** | 324 |
-| Tunnels CONNECT (flood)³ | **7,6 Gbps · 0,97 s CPU/GB** | 7,5 Gbps · 1,08 s CPU/GB |
+| 1 KB | **14 896 · 57 µs** | 3 904 · 254 µs |
+| 1 MB | **792 · 1 190 µs** | 317 · 3 093 µs |
+| Tunnels CONNECT (flood)³ | 7,4 Gbps · **0,91 s CPU/GB** | 7,6 Gbps · 1,05 s CPU/GB |
+| 25 000 tunnels⁴ | **21 264 · 941 MB** | 462 |
 
 ¹ 3proxy sur 1 KB : plombé par son delayed-ACK de 40 ms (artefact connu, voir RESULTS.md).
-² gost dépasse la RAM de la machine (4 GB) : conteneur tué pendant le test.
-³ Après correction des fenêtres HTTP/2 (M20) : moyenne de 3 passes alternées avec gost ; le
-débit est borné par le core du harnais, l'écart se lit surtout sur le CPU par Go (−11 %).
-myproxy est premier sur toutes les lignes.
-Tableaux complets : [`bench/RESULTS.md`](bench/RESULTS.md) (section M19).
+² gost dépasse la RAM de la machine (4 GB) : conteneur tué ou tunnels refusés pendant le test.
+³ Débit borné par le core du harnais (générateur + sink) : l'écart de débit (−3 %) est dans
+le bruit du flood (±15 %) ; à débit égal myproxy dépense 13 % de CPU de moins par Go.
+⁴ Plafond du harnais (handshakes TLS du générateur sur le core partagé, p50 1,3 s), stable
+depuis la première campagne.
+myproxy est premier sur toutes les lignes, sauf le débit du flood HTTP/2 (égalité dans le bruit,
+CPU par Go meilleur).
+Tableaux complets : [`bench/RESULTS.md`](bench/RESULTS.md) (section M21, campagne finale).
 
 ## Décisions mesurées
 

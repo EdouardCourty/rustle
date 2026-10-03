@@ -503,3 +503,52 @@ standard → ~416 KB effectifs, ~33 Mbit/s à 100 ms ; avertissement au démarra
 **Écartés (mesurés neutres)** : QUICKACK 1×/connexion vs aucun (1 KB, short, 10 KB dans le bruit : conservé
 tel quel) ; QUICKACK=0 sur le listener (« smart-accept » HAProxy) non testé : `inet_csk_clone_lock` remet
 l'état d'ACK à zéro sur le socket accepté, rien n'est hérité.
+
+### Campagne finale M21 — 2026-10-03, seed 2004113323, auth on, 1 core proxy (protocole M21.5)
+
+Index : `results/campaign-20261003-015025.txt`. Débit · CPU proxy par requête (ms/GB pour les floods) ; holds = ouverts/demandés · pic RAM. `err_kinds` vides partout côté proxy. h2 hold-25000 : 21 264/25 000 (plafond du harnais, stable depuis la première campagne : 21 351 le 30/09 ; gost 462), pic RAM 1 113 → 941 MB depuis M19. Flood h2 : 7,4 vs 7,6 Gbps pour gost (bruit flood ±15 %), 0,91 vs 1,05 s CPU/GB.
+
+#### plain
+
+| test | myproxy | 3proxy | squid | gost | tinyproxy |
+|---|---|---|---|---|---|
+| http-1kb | 14,594 rps 44µs | 1,557 rps 67µs | 8,964 rps 110µs | 1,935 rps 510µs | 2,962 rps 313µs |
+| http-10kb | 14,211 rps 54µs | 12,343 rps 74µs | 7,292 rps 136µs | 1,850 rps 521µs | 2,601 rps 353µs |
+| http-1mb | 2,453 rps 224µs | 2,159 rps 329µs | 306 rps 3247µs | 688 rps 1426µs | 128 rps 7783µs |
+| http-10mb | 319 rps 1811µs | 264 rps 2214µs | 31 rps 31794µs | 104 rps 9518µs | 14 rps 73734µs |
+| http-1kb-short | 4,884 rps 75µs | 3,403 rps 230µs | 3,795 rps 212µs | 1,916 rps 507µs | 2,996 rps 306µs |
+| flood | 19.3 Gbps 153ms/GB | 18.4 Gbps 197ms/GB | 13.0 Gbps 626ms/GB | 11.6 Gbps 701ms/GB | 1.2 Gbps 6541ms/GB |
+| hold-1000 | 1,000/1000 9.2MB | 1,000/1000 26.1MB | 1,000/1000 164.7MB | 1,000/1000 179.2MB | 1,000/1000 21.7MB |
+| hold-5000 | 5,000/5000 20.1MB | 5,000/5000 117.1MB | 5,000/5000 291.2MB | 5,000/5000 758.8MB | 5,000/5000 95.9MB |
+| hold-10000 | 10,000/10000 35.9MB | 10,000/10000 230.9MB | 10,000/10000 449.8MB | 10,000/10000 1526.1MB | 10,000/10000 188.6MB |
+| hold-25000 | 25,000/25000 78.0MB | 17,154/25000 380.3MB | 25,000/25000 896.1MB | — | 16,746/25000 314.0MB |
+
+#### tls
+
+| test | myproxy | squid | gost |
+|---|---|---|---|
+| http-1kb | 14,128 rps 50µs | 7,826 rps 126µs | 1,611 rps 601µs |
+| http-10kb | 12,895 rps 59µs | 5,993 rps 165µs | 1,536 rps 615µs |
+| http-1mb | 1,444 rps 654µs | 178 rps 5583µs | 468 rps 2069µs |
+| http-10mb | 126 rps 7842µs | 18 rps 54105µs | 60 rps 16442µs |
+| http-1kb-short | 2,727 rps 233µs | 1,600 rps 611µs | 1,566 rps 605µs |
+| flood | 11.4 Gbps 710ms/GB | 4.8 Gbps 1680ms/GB | 6.7 Gbps 1214ms/GB |
+| hold-1000 | 1,000/1000 47.7MB | 1,000/1000 201.6MB | 1,000/1000 233.0MB |
+| hold-5000 | 5,000/5000 221.0MB | 5,000/5000 464.4MB | 5,000/5000 952.6MB |
+| hold-10000 | 10,000/10000 437.7MB | 10,000/10000 829.7MB | 10,000/10000 2036.2MB |
+| hold-25000 | 25,000/25000 787.6MB | 25,000/25000 1845.9MB | 1,226/25000 0.00MB |
+
+#### h2
+
+| test | myproxy | gost |
+|---|---|---|
+| http-1kb | 14,896 rps 57µs | 3,904 rps 254µs |
+| http-10kb | 11,924 rps 76µs | 3,700 rps 266µs |
+| http-1mb | 792 rps 1190µs | 317 rps 3093µs |
+| http-10mb | 75 rps 12692µs | 35 rps 27747µs |
+| http-1kb-short | 2,324 rps 315µs | 1,464 rps 620µs |
+| flood | 7.4 Gbps 910ms/GB | 7.6 Gbps 1046ms/GB |
+| hold-1000 | 1,000/1000 94.1MB | 1,000/1000 263.5MB |
+| hold-5000 | 5,000/5000 465.4MB | 5,000/5000 1137.4MB |
+| hold-10000 | 10,000/10000 786.1MB | 10,000/10000 1899.1MB |
+| hold-25000 | 21,264/25000 940.9MB | 462/25000 0.00MB |
