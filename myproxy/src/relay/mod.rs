@@ -70,6 +70,9 @@ pub(crate) const RELAY_BUF0: usize = 8 * 1024;
 /// doubles it (8 -> 16 -> 32 -> 64 KB), so a bulk flow settles at
 /// `RELAY_BUF_MAX`: one read+write pair per 64 KB instead of per 8 KB.
 pub(crate) const RELAY_BUF_MAX: usize = 64 * 1024;
+/// Cap for flows that can never splice (TLS client side: records, not
+/// bytes): a bigger copy means fewer read/encrypt/write rounds per MB.
+pub(crate) const RELAY_BUF_MAX_COPY: usize = 256 * 1024;
 
 /// Bidirectional tunnel relay with a per-direction adaptive buffer.
 ///
