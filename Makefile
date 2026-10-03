@@ -23,7 +23,6 @@ test: ## tests unitaires
 
 fmt: ## formatter tout le code
 	cargo fmt --all
-	cd bench/uring-proto && cargo fmt
 
 check: ## fmt + clippy (0 warning) + tests — à passer avant chaque commit
 	cargo fmt --all --check

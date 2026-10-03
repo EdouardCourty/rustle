@@ -268,7 +268,7 @@ Chaque choix de performance est passé par la matrice à graine fixe (détails d
 `bench/RESULTS.md`) :
 - **runtime Tokio `current_thread` par shard** : −11 % de CPU par requête sur les connexions
   courtes par rapport à un runtime multi-thread à un worker ;
-- **pas d'io_uring** : un prototype (`bench/uring-proto`, monoio) fait ±8 % selon la taille,
+- **pas d'io_uring** : un prototype monoio (M18, retiré du repo, commit `a2b11e3`) fait ±8 % selon la taille,
   sans gain net — sur un core, le coût est dans la pile TCP du noyau (~80 % du CPU) ;
   à retester en multi-core ;
 - **kTLS en option** : +13 % sur les tunnels CONNECT et −30 % de mémoire à 25 000 tunnels,
