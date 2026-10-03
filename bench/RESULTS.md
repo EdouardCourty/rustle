@@ -484,6 +484,7 @@ du netns du proxy par run : `segs_out_per_run`, `active_opens_per_run` (churn du
 | M21.9 | `server.socket_buffer_bytes` (défaut 1 MB, 0 = autotuning) | voir ci-dessous |
 | M21.10 | État keep-alive de `serve` boxé (future de connexion 3 760 → < 2 560 octets : un tunnel tenu gardait la taille de la branche la plus grosse) | pic RAM hold-25k 118,5/120,6 → **81,7/79,4 MB (−33 %)**, hold-10k 51,4/51,7 → 36,1/35,3 MB (−31 %) ; CPU, 1 KB et short dans le bruit (1 malloc par connexion) |
 | M21.11 | Buffer de copie TLS (côté client non spliceable) 64 → 256 KB max, croissance adaptative inchangée | flood TLS 10,26/10,29 → **11,38/11,46 Gbps** (CPU/GB 0,78 → 0,69, −11 %), TLS 10 MB 8 329/8 512 → 7 633/7 740 µs/req (−9 %), TLS 1 MB −3,6 % (bruit) |
+| M21.12 | Steering CPU (`SO_ATTACH_REUSEPORT_CBPF`) quand `pin_cores` donne un shard par CPU : la connexion va au shard épinglé sur le CPU qui a traité son SYN | non mesurable sur 1 core ; vérifié : client épinglé sur le CPU 1 → 40/40 connexions sur le shard 1 |
 
 **Buffers socket : 1 MB fixe vs autotuning noyau** (A/B ×2, bench = LAN Docker) :
 
