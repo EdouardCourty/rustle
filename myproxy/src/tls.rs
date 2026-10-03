@@ -40,6 +40,10 @@ pub fn acceptor(cfg: &TlsConfig, ktls: bool) -> anyhow::Result<TlsAcceptor> {
         .context("certificate/key mismatch")?;
     server.ignore_client_order = true;
     server.enable_secret_extraction = ktls;
+    // Stateless resumption tickets (key shared by every shard, read under
+    // an RwLock) instead of the default stateful cache, a Mutex taken by
+    // every full handshake on every shard.
+    server.ticketer = rustls::crypto::ring::Ticketer::new()?;
     server.alpn_protocols = if cfg.http2 {
         vec![b"h2".to_vec(), b"http/1.1".to_vec()]
     } else {

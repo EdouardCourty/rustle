@@ -9,24 +9,19 @@ use std::time::{Duration, Instant};
 /// blocking pool (512 threads max) — under a connection burst the queue
 /// alone blew the connect timeout. The benchmark harness bypasses DNS,
 /// real workloads don't.
-struct Inner {
-    entries: HashMap<String, (Vec<std::net::SocketAddr>, Instant)>,
+pub struct DnsCache {
+    entries: Mutex<HashMap<String, (Vec<SocketAddr>, Instant)>>,
+    /// Immutable: read without the lock (0 = cache off, no lock at all).
     ttl: Duration,
     max_entries: usize,
-}
-
-pub struct DnsCache {
-    inner: Mutex<Inner>,
 }
 
 impl DnsCache {
     pub fn new(ttl: Duration, max_entries: usize) -> Self {
         Self {
-            inner: Mutex::new(Inner {
-                entries: HashMap::new(),
-                ttl,
-                max_entries,
-            }),
+            entries: Mutex::new(HashMap::new()),
+            ttl,
+            max_entries,
         }
     }
 
@@ -35,36 +30,31 @@ impl DnsCache {
     /// caller tries them in order, matching tokio's `ToSocketAddrs`
     /// semantics.
     pub fn get(&self, key: &str) -> Option<Vec<SocketAddr>> {
-        if self.ttl_is_zero() {
+        if self.ttl.is_zero() {
             return None;
         }
-        let mut guard = self.inner.lock().unwrap();
-        match guard.entries.get(key) {
+        let mut entries = self.entries.lock().unwrap();
+        match entries.get(key) {
             Some((addrs, expiry)) if *expiry > Instant::now() => Some(addrs.clone()),
             Some(_) => {
-                guard.entries.remove(key);
+                entries.remove(key);
                 None
             }
             None => None,
         }
     }
 
-    fn ttl_is_zero(&self) -> bool {
-        self.inner.lock().unwrap().ttl.is_zero()
-    }
-
     pub fn put(&self, key: String, addrs: Vec<SocketAddr>) {
-        let mut guard = self.inner.lock().unwrap();
-        if guard.ttl.is_zero() {
+        if self.ttl.is_zero() {
             return;
         }
-        if guard.entries.len() >= guard.max_entries {
+        let mut entries = self.entries.lock().unwrap();
+        if entries.len() >= self.max_entries {
             // Bounded and simple: a full cache is wiped. A proxy sees a
             // hot set of destinations; the refill costs a few resolutions.
-            guard.entries.clear();
+            entries.clear();
         }
-        let expiry = Instant::now() + guard.ttl;
-        guard.entries.insert(key, (addrs, expiry));
+        entries.insert(key, (addrs, Instant::now() + self.ttl));
     }
 }
 

@@ -187,12 +187,30 @@ struct Failures {
     banned_until: Option<Instant>,
 }
 
+impl Failures {
+    /// Still counting (window open) or still banned.
+    fn live(&self, now: Instant, window: Duration) -> bool {
+        self.banned_until.is_some_and(|t| t > now) || now - self.window_start < window
+    }
+}
+
+struct Entries {
+    map: HashMap<IpAddr, Failures>,
+    /// Next sweep of expired entries from the accept path: without it an
+    /// IP that failed once stayed tracked forever and every accept paid
+    /// the global lock.
+    next_sweep: Instant,
+}
+
+/// Minimum spacing of the accept-path sweeps.
+const SWEEP_EVERY: Duration = Duration::from_secs(1);
+
 /// Per-IP bad-credential limiter (shared by every shard and listener).
 pub struct AuthLimiter {
     max_failures: u32,
     window: Duration,
     ban: Duration,
-    entries: Mutex<HashMap<IpAddr, Failures>>,
+    entries: Mutex<Entries>,
     /// IPs currently tracked: the accept-time check skips the lock
     /// entirely while nobody failed (the normal state).
     tracked: AtomicUsize,
@@ -208,7 +226,10 @@ impl AuthLimiter {
             max_failures,
             window,
             ban,
-            entries: Mutex::new(HashMap::new()),
+            entries: Mutex::new(Entries {
+                map: HashMap::new(),
+                next_sweep: Instant::now(),
+            }),
             tracked: AtomicUsize::new(0),
         }
     }
@@ -220,8 +241,13 @@ impl AuthLimiter {
             return false;
         }
         let now = Instant::now();
-        let map = self.entries.lock().unwrap();
-        matches!(map.get(&ip), Some(f) if f.banned_until.is_some_and(|t| t > now))
+        let mut e = self.entries.lock().unwrap();
+        if now >= e.next_sweep {
+            e.map.retain(|_, f| f.live(now, self.window));
+            e.next_sweep = now + SWEEP_EVERY;
+            self.tracked.store(e.map.len(), Relaxed);
+        }
+        matches!(e.map.get(&ip), Some(f) if f.banned_until.is_some_and(|t| t > now))
     }
 
     /// Records a wrong key from `ip`; returns true when it triggers a ban.
@@ -230,11 +256,10 @@ impl AuthLimiter {
             return false;
         }
         let now = Instant::now();
-        let mut map = self.entries.lock().unwrap();
+        let mut e = self.entries.lock().unwrap();
+        let map = &mut e.map;
         if map.len() >= MAX_TRACKED && !map.contains_key(&ip) {
-            map.retain(|_, f| {
-                f.banned_until.is_some_and(|t| t > now) || now - f.window_start < self.window
-            });
+            map.retain(|_, f| f.live(now, self.window));
             if map.len() >= MAX_TRACKED {
                 return false; // still full of live entries: do not grow
             }
@@ -365,6 +390,18 @@ mod tests {
         // A fresh window after the ban: counting restarts.
         assert!(!l.fail(a));
         assert!(!l.banned(a));
+    }
+
+    #[test]
+    fn limiter_forgets_expired_entries() {
+        let l = AuthLimiter::new(3, Duration::from_millis(20), Duration::from_millis(20));
+        l.fail(ip("198.51.100.1"));
+        assert_eq!(l.tracked.load(Relaxed), 1);
+        std::thread::sleep(Duration::from_millis(30));
+        // The first check sweeps: back to the lock-free accept path.
+        l.entries.lock().unwrap().next_sweep = Instant::now();
+        assert!(!l.banned(ip("198.51.100.9")));
+        assert_eq!(l.tracked.load(Relaxed), 0);
     }
 
     #[test]
