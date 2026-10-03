@@ -1,11 +1,5 @@
-# myproxy — cibles courantes
-# `make help` liste tout. Variables utiles :
-#   make bench P=3proxy        # matrice sur 3proxy
-#   make bench A=off           # matrice sans auth
-#   make bench P=myproxy A=off R=5
-
 SHELL := /bin/bash
-.PHONY: help build test fmt check clippy images up down smoke bench bench-all bench-scaling latest latest-3proxy latest-off clean
+.PHONY: help build test e2e e2e-quick fmt check clippy images up down smoke bench bench-all bench-scaling latest latest-3proxy latest-off clean
 
 P ?= myproxy
 A ?= on
@@ -24,10 +18,19 @@ test: ## tests unitaires
 fmt: ## formatter tout le code
 	cargo fmt --all
 
-check: ## fmt + clippy (0 warning) + tests — à passer avant chaque commit
+check: ## fmt + clippy (0 warning) + tests + e2e rapide — à passer avant chaque commit
 	cargo fmt --all --check
 	cargo clippy --workspace --all-targets -- -D warnings
 	cargo test -p myproxy
+	$(MAKE) e2e-quick
+
+e2e: ## tests fonctionnels boîte noire, suite complète (~2 min) : make e2e [F="filtre ..."]
+	cargo build --release -p myproxy
+	cargo run -q --profile e2e -p e2e -- $(F)
+
+e2e-quick: ## tests fonctionnels, sous-ensemble rapide (~30 s)
+	cargo build --release -p myproxy
+	cargo run -q --profile e2e -p e2e -- --quick $(F)
 
 clippy: ## linter (warnings = erreurs)
 	cargo clippy --workspace --all-targets -- -D warnings

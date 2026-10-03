@@ -552,3 +552,46 @@ Index : `results/campaign-20261003-015025.txt`. Débit · CPU proxy par requête
 | hold-5000 | 5,000/5000 465.4MB | 5,000/5000 1137.4MB |
 | hold-10000 | 10,000/10000 786.1MB | 10,000/10000 1899.1MB |
 | hold-25000 | 21,264/25000 940.9MB | 462/25000 0.00MB |
+
+## M22 — suite e2e boîte noire et correctifs qu'elle a révélés — 2026-10-03, seed 2004113323, auth on, 1 core
+
+Nouvelle suite `e2e/` (voir `e2e/README.md`) : le binaire release, un process par
+scénario, de vrais clients (HTTP/1.1, HTTPS, h2, SOCKS5 TCP/UDP, curl) et des origines
+programmables. 527 scénarios, ~2 min. Résultat : 524 OK, 3 SKIP (curl 7.88 sans
+`--proxy-http2`), 3 runs d'affilée sans flake. La suite rapide (62 scénarios, ~20 s)
+fait partie de `make check`.
+
+Défauts du proxy trouvés et corrigés :
+
+| # | Cas | Avant | Après |
+|---|---|---|---|
+| 1 | Origine qui ferme sans répondre / muette (HTTP/1) | fermeture sèche (le log disait 502/504) | 502 / 504 |
+| 2 | Origine muette (h2) | 502 | 504 |
+| 3 | 1xx et réponse finale dans le même segment | réponse finale perdue | relayée |
+| 4 | Réponse délimitée par EOF | client gardé en keep-alive, bloqué jusqu'à `idle` (60 s) | fermeture après la réponse |
+| 5 | POST sur socket poolée fermée (HTTP/1) ; requête sans body non idempotente (h2) | **rejoué** (double exécution, invariant B7) | 502, jamais rejoué |
+| 6 | Échec d'écriture vers une socket poolée morte | fermeture sèche | retry si rejouable, sinon 502 |
+| 7 | Requêtes pipelinées | fermeture sans réponse | 1re réponse, puis fermeture |
+| 8 | Upload chunked hors budget / framing invalide | fermeture sèche | 413 / 400 |
+| 9 | Upload interrompu par le client | origine en attente jusqu'au timeout | abandon immédiat |
+| 10 | Tunnel CONNECT sur kTLS : fin du flux amont | FIN sans `close_notify` | `close_notify` puis FIN |
+| 11 | Splice : reset ou `close_notify` kTLS côté source | pipe non vidé, half-close perdu (tunnel bloqué jusqu'à `idle`) | traité comme EOF |
+| 12 | SIGTERM / SIGHUP juste après le démarrage | process tué (handlers installés après les listeners) | handlers installés avant |
+| 13 | Logs stderr hors terminal | codes couleur ANSI | texte brut |
+
+Mutations vérifiées (la suite doit échouer) : half-close du splice désactivé (2 échecs
+en quick), `Proxy-Authorization` transmis à l'origine (5 échecs en quick),
+`allowed_ports` ignoré (6 échecs en complet ; depuis, les cas policy HTTP/1 et SOCKS5
+sont en quick).
+
+Non-régression : A/B alterné ×2 base (M21) vs M22, seed 2004113323.
+
+| Test | base | M22 |
+|---|---|---|
+| 1 KB µs CPU/req | 45,0 / 44,1 | 43,9 / 42,7 |
+| short µs CPU/req | 75,0 / 74,0 | 73,3 / 75,9 |
+| 1 MB µs CPU/req | 241,1 / 218,5 | 227,4 / 222,7 |
+| flood-8 Gbps (s CPU/GB) | 19,03 (0,195) / 18,73 (0,165) | 19,37 (0,159) / 18,95 (0,150) |
+| flood-8 TLS Gbps (s CPU/GB) | 11,44 (0,708) / 11,44 (0,706) | 11,47 (0,699) / 11,48 (0,702) |
+
+Tout est dans le bruit : pas de régression.

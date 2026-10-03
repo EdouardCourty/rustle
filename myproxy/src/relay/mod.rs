@@ -96,7 +96,8 @@ pub async fn bidirectional<C: ClientStream>(
     idle: Duration,
 ) -> std::io::Result<(u64, u64)> {
     match client.into_tcp() {
-        Ok(tcp) => Ok(splice::tunnel(tcp, up, idle).await),
+        // kTLS client (TLS session, plaintext socket): close_notify on EOF.
+        Ok(tcp) => Ok(splice::tunnel(tcp, up, idle, C::TLS).await),
         Err(tls) => Ok(adaptive::bidirectional_io(tls, up, idle).await),
     }
 }

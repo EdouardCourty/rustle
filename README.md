@@ -135,7 +135,7 @@ Une requête **sans** identifiants (premier 407 d'un navigateur) ne compte pas c
 
 | Clé | Défaut | Rôle |
 |---|---|---|
-| `listen` | `""` | port HTTPS (ex. `"0.0.0.0:8443"`) ; vide = désactivé |
+| `listen` | `""` | adresse `"IP:port"` du port HTTPS (IP littérale) : `"0.0.0.0:8443"` ; vide = désactivé. Requiert `cert`/`key` |
 | `cert` / `key` | `""` | certificat (chaîne) et clé privée PEM |
 | `handshake_timeout` | `"10s"` | durée max d'un handshake TLS |
 | `http2` | `true` | proposer HTTP/2 via ALPN |
@@ -153,7 +153,7 @@ Une requête **sans** identifiants (premier 407 d'un navigateur) ne compte pas c
 
 | Clé | Défaut | Rôle |
 |---|---|---|
-| `listen` | `""` | port SOCKS5 (ex. `"127.0.0.1:1080"`) ; vide = désactivé. Mot de passe = une des `api_keys` |
+| `listen` | `""` | adresse `"IP:port"` du port SOCKS5 (IP littérale, pas de nom) : `"127.0.0.1:1080"` (machine locale / VPN) ou `"0.0.0.0:1080"` (toutes interfaces) ; vide = désactivé. TCP CONNECT + UDP ASSOCIATE. Mot de passe = une des `api_keys`, user ignoré |
 
 ### `[log]` — log d'accès
 
@@ -174,10 +174,23 @@ sur stderr.
 ## Développement
 
 ```sh
-make check      # fmt + clippy (-D warnings) + tests — avant chaque commit
-make test       # tests (unitaires et de bout en bout : HTTP, TLS, h2, SOCKS5, policy, logs)
+make check      # fmt + clippy (-D warnings) + tests + e2e rapide — avant chaque commit
+make test       # tests unitaires et d'intégration (dans le process)
+make e2e        # tests fonctionnels boîte noire, suite complète (~2 min)
 make help       # toutes les cibles
 ```
+
+**Tests fonctionnels** ([`e2e/`](e2e/README.md)) : le vrai binaire, un process par
+scénario, piloté par de vrais clients (HTTP/1.1, HTTPS, HTTP/2, SOCKS5 TCP/UDP, curl)
+contre des origines locales programmables. La suite couvre ~530 scénarios :
+- matrice configs × transports × opérations × tailles de payload, vérifiés octet par
+  octet ;
+- sémantique HTTP et tunnels ;
+- limites, sécurité (auth, bans, policy), robustesse face à des clients défaillants ;
+- signaux, logs d'accès.
+
+Chaque scénario vérifie qu'aucune connexion ne fuit et que l'arrêt par SIGTERM est
+propre. `make e2e F="socks5"` filtre par nom.
 
 ```text
 myproxy/src/
@@ -197,6 +210,7 @@ myproxy/src/
 ├── policy.rs          destinations, allowlist clients, bans
 ├── accesslog.rs       log d'accès
 ├── auth.rs, dns.rs, upstream.rs
+e2e/                   tests fonctionnels boîte noire (voir e2e/README.md)
 bench/                 harnais de comparaison (voir ci-dessous)
 ```
 

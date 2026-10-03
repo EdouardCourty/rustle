@@ -1,7 +1,14 @@
 [workspace]
 resolver = "2"
-members = ["myproxy", "bench/generator"]
+members = ["myproxy", "bench/generator", "e2e"]
 
 [profile.release]
 lto = "fat"
 codegen-units = 1
+
+# Test harness (e2e/): optimized, without the release LTO cost.
+[profile.e2e]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true

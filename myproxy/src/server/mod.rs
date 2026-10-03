@@ -149,7 +149,9 @@ fn bind_group(
 ) -> anyhow::Result<(SocketAddr, Vec<std::net::TcpListener>)> {
     let a: SocketAddr = listen
         .parse()
-        .with_context(|| format!("invalid {what} address: {listen}"))?;
+        .with_context(|| {
+            format!("invalid {what} address {listen:?}: expected \"IP:port\", e.g. \"127.0.0.1:1080\" (literal IP, no host name)")
+        })?;
     let first = bind(a, n > 1).with_context(|| format!("binding {what} {a}"))?;
     let addr = first.local_addr()?;
     let mut v = vec![first];
@@ -203,6 +205,7 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
             .with_context(|| format!("invalid admin address: {}", cfg.server.admin_listen))?;
         Some(bind(a, false).with_context(|| format!("binding admin {a}"))?)
     };
+    let admin_addr = admin.as_ref().and_then(|l| l.local_addr().ok());
     let cpus = if cfg.server.pin_cores {
         allowed_cpus()
     } else {
@@ -250,6 +253,7 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
         tls = ?tls_addr,
         ktls,
         socks5 = ?socks_addr,
+        admin = ?admin_addr,
         shards = n,
         pinned = !cpus.is_empty(),
         max_connections = shared.cfg.limits.max_connections,
@@ -712,17 +716,6 @@ async fn admin_loop(listener: TcpListener) {
                 let _ = sock.write_all(body).await;
             }
         });
-    }
-}
-
-/// Resolves on SIGTERM or SIGINT.
-pub async fn shutdown_signal() {
-    use tokio::signal::unix::{signal, SignalKind};
-    let mut term = signal(SignalKind::terminate()).expect("SIGTERM handler");
-    let mut int = signal(SignalKind::interrupt()).expect("SIGINT handler");
-    tokio::select! {
-        _ = term.recv() => {},
-        _ = int.recv() => {},
     }
 }
 

@@ -192,7 +192,10 @@ pub async fn chunked<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
 
         body = body.saturating_add(size);
         if budget > 0 && body > budget {
-            return Err(invalid("chunked body over budget"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::FileTooLarge,
+                "chunked body over budget",
+            ));
         }
 
         // Chunk data: staged bytes first (forwarded with the framing),
