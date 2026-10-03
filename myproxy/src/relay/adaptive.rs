@@ -10,7 +10,7 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use super::{IdleTimer, RELAY_BUF0, RELAY_BUF_MAX};
+use super::{IdleTimer, RELAY_BUF0, RELAY_BUF_MAX, RELAY_BUF_MAX_COPY};
 
 /// Remaining declared body from which the response goes straight to splice.
 const SPLICE_EARLY: u64 = 128 * 1024;
@@ -67,6 +67,13 @@ pub(super) async fn response<C: ClientStream>(
             }
         }
     }
+    // Spliceable client: grow to 64 KB, then hand over to splice.
+    // Otherwise (TLS) the copy is the whole relay: grow further.
+    let max = if client.tcp().is_some() {
+        RELAY_BUF_MAX
+    } else {
+        RELAY_BUF_MAX_COPY
+    };
     let mut buf: Vec<u8> = Vec::with_capacity(RELAY_BUF0);
     let mut timer = IdleTimer::new(idle);
     let mut total: u64 = 0;
@@ -98,7 +105,7 @@ pub(super) async fn response<C: ClientStream>(
         total += n as u64;
         timer.reset();
         if buf.len() == buf.capacity() {
-            if buf.capacity() < RELAY_BUF_MAX {
+            if buf.capacity() < max {
                 buf.reserve(buf.capacity()); // double
             } else if remaining.is_none() || remaining.unwrap() > total {
                 // Zero-copy needs the client socket itself (plain TCP) and
@@ -194,7 +201,7 @@ where
         written += n as u64;
         timer.reset();
         // A full buffer means the flow is (or may become) bulk: grow.
-        if buf.len() == buf.capacity() && buf.capacity() < RELAY_BUF_MAX {
+        if buf.len() == buf.capacity() && buf.capacity() < RELAY_BUF_MAX_COPY {
             buf.reserve(buf.capacity()); // doubles capacity
         }
     }

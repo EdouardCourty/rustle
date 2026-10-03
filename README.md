@@ -91,6 +91,7 @@ placée fait échouer le démarrage. Durées au format `"5s"`, `"1m"`, `"15m"`.
 | `workers` | `1` | nombre de shards (un thread + un listener `SO_REUSEPORT` chacun) ; `0` = un par CPU |
 | `pin_cores` | `false` | épingle le shard *i* sur le *i*-ème CPU autorisé |
 | `admin_listen` | `"127.0.0.1:8181"` | `GET /health` sans auth ; `""` désactive |
+| `socket_buffer_bytes` | `1048576` | `SO_SNDBUF`/`SO_RCVBUF` de chaque socket relayée ; `0` = autotuning du noyau. Une taille fixe coupe l'autotuning et est plafonnée par `net.core.rmem_max`/`wmem_max` (avertissement au démarrage) : 1 MB en vol au plus par connexion, soit ~80 Mbit/s à 100 ms de RTT. Mettre `0` pour des clients lointains |
 
 ### `[auth]`
 
@@ -270,3 +271,10 @@ Chaque choix de performance est passé par la matrice à graine fixe (détails d
 - **log d'accès par lots** : +2,9 % de CPU par requête en mode `all` (un réveil du thread
   d'écriture par ligne coûtait +26 %) ;
 - **allocateur** : mimalloc testé, neutre (le chemin chaud n'alloue pas).
+- **buffers socket 1 MB fixes** plutôt que l'autotuning sur le bench (LAN) : flood −56 % de CPU
+  par Go, 10 MB +30 % de débit, 1 KB −10 % de CPU ; l'autotuning reste disponible pour le WAN ;
+- **`TCP_DEFER_ACCEPT`** : −7 % de CPU par connexion courte (le réveil d'`accept` attend la
+  requête) ; QUICKACK une fois par connexion : neutre, conservé ;
+- **pipes de splice en pool par shard**, pipes réduits par le noyau refusés : au-delà de ~60
+  tunnels, le budget `fs.pipe-user-pages-soft` donnait des pipes de 8 KB (flood à 128 tunnels
+  10,0 → 16,9 Gbps).
