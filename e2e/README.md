@@ -1,98 +1,98 @@
-# e2e — tests fonctionnels boîte noire
+# e2e — black-box functional tests
 
-Lance **le vrai binaire** (`target/release/myproxy`), un process par scénario, avec un
-fichier de config généré. Le proxy est piloté de l'extérieur par de vrais clients :
-HTTP/1.1, HTTPS, HTTP/2, SOCKS5 TCP/UDP et le curl du système. En face, il y a des
-origines locales programmables. Rien n'est mocké, aucun code du proxy n'est importé.
+Runs **the real binary** (`target/release/myproxy`), one process per scenario, with a
+generated config file. The proxy is driven from the outside by real clients: HTTP/1.1,
+HTTPS, HTTP/2, SOCKS5 TCP/UDP and the system's curl. On the other side are programmable
+local origins. Nothing is mocked, no proxy code is imported.
 
 ```bash
-make e2e                      # suite complète (~2 min, ~530 scénarios)
-make e2e-quick                # sous-ensemble (~20 s), lancé par `make check`
-make e2e F="socks5 policy"    # filtre : sous-chaînes du nom, au moins une doit matcher
+make e2e                      # full suite (~2 min, ~530 scenarios)
+make e2e-quick                # subset (~20 s), run by `make check`
+make e2e F="socks5 policy"    # filter: substrings of the name, at least one must match
 
-cargo run --profile e2e -p e2e -- [FILTRE...] [--quick] [--jobs N] [--list] [--keep] [--bin CHEMIN]
+cargo run --profile e2e -p e2e -- [FILTER...] [--quick] [--jobs N] [--list] [--keep] [--bin PATH]
 ```
 
-- `--list` : liste les scénarios sans les lancer.
-- `--keep` : garde les répertoires temporaires (config, certificats, logs d'accès).
-- `--jobs N` : nombre de scénarios en parallèle (défaut : nombre de CPU).
-- Code de sortie ≠ 0 si un scénario échoue. En cas d'échec, le rapport affiche la fin
-  du stderr du proxy concerné.
+- `--list`: lists the scenarios without running them.
+- `--keep`: keeps the temporary directories (config, certificates, access logs).
+- `--jobs N`: scenarios run in parallel (default: number of CPUs).
+- Exit code ≠ 0 when a scenario fails. On failure, the report shows the end of the
+  stderr of the proxy involved.
 
-Avant de lancer la suite, construire le binaire testé : `cargo build --release -p myproxy`
-(fait par `make e2e`).
+Before running the suite, build the binary under test: `cargo build --release -p myproxy`
+(done by `make e2e`).
 
-## Contrôles automatiques
+## Automatic checks
 
-Ces contrôles s'appliquent à chaque scénario qui termine par `Proxy::finish()` :
+These checks apply to every scenario that ends with `Proxy::finish()`:
 
-- **fuite** : aucune connexion fermée par son client ne doit rester ouverte côté
-  proxy (socket en `CLOSE_WAIT`) ;
-- **arrêt** : SIGTERM doit arrêter le process en moins de 8 s, avec code 0, sans
-  panique et avec la ligne `shutdown complete`.
+- **leak**: no connection closed by its client may stay open on the proxy side (socket
+  in `CLOSE_WAIT`);
+- **shutdown**: SIGTERM must stop the process within 8 s, with exit code 0, without a
+  panic and with the `shutdown complete` line.
 
-Les ports réels sont lus sur la ligne de démarrage `myproxy listening`, puisque tous les
-listeners sont sur `127.0.0.1:0` : pas de course sur les ports, exécution parallèle
-sûre.
+The real ports are read from the `myproxy listening` startup line, since every listener
+is on `127.0.0.1:0`: no port races, safe parallel execution. The harness's own listeners
+have a deep accept queue (4096), so 1,000 simultaneous tunnels never overflow a target.
 
-Un **SKIP** est motivé et n'est pas un échec : kTLS absent du noyau, curl sans
-`--proxy-http2` (curl < 8.1), 127.0.0.2 non disponible.
+A **SKIP** has a stated reason and is not a failure: kTLS missing from the kernel, curl
+without `--proxy-http2` (curl < 8.1), 127.0.0.2 unavailable.
 
-## Rangement
+## Layout
 
 ```
 src/
-  main.rs        CLI + rapport
-  runner.rs      registre, exécution parallèle, timeouts, SKIP, rapport par suite
-  harness/       infrastructure, aucune assertion
-    proxy.rs     Config (TOML de test → fichier), Proxy (spawn, ports, /proc : fds,
-                 RSS, sockets, signaux, finish)
-    origin.rs    origine HTTP/1.1 programmable (le chemin choisit le comportement)
-    targets.rs   écho TCP, serveur qui parle en premier, écho TLS, origine HTTPS,
-                 écho UDP (127.0.0.1 et ::1 sur le même port)
-    payload.rs   payloads déterministes (octet i = f(seed, i)), vérifiés octet par octet
-    certs.rs     certificat localhost (rcgen), configs rustls client/serveur
-  clients/       http1.rs (clair + TLS), h2.rs (requêtes + tunnels CONNECT en
+  main.rs        CLI + report
+  runner.rs      registry, parallel execution, timeouts, SKIP, report per suite
+  harness/       infrastructure, no assertions
+    proxy.rs     Config (test TOML → file), Proxy (spawn, ports, /proc: fds, RSS,
+                 sockets, signals, finish)
+    origin.rs    programmable HTTP/1.1 origin (the path selects the behavior)
+    targets.rs   TCP echo, server that speaks first, TLS echo, HTTPS origin, UDP echo
+                 (127.0.0.1 and ::1 on the same port)
+    payload.rs   deterministic payloads (byte i = f(seed, i)), checked byte for byte
+    certs.rs     localhost certificate (rcgen), rustls client/server configs
+  clients/       http1.rs (plain + TLS), h2.rs (requests + CONNECT tunnels as
                  AsyncRead/Write), socks5.rs (CONNECT, UDP ASSOCIATE), curl.rs
-  suites/        un fichier par feature = une catégorie du rapport
+  suites/        one file per feature = one report category
 ```
 
-## Couverture (suites)
+## Coverage (suites)
 
-| Suite | Contenu |
+| Suite | Content |
 |---|---|
-| `matrix` | 13 configs × transports (`h1`, `tls`, `tls12`, `h2`, `socks5`) × opérations : GET avec framings `cl` / `chunked` / `chunked-small` / `eof`, uploads `cl` / `chunked` / sans longueur (h2), CONNECT (écho et TLS de bout en bout), UDP. Tailles aux frontières du moteur : 0, 1, 8 191, 8 193, 64 KB ± 1, 128 KB ± 1, 1 MB, 10 MB, et 64 MB pour la config par défaut. Configs : `default`, `workers2-pin`, `workers0`, `keepalive-off`, `sockbuf-autotune`, `ktls`, `open-relay`, `dns-names`, `dns-nocache`, `log-all-file`, `log-all-stdout`, `policy`, `limits-generous` |
-| `http` | pool amont réutilisé ou non, `Connection: close`, HTTP/1.0, HEAD/204/304, codes de statut, 1xx, trailers chunked, origine lente, retry GET sur socket poolée morte, POST jamais rejoué, origine qui reset / muette (504) / refuse (502), DNS en échec, timeout de connexion, IPv6, nom d'hôte, origin-form, réécriture des headers et de la ligne de requête, méthodes, gros head de réponse, 50 headers, pipelining, `Expect: 100-continue` |
-| `connect` | serveur qui parle en premier, cible qui ferme d'abord, refus, DNS en échec, cible IPv6, sur les 4 transports ; early bytes ; 1 000 tunnels simultanés ; 200 streams h2 CONNECT sur une connexion ; timeout idle ; tunnel vers le proxy lui-même |
-| `h2` | multiplexage de tailles et framings mêlés, ALPN avec `http2 = false`, 407, HEAD/204/304/1xx, erreurs amont, RST_STREAM en plein download, tunnel et requêtes entrelacés |
-| `socks5` | méthode sans credentials refusée, mauvaise clé, autre user + 2e clé, open relay, cible par nom, BIND refusé, SOCKS4 fermé, UDP IPv4 / nom / IPv6, UDP filtré par la policy, source étrangère ignorée, fin de l'association avec le contrôle TCP, 500 datagrammes |
-| `uploads` | extensions et trailers chunked, chunk unique de 12 MB, chunks d'un octet, envoi lent, chunked en HTTP/1.0 (400), CL + TE (400), CL dupliqué (400), taille de chunk invalide (400), octets après le chunk final (fermeture) |
-| `limits` | `max_header_bytes` (431), budgets de body requête (413 en CL, chunked et h2), budgets de réponse (502 si déclaré, coupure sinon), `max_connections` global sur 2 shards, slowloris HTTP et SOCKS5, timeout de handshake TLS, limites larges qui ne coupent rien |
-| `security` | auth absente / fausse / valide sur les 4 transports, credentials malformés, clé contenant `:`, bans puis expiration (les 407 sans credentials ne comptent pas, les échecs SOCKS5 comptent), `allow_clients` (fermeture à l'accept, filtrage par adresse source), `block_private` (loopback, RFC 1918, métadonnées cloud, CGNAT, ULA, link-local, rebinding par nom), `deny`, `allowed_ports`, open relay, policy vérifiée avant le connect |
-| `robustness` | client qui coupe un download / un upload / des tunnels, lecteur lent (backpressure : RSS bornée), requêtes malformées, demi-requêtes, garbage sur les ports TLS / SOCKS5 / h2, 2 000 connexions successives sans croissance de fds, ligne de requête énorme |
-| `process` | config d'exemple livrée, configs invalides (code ≠ 0 + message), port occupé, SIGTERM (transfert en cours terminé, plus d'accept, sortie à temps avec un tunnel ouvert), SIGHUP sans log, admin désactivé / 404 |
-| `logs` | `all` (une ligne par requête / tunnel / stream h2 / association UDP), `errors` (refus seulement), `target = url`, sortie stdout, `off`, réouverture SIGHUP après rename, refus à l'accept agrégés |
-| `curl` | GET via proxy HTTP, tunnel `-p`, proxy HTTPS (certificat vérifié), proxy HTTP/2 (si curl ≥ 8.1), `socks5h`, HTTPS de bout en bout à travers CONNECT, uploads POST et chunked, 407 |
+| `matrix` | 13 configs × transports (`h1`, `tls`, `tls12`, `h2`, `socks5`) × operations: GET with `cl` / `chunked` / `chunked-small` / `eof` framings, `cl` / `chunked` / length-less (h2) uploads, CONNECT (echo and end-to-end TLS), UDP. Sizes at the engine boundaries: 0, 1, 8,191, 8,193, 64 KB ± 1, 128 KB ± 1, 1 MB, 10 MB, and 64 MB for the default config. Configs: `default`, `workers2-pin`, `workers0`, `keepalive-off`, `sockbuf-autotune`, `ktls`, `open-relay`, `dns-names`, `dns-nocache`, `log-all-file`, `log-all-stdout`, `policy`, `limits-generous` |
+| `http` | upstream pool reused or not, `Connection: close`, HTTP/1.0, HEAD/204/304, status codes, 1xx, chunked trailers, slow origin, GET retry on a dead pooled socket, POST never replayed, origin that resets / stays silent (504) / refuses (502), DNS failure, connect timeout, IPv6, host name, origin-form, header and request-line rewriting, methods, large response head, 50 headers, pipelining, `Expect: 100-continue` |
+| `connect` | server that speaks first, target that closes first, refusal, DNS failure, IPv6 target, on all 4 transports; early bytes; 1,000 simultaneous tunnels; 200 h2 CONNECT streams on one connection; idle timeout; tunnel to the proxy itself |
+| `h2` | multiplexing of mixed sizes and framings, ALPN with `http2 = false`, 407, HEAD/204/304/1xx, upstream errors, RST_STREAM mid-download, interleaved tunnel and requests |
+| `socks5` | method without credentials refused, wrong key, other user + second key, open relay, target by name, BIND refused, SOCKS4 closed, UDP IPv4 / name / IPv6, UDP filtered by the policy, foreign source ignored, association ends with the TCP control connection, 500 datagrams |
+| `uploads` | chunked extensions and trailers, single 12 MB chunk, one-byte chunks, slow sender, chunked in HTTP/1.0 (400), CL + TE (400), duplicate CL (400), invalid chunk size (400), bytes after the final chunk (close) |
+| `limits` | `max_header_bytes` (431), request body budgets (413 for CL, chunked and h2), response budgets (502 when declared, cut otherwise), global `max_connections` across 2 shards, HTTP and SOCKS5 slowloris, TLS handshake timeout, generous limits that cut nothing |
+| `security` | missing / wrong / valid auth on all 4 transports, malformed credentials, key containing `:`, bans then expiry (407s without credentials do not count, SOCKS5 failures do), `allow_clients` (closed at accept, filtering by source address), `block_private` (loopback, RFC 1918, cloud metadata, CGNAT, ULA, link-local, rebinding by name), `deny`, `allowed_ports`, open relay, policy checked before connecting |
+| `robustness` | client cutting a download / an upload / tunnels, slow reader (backpressure: bounded RSS), malformed requests, half requests, garbage on the TLS / SOCKS5 / h2 ports, 2,000 successive connections without fd growth, huge request line |
+| `process` | shipped example config, invalid configs (exit code ≠ 0 + message), busy port, SIGTERM (in-flight transfer completed, no more accepts, exit in time with an open tunnel), SIGHUP without a log, admin disabled / 404 |
+| `logs` | `all` (one line per request / tunnel / h2 stream / UDP association), `errors` (refusals only), `target = url`, stdout output, `off`, SIGHUP reopen after rename, aggregated refusals at accept |
+| `curl` | GET through the HTTP proxy, `-p` tunnel, HTTPS proxy (verified certificate), HTTP/2 proxy (when curl ≥ 8.1), `socks5h`, end-to-end HTTPS through CONNECT, POST and chunked uploads, 407 |
 
-## Ajouter un scénario
+## Adding a scenario
 
-Dans le fichier de la feature (`suites/<feature>.rs`), ajouter un élément à `scenarios()` :
+In the feature's file (`suites/<feature>.rs`), add an element to `scenarios()`:
 
 ```rust
-scenario("http/mon-cas", |env| async move {
+scenario("http/my-case", |env| async move {
     let p = Proxy::start(Config::new().set("http", "upstream_keepalive", "false")).await?;
     let mut c = Client::plain(p.addr).await?;
     let r = c.roundtrip(&get(&env.origin.url("/data/1000")), false).await?;
     r.expect(200)?;
     payload::check(1000, 1000, &r.body)?;
     drop(c);
-    p.finish().await // contrôle de fuite + arrêt propre
+    p.finish().await // leak check + clean shutdown
 })
-.quick(), // si le cas doit tourner dans `make check`
+.quick(), // when the case must run in `make check`
 ```
 
-- `Config::new()` : listeners sur ports libres, auth on (`secret1`, `secret2`) et
-  `block_private = false` (toutes les cibles sont locales). Les valeurs passées à
-  `set` sont du TOML brut.
-- Un cas qui ne peut pas tourner sur la machine retourne `Err(skip("raison"))`.
-- Le nom est hiérarchique : le premier segment donne la catégorie du rapport.
+- `Config::new()`: listeners on free ports, auth on (`secret1`, `secret2`) and
+  `block_private = false` (every target is local). Values passed to `set` are raw TOML.
+- A case that cannot run on the machine returns `Err(skip("reason"))`.
+- The name is hierarchical: the first segment is the report category.
+- A bug found → first a scenario that reproduces it (it must fail), then the fix.
