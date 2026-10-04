@@ -55,7 +55,7 @@ HOLD_MAX_SINGLE=30000   # above this, split across 2 client replicas (ephemeral 
 export PROXY_IMAGE="${PROXY}:bench"
 export AUTH
 
-# CPU pinning auto-détecté (partagé avec le Makefile).
+# Auto-detected CPU pinning (shared with the Makefile).
 . "$(dirname "$0")/env.sh"
 echo "==> cpu pinning: proxy=$PROXY_CPU generator/upstream/sink=$BENCH_CPU (available: $ALL_CPUS)"
 
@@ -183,18 +183,18 @@ run_hold() {
     echo "RESULT median mode=hold conns=$conns replicas=2 opened=$opened failed=$failed rate=$rate elapsed_s=$maxelapsed cpu_s_per_run=$cpu_s_per_run rss_mb=$(rss_mb) peak_rss_mb=$(peak_rss_mb)" | tee -a "$out/results.txt"
 }
 
-# --- Warmup réseau (avant toute mesure): montée des conntrack, caches
-# DNS/kernel, fenêtres TCP autotunées — sans ça, les 1ers tests de la
-# matrice absorbent la chauffe et la variance entre passes est ±30 %.
+# --- Network warmup (before any measurement): conntrack growth, DNS/kernel
+# caches, autotuned TCP windows — without it the first tests of the matrix
+# absorb the warmup and the variance between passes is ±30 %.
 echo "### warmup-network"
 docker compose --profile generator run --rm -T generator --repeat 1 --no-warmup "${GEN_ARGS[@]}" \
     http http://upstream:8000/1mb --conns 16 --requests 200 >/dev/null 2>&1 || true
 docker compose --profile generator run --rm -T generator --repeat 1 --no-warmup "${GEN_ARGS[@]}" \
     flood sink:9000 --conns 8 --duration 3 >/dev/null 2>&1 || true
 
-# --- Workloads, ordre randomisé à seed fixe (reproductible d'une passe à
-# l'autre, mais supprime le biais d'ordre: le réseau n'est pas dans le même
-# état après le hold-25k qu'après le 1kb). OVERRIDE=$SEED pour reproduire.
+# --- Workloads, order randomized with a fixed seed (reproducible from one
+# pass to the next, but removes the order bias: the network is not in the
+# same state after hold-25k as after 1kb). OVERRIDE=$SEED to reproduce.
 if [ -n "${BENCH_SEED:-}" ]; then SEED="$BENCH_SEED"; else SEED=$RANDOM$RANDOM; fi
 echo "seed=$SEED" | tee -a "$out/results.txt"
 
@@ -227,8 +227,8 @@ if [[ -n "${BENCH_ONLY:-}" ]]; then
         "run_hold 5000 10"
         "run_hold 10000 10"
         "run_hold 25000 10"
-        # Hors matrice (BENCH_ONLY seulement) : 128 tunnels en flood, au-delà
-        # du plafond noyau des pipes de 1 MB (fs.pipe-user-pages-soft).
+        # Outside the matrix (BENCH_ONLY only): 128 flood tunnels, beyond
+        # the kernel cap on 1 MB pipes (fs.pipe-user-pages-soft).
         "run_test flood-128 flood sink:9000 --conns 128 --duration 10"
     )
     found=""
@@ -240,12 +240,12 @@ if [[ -n "${BENCH_ONLY:-}" ]]; then
     done
     [[ -n "$found" ]] || { echo "no test matches BENCH_ONLY=${BENCH_ONLY}" >&2; exit 2; }
 fi
-# Fisher-Yates avec seed
+# Seeded Fisher-Yates
 shopt -s extglob
 shuffled=(); tmp=("${TESTS[@]}")
 n=${#tmp[@]}
 for ((i=0; i<n; i++)); do
-    # pseudo-random déterministe sur le seed
+    # deterministic pseudo-random from the seed
     SEED=$(( (SEED * 1103515245 + 12345) & 0x7fffffff ))
     j=$(( i + (SEED % (n - i)) ))
     shuffled[i]=${tmp[j]}
