@@ -36,7 +36,18 @@ fn render(key: &str) -> anyhow::Result<String> {
     ))
 }
 
-pub fn run(path: Option<PathBuf>, force: bool) -> anyhow::Result<i32> {
+#[derive(clap::Args)]
+pub struct Args {
+    /// Where to write the config (default: ~/.config/rustle/config.toml)
+    #[arg(long)]
+    pub path: Option<PathBuf>,
+    /// Overwrite an existing file
+    #[arg(short, long)]
+    pub force: bool,
+}
+
+pub fn run(args: Args) -> anyhow::Result<i32> {
+    let Args { path, force } = args;
     let path = match path {
         Some(p) => p,
         None => user_config_path()?,
@@ -96,9 +107,13 @@ mod tests {
         assert!(text.contains(&format!("\"{key}\"")));
         let dir = std::env::temp_dir().join(format!("rustle-init-test-{}", std::process::id()));
         let p = dir.join("sub").join("config.toml");
-        run(Some(p.clone()), false).unwrap();
-        assert!(run(Some(p.clone()), false).is_err(), "no silent overwrite");
-        run(Some(p.clone()), true).unwrap();
+        let a = |force| Args {
+            path: Some(p.clone()),
+            force,
+        };
+        run(a(false)).unwrap();
+        assert!(run(a(false)).is_err(), "no silent overwrite");
+        run(a(true)).unwrap();
         let cfg = crate::config::Config::load(&p).unwrap();
         assert_eq!(cfg.auth.api_keys.len(), 1);
         #[cfg(unix)]

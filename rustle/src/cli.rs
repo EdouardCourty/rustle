@@ -1,274 +1,122 @@
-//! Command line: `rustle [run] [CONFIG]` and the management subcommands.
-//!
-//! Backward compatible by construction: anything that is not a known
-//! subcommand or flag is the config path (`rustle config.toml`), which is
-//! how Docker entrypoints, the e2e harness and the bench start the proxy.
+//! Command line. `rustle [CONFIG]` and `rustle run [CONFIG]` run the proxy
+//! (a bare path is the historical form, kept for Docker entrypoints, the
+//! e2e harness and the bench); the other subcommands live in `cmd/`, one
+//! file each with its own clap `Args`.
 
 use std::path::PathBuf;
 
-#[derive(Debug, PartialEq)]
-pub enum Command {
-    Run(Option<PathBuf>),
-    Init {
-        path: Option<PathBuf>,
-        force: bool,
-    },
-    Check(Option<PathBuf>),
-    Status(Option<PathBuf>),
-    Service(ServiceCmd),
-    Update {
-        check: bool,
-        version: Option<String>,
-    },
-    Uninstall {
-        purge: bool,
-    },
-    Version,
-    Help(Option<String>),
-}
+use clap::{Parser, Subcommand};
 
-#[derive(Debug, PartialEq)]
-pub struct ServiceCmd {
-    pub action: ServiceAction,
-    pub system: bool,
-    pub config: Option<PathBuf>,
-    pub dry_run: bool,
-}
-
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum ServiceAction {
-    Install,
-    Uninstall,
-    Enable,
-    Disable,
-    Start,
-    Stop,
-    Restart,
-    Status,
-    Logs,
-}
-
-const SERVICE_ACTIONS: &[(&str, ServiceAction)] = &[
-    ("install", ServiceAction::Install),
-    ("uninstall", ServiceAction::Uninstall),
-    ("enable", ServiceAction::Enable),
-    ("disable", ServiceAction::Disable),
-    ("start", ServiceAction::Start),
-    ("stop", ServiceAction::Stop),
-    ("restart", ServiceAction::Restart),
-    ("status", ServiceAction::Status),
-    ("logs", ServiceAction::Logs),
-];
-
-/// Parses the arguments after the program name.
-pub fn parse(args: &[String]) -> Result<Command, String> {
-    let Some(first) = args.first() else {
-        return Ok(Command::Run(None));
-    };
-    let rest = &args[1..];
-    match first.as_str() {
-        "-V" | "--version" | "version" => Ok(Command::Version),
-        "-h" | "--help" => Ok(Command::Help(None)),
-        "help" => Ok(Command::Help(rest.first().cloned())),
-        "run" => Ok(Command::Run(one_path(rest)?)),
-        "check" => Ok(Command::Check(one_path(rest)?)),
-        "status" => Ok(Command::Status(one_path(rest)?)),
-        "init" => {
-            let (mut path, mut force) = (None, false);
-            let mut it = rest.iter();
-            while let Some(a) = it.next() {
-                match a.as_str() {
-                    "--force" | "-f" => force = true,
-                    "--path" => path = Some(value(&mut it, "--path")?.into()),
-                    other => return Err(format!("init: unexpected argument `{other}`")),
-                }
-            }
-            Ok(Command::Init { path, force })
-        }
-        "update" => {
-            let (mut check, mut version) = (false, None);
-            let mut it = rest.iter();
-            while let Some(a) = it.next() {
-                match a.as_str() {
-                    "--check" => check = true,
-                    "--version" => version = Some(value(&mut it, "--version")?),
-                    other => return Err(format!("update: unexpected argument `{other}`")),
-                }
-            }
-            Ok(Command::Update { check, version })
-        }
-        "uninstall" => {
-            let mut purge = false;
-            for a in rest {
-                match a.as_str() {
-                    "--purge" => purge = true,
-                    other => return Err(format!("uninstall: unexpected argument `{other}`")),
-                }
-            }
-            Ok(Command::Uninstall { purge })
-        }
-        "service" => {
-            let Some(name) = rest.first() else {
-                return Err(service_usage());
-            };
-            let Some(&(_, action)) = SERVICE_ACTIONS.iter().find(|(n, _)| n == name) else {
-                return Err(format!(
-                    "service: unknown action `{name}`\n{}",
-                    service_usage()
-                ));
-            };
-            let (mut system, mut config, mut dry_run) = (false, None, false);
-            let mut it = rest[1..].iter();
-            while let Some(a) = it.next() {
-                match a.as_str() {
-                    "--system" => system = true,
-                    "--dry-run" => dry_run = true,
-                    "--config" => config = Some(value(&mut it, "--config")?.into()),
-                    other => return Err(format!("service {name}: unexpected argument `{other}`")),
-                }
-            }
-            Ok(Command::Service(ServiceCmd {
-                action,
-                system,
-                config,
-                dry_run,
-            }))
-        }
-        s if s.starts_with('-') => Err(format!("unknown option `{s}` (see `rustle --help`)")),
-        // Anything else: the config path (historical form).
-        path => {
-            if !rest.is_empty() {
-                return Err(format!("unexpected argument `{}`", rest[0]));
-            }
-            Ok(Command::Run(Some(path.into())))
-        }
-    }
-}
-
-fn one_path(rest: &[String]) -> Result<Option<PathBuf>, String> {
-    match rest {
-        [] => Ok(None),
-        [p] if !p.starts_with('-') => Ok(Some(p.into())),
-        [other, ..] => Err(format!("unexpected argument `{other}`")),
-    }
-}
-
-fn value<'a>(it: &mut impl Iterator<Item = &'a String>, flag: &str) -> Result<String, String> {
-    it.next()
-        .cloned()
-        .ok_or_else(|| format!("{flag} needs a value"))
-}
-
-fn service_usage() -> String {
-    let names: Vec<&str> = SERVICE_ACTIONS.iter().map(|(n, _)| *n).collect();
-    format!(
-        "usage: rustle service <{}> [--system] [--config PATH] [--dry-run]",
-        names.join("|")
-    )
-}
+use crate::cmd;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const TARGET: &str = env!("RUSTLE_TARGET");
+const LONG_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("RUSTLE_TARGET"), ")");
 
-pub fn version_line() -> String {
-    format!("rustle {VERSION} ({TARGET})")
+#[derive(Parser)]
+#[command(
+    name = "rustle",
+    version = LONG_VERSION,
+    about = "High-performance forward proxy: HTTP/1.1, HTTPS, HTTP/2, SOCKS5",
+    // `rustle config.toml` (positional) vs `rustle init` (subcommand).
+    args_conflicts_with_subcommands = true
+)]
+pub struct Cli {
+    /// Config file to run with (same as `rustle run CONFIG`)
+    pub config: Option<PathBuf>,
+
+    #[command(subcommand)]
+    pub command: Option<Command>,
 }
 
-pub fn help(topic: Option<&str>) -> String {
-    match topic {
-        Some("service") => format!(
-            "{}\n\n\
-             install     write the service definition (systemd unit / launchd agent)\n\
-             uninstall   stop, disable and remove it\n\
-             enable      install + start now and at boot/login\n\
-             disable     stop and disable\n\
-             start|stop|restart|status\n\
-             logs        follow the service logs (journalctl / log file)\n\n\
-             --system    Linux system-wide unit (root; dedicated `rustle` user,\n\
-             \x20           config /etc/rustle/config.toml) instead of a user unit\n\
-             --config    config file the service runs with\n\
-             --dry-run   print what would be written/run, change nothing",
-            service_usage()
-        ),
-        _ => format!(
-            "{}\n\n\
-             USAGE\n\
-             \x20 rustle [run] [CONFIG]     run the proxy (default command)\n\
-             \x20 rustle init               write a config with a fresh API key\n\
-             \x20 rustle check [CONFIG]     validate a config without starting\n\
-             \x20 rustle status [CONFIG]    health of the running proxy and its service\n\
-             \x20 rustle service <action>   manage the systemd / launchd service\n\
-             \x20 rustle update [--check]   update to the latest release\n\
-             \x20 rustle uninstall [--purge]\n\
-             \x20 rustle --version | --help\n\n\
-             Without CONFIG the first existing file wins: ./config.toml,\n\
-             ~/.config/rustle/config.toml, /etc/rustle/config.toml.\n\
-             `rustle help service` lists the service actions.",
-            version_line()
-        ),
+#[derive(Subcommand)]
+pub enum Command {
+    /// Run the proxy in the foreground (default command)
+    Run(cmd::run::Args),
+    /// Write a config with a freshly generated API key
+    Init(cmd::init::Args),
+    /// Validate a config without starting the proxy
+    Check(cmd::check::Args),
+    /// Health of the running proxy and of its service
+    Status(cmd::status::Args),
+    /// Manage the systemd / launchd service
+    Service(cmd::service::Args),
+    /// Update to the latest release (checksum verified)
+    Update(cmd::update::Args),
+    /// Remove the service and the binary
+    Uninstall(cmd::uninstall::Args),
+}
+
+impl Cli {
+    /// Runs the chosen command; the value is the process exit code.
+    pub fn dispatch(self) -> anyhow::Result<i32> {
+        match self.command {
+            None => cmd::run::run(cmd::run::Args {
+                config: self.config,
+            }),
+            Some(Command::Run(a)) => cmd::run::run(a),
+            Some(Command::Init(a)) => cmd::init::run(a),
+            Some(Command::Check(a)) => cmd::check::run(a),
+            Some(Command::Status(a)) => cmd::status::run(a),
+            Some(Command::Service(a)) => cmd::service::run(a),
+            Some(Command::Update(a)) => cmd::update::run(a),
+            Some(Command::Uninstall(a)) => cmd::uninstall::run(a),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
 
-    fn p(s: &str) -> Result<Command, String> {
-        let v: Vec<String> = s.split_whitespace().map(String::from).collect();
-        parse(&v)
+    fn p(s: &str) -> Result<Cli, clap::Error> {
+        Cli::try_parse_from(std::iter::once("rustle").chain(s.split_whitespace()))
+    }
+
+    #[test]
+    fn definition_is_consistent() {
+        Cli::command().debug_assert();
     }
 
     #[test]
     fn config_path_stays_the_historical_form() {
-        assert_eq!(p("").unwrap(), Command::Run(None));
-        assert_eq!(
-            p("/tmp/c.toml").unwrap(),
-            Command::Run(Some("/tmp/c.toml".into()))
-        );
-        assert_eq!(
-            p("run /tmp/c.toml").unwrap(),
-            Command::Run(Some("/tmp/c.toml".into()))
-        );
+        let c = p("").unwrap();
+        assert!(c.command.is_none() && c.config.is_none());
+        let c = p("/tmp/c.toml").unwrap();
+        assert_eq!(c.config, Some("/tmp/c.toml".into()));
+        assert!(c.command.is_none());
+        assert!(matches!(
+            p("run /tmp/c.toml").unwrap().command,
+            Some(Command::Run(_))
+        ));
         assert!(p("a.toml b.toml").is_err());
     }
 
     #[test]
-    fn flags_and_subcommands() {
-        assert_eq!(p("--version").unwrap(), Command::Version);
-        assert_eq!(p("-V").unwrap(), Command::Version);
-        assert_eq!(p("-h").unwrap(), Command::Help(None));
-        assert_eq!(p("check").unwrap(), Command::Check(None));
-        assert!(p("--bogus").is_err());
-        assert_eq!(
-            p("init --path /x --force").unwrap(),
-            Command::Init {
-                path: Some("/x".into()),
-                force: true
-            }
-        );
-        assert_eq!(
-            p("update --check --version v1.2.3").unwrap(),
-            Command::Update {
-                check: true,
-                version: Some("v1.2.3".into())
-            }
-        );
-        assert!(p("init --path").is_err());
-    }
-
-    #[test]
-    fn service_actions() {
-        assert_eq!(
-            p("service enable --system --config /c.toml --dry-run").unwrap(),
-            Command::Service(ServiceCmd {
-                action: ServiceAction::Enable,
-                system: true,
-                config: Some("/c.toml".into()),
-                dry_run: true
-            })
-        );
-        assert!(p("service").is_err());
-        assert!(p("service explode").is_err());
-        assert!(p("service start --nope").is_err());
+    fn subcommands_and_errors() {
+        assert!(matches!(
+            p("init --path /x --force").unwrap().command,
+            Some(Command::Init(_))
+        ));
+        assert!(matches!(
+            p("update --check --version v1.2.3").unwrap().command,
+            Some(Command::Update(_))
+        ));
+        assert!(matches!(
+            p("service enable --system --config /c.toml --dry-run")
+                .unwrap()
+                .command,
+            Some(Command::Service(_))
+        ));
+        for bad in [
+            "--bogus",
+            "service",
+            "service explode",
+            "service start --nope",
+            "init --path",
+        ] {
+            assert!(p(bad).is_err(), "{bad}");
+        }
     }
 }

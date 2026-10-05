@@ -73,7 +73,7 @@ bench/
 
 ## Config (TOML, the only input for the proxy itself; no reload)
 
-CLI (`rustle/src/cli.rs`, `cmd/`): `rustle [run] [CONFIG]` (a bare path = config, kept for Docker/e2e/bench), `init`, `check`, `status`, `service <install|uninstall|enable|disable|start|stop|restart|status|logs> [--system] [--dry-run]`, `update [--check]`, `uninstall`, `--version`. No flags change proxy behavior: everything is in the TOML. Default config lookup: `./config.toml`, `~/.config/rustle/config.toml`, `/etc/rustle/config.toml`.
+CLI (clap derive: `rustle/src/cli.rs` = `Cli` + `Command`; one file per command in `rustle/src/cmd/` with its own `Args` + `run`): `rustle [run] [CONFIG]` (a bare path = config, kept for Docker/e2e/bench), `init`, `check`, `status`, `service <install|uninstall|enable|disable|start|stop|restart|status|logs> [--system] [--dry-run]`, `update [--check]`, `uninstall`, `--version`. No flags change proxy behavior: everything is in the TOML. Default config lookup: `./config.toml`, `~/.config/rustle/config.toml`, `/etc/rustle/config.toml`.
 
 | Key | Default |
 |---|---|

@@ -10,7 +10,40 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context};
 
 use super::{quote_arg, resolve_config, run_capture, run_inherit, user_config_dir, SYSTEM_CONFIG};
-use crate::cli::{ServiceAction, ServiceCmd};
+
+#[derive(Clone, Copy, PartialEq, clap::ValueEnum)]
+pub enum Action {
+    /// Write the service definition (systemd unit / launchd agent)
+    Install,
+    /// Stop, disable and remove it
+    Uninstall,
+    /// Install, start now and at boot / login
+    Enable,
+    /// Stop and disable
+    Disable,
+    Start,
+    Stop,
+    Restart,
+    Status,
+    /// Follow the service logs (journalctl / log file)
+    Logs,
+}
+
+#[derive(clap::Args)]
+pub struct Args {
+    #[arg(value_enum)]
+    pub action: Action,
+    /// Linux: system-wide unit (needs root; dedicated `rustle` user, config
+    /// /etc/rustle/config.toml) instead of a user unit
+    #[arg(long)]
+    pub system: bool,
+    /// Config file the service runs with
+    #[arg(long, value_name = "PATH")]
+    pub config: Option<PathBuf>,
+    /// Print what would be written / run; change nothing
+    #[arg(long)]
+    pub dry_run: bool,
+}
 
 const NAME: &str = "rustle";
 const LABEL: &str = "com.edouardcourty.rustle";
@@ -345,19 +378,19 @@ fn uninstall(ctx: &Ctx) -> anyhow::Result<()> {
 }
 
 /// Runs a direct control verb; returns the tool's exit code.
-fn control(ctx: &Ctx, action: ServiceAction) -> anyhow::Result<i32> {
+fn control(ctx: &Ctx, action: Action) -> anyhow::Result<i32> {
     let verb = match action {
-        ServiceAction::Start => "start",
-        ServiceAction::Stop => "stop",
-        ServiceAction::Restart => "restart",
-        ServiceAction::Status => "status",
+        Action::Start => "start",
+        Action::Stop => "stop",
+        Action::Restart => "restart",
+        Action::Status => "status",
         _ => unreachable!(),
     };
     if is_macos() {
         let target = launchd_target();
         let loaded = run_capture("launchctl", &["print", &target]).is_ok_and(|(c, _)| c == 0);
         return match action {
-            ServiceAction::Start => {
+            Action::Start => {
                 if !loaded {
                     let plist = plist_path()?.display().to_string();
                     ctx.must("launchctl", &["bootstrap", &launchd_domain(), &plist])?;
@@ -365,11 +398,11 @@ fn control(ctx: &Ctx, action: ServiceAction) -> anyhow::Result<i32> {
                 ctx.must("launchctl", &["kickstart", &target])?;
                 Ok(0)
             }
-            ServiceAction::Stop => {
+            Action::Stop => {
                 ctx.must("launchctl", &["bootout", &target])?;
                 Ok(0)
             }
-            ServiceAction::Restart => {
+            Action::Restart => {
                 ctx.must("launchctl", &["kickstart", "-k", &target])?;
                 Ok(0)
             }
@@ -404,22 +437,21 @@ fn logs(ctx: &Ctx) -> anyhow::Result<i32> {
     run_inherit("journalctl", &a)
 }
 
-pub fn run(cmd: ServiceCmd) -> anyhow::Result<i32> {
+pub fn run(cmd: Args) -> anyhow::Result<i32> {
     let ctx = Ctx {
         system: cmd.system,
         dry: cmd.dry_run,
         config: cmd.config,
     };
     match cmd.action {
-        ServiceAction::Install => install(&ctx)?,
-        ServiceAction::Uninstall => uninstall(&ctx)?,
-        ServiceAction::Enable => enable(&ctx)?,
-        ServiceAction::Disable => disable(&ctx)?,
-        ServiceAction::Logs => return logs(&ctx),
-        a @ (ServiceAction::Start
-        | ServiceAction::Stop
-        | ServiceAction::Restart
-        | ServiceAction::Status) => return control(&ctx, a),
+        Action::Install => install(&ctx)?,
+        Action::Uninstall => uninstall(&ctx)?,
+        Action::Enable => enable(&ctx)?,
+        Action::Disable => disable(&ctx)?,
+        Action::Logs => return logs(&ctx),
+        a @ (Action::Start | Action::Stop | Action::Restart | Action::Status) => {
+            return control(&ctx, a)
+        }
     }
     Ok(0)
 }

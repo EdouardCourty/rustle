@@ -99,7 +99,18 @@ impl Drop for TempDir {
     }
 }
 
-pub fn run(check: bool, version: Option<String>) -> anyhow::Result<i32> {
+#[derive(clap::Args)]
+pub struct Args {
+    /// Only report whether an update is available
+    #[arg(long)]
+    pub check: bool,
+    /// Install this version (e.g. v0.2.0) instead of the latest
+    #[arg(long, value_name = "VERSION")]
+    pub version: Option<String>,
+}
+
+pub fn run(args: Args) -> anyhow::Result<i32> {
+    let Args { check, version } = args;
     let work = TempDir(std::env::temp_dir().join(format!("rustle-update-{}", std::process::id())));
     std::fs::create_dir_all(&work.0)?;
     let base = base_url(version.as_deref());
