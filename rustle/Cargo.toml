@@ -9,6 +9,7 @@ build = "build.rs"
 
 [dependencies]
 anyhow = "1"
+clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
 base64 = "0.22"
 bytes = "1"
 h2 = "0.4"

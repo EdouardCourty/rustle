@@ -28,8 +28,14 @@ pub fn health(addr: SocketAddr) -> bool {
     head[..n].starts_with(b"HTTP/1.1 200")
 }
 
-pub fn run(path: Option<PathBuf>) -> anyhow::Result<i32> {
-    let path = resolve_config(path)?;
+#[derive(clap::Args)]
+pub struct Args {
+    /// Config file (default: the usual lookup)
+    pub config: Option<PathBuf>,
+}
+
+pub fn run(args: Args) -> anyhow::Result<i32> {
+    let path = resolve_config(args.config)?;
     let cfg = Config::load(&path).with_context(|| format!("loading {}", path.display()))?;
     println!("config:  {}", path.display());
     println!("{}", super::service::state_summary());

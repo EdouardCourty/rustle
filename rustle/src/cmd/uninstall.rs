@@ -1,13 +1,20 @@
 //! `rustle uninstall`: remove the service and the binary.
 
-use super::service;
-use crate::cli::ServiceAction;
+use super::service::{self, Action};
 
-pub fn run(purge: bool) -> anyhow::Result<i32> {
+#[derive(clap::Args)]
+pub struct Args {
+    /// Also remove ~/.config/rustle (the config and its API key)
+    #[arg(long)]
+    pub purge: bool,
+}
+
+pub fn run(args: Args) -> anyhow::Result<i32> {
+    let purge = args.purge;
     // The service first (user scope, then system scope when it is ours).
     for system in [false, true] {
-        let cmd = crate::cli::ServiceCmd {
-            action: ServiceAction::Uninstall,
+        let cmd = service::Args {
+            action: Action::Uninstall,
             system,
             config: None,
             dry_run: false,

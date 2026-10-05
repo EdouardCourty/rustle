@@ -32,7 +32,7 @@ fn tmp_dir(tag: &str) -> std::path::PathBuf {
 pub fn scenarios() -> Vec<Scenario> {
     vec![
         scenario("cli/version-and-help", |_env| async move {
-            for flag in ["--version", "-V", "version"] {
+            for flag in ["--version", "-V"] {
                 let (code, out, _) = rustle(&[flag], &[])?;
                 ensure!(
                     code == 0 && out.starts_with("rustle "),
@@ -41,7 +41,7 @@ pub fn scenarios() -> Vec<Scenario> {
             }
             let (code, out, _) = rustle(&["--help"], &[])?;
             ensure!(
-                code == 0 && out.contains("USAGE") && out.contains("service"),
+                code == 0 && out.contains("Usage") && out.contains("service"),
                 "{out}"
             );
             let (code, out, _) = rustle(&["help", "service"], &[])?;
@@ -58,7 +58,7 @@ pub fn scenarios() -> Vec<Scenario> {
             ] {
                 let (code, _, err) = rustle(args, &[])?;
                 ensure!(code == 2, "{args:?}: exit {code}, stderr {err}");
-                ensure!(err.starts_with("rustle: "), "{args:?}: {err}");
+                ensure!(err.contains("error:"), "{args:?}: {err}");
             }
             Ok(())
         })

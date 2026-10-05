@@ -2,6 +2,7 @@
 
 pub mod check;
 pub mod init;
+pub mod run;
 pub mod service;
 pub mod status;
 pub mod uninstall;

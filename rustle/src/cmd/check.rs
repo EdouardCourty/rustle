@@ -9,8 +9,14 @@ use super::resolve_config;
 use crate::config::Config;
 use crate::policy::{ClientPolicy, DestPolicy};
 
-pub fn run(path: Option<PathBuf>) -> anyhow::Result<i32> {
-    let path = resolve_config(path)?;
+#[derive(clap::Args)]
+pub struct Args {
+    /// Config file (default: the usual lookup)
+    pub config: Option<PathBuf>,
+}
+
+pub fn run(args: Args) -> anyhow::Result<i32> {
+    let path = resolve_config(args.config)?;
     let cfg = Config::load(&path).with_context(|| format!("loading {}", path.display()))?;
     DestPolicy::from_config(&cfg).context("[filter]")?;
     ClientPolicy::from_config(&cfg).context("[auth] allow_clients")?;
