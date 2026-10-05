@@ -2,7 +2,7 @@
 name = "bench-client"
 version = "0.1.0"
 edition = "2021"
-description = "Load generator for the myproxy benchmark harness"
+description = "Load generator for the rustle benchmark harness"
 
 [dependencies]
 anyhow = "1"

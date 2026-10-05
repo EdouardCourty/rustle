@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["myproxy", "bench/generator", "e2e"]
+members = ["rustle", "bench/generator", "e2e"]
 
 [profile.release]
 lto = "fat"

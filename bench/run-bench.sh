@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Benchmark one proxy (myproxy | 3proxy) inside Docker.
+# Benchmark one proxy (rustle | 3proxy) inside Docker.
 #
 # Usage:
-#   ./run-bench.sh [myproxy|3proxy] [on|off]
-#   REPEAT=5 ./run-bench.sh myproxy on     # more repetitions
-#   ALLOCATOR="--features mimalloc" ./run-bench.sh myproxy on   # allocator A/B
+#   ./run-bench.sh [rustle|3proxy] [on|off]
+#   REPEAT=5 ./run-bench.sh rustle on     # more repetitions
+#   ALLOCATOR="--features mimalloc" ./run-bench.sh rustle on   # allocator A/B
 #
 # Each client invocation does its own warmup + REPEAT measured runs and
 # prints one "RESULT median ..." line. This script additionally samples the
@@ -16,15 +16,15 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-PROXY="${1:-myproxy}"
+PROXY="${1:-rustle}"
 AUTH="${2:-on}"
 REPEAT="${REPEAT:-3}"
 # Multi-core: WORKERS = shards/workers of the proxy (DUTs that support it),
 # PROXY_NCPU = CPUs given to the proxy (env.sh), GEN_THREADS = generator
 # runtime threads (size to BENCH_CPU or the generator saturates first).
 export WORKERS="${WORKERS:-1}"
-export ACCESS_LOG="${ACCESS_LOG:-off}"   # myproxy: off | errors | all
-export KTLS="${KTLS:-false}"               # myproxy TLS listener: kernel TLS on/off
+export ACCESS_LOG="${ACCESS_LOG:-off}"   # rustle: off | errors | all
+export KTLS="${KTLS:-false}"               # rustle TLS listener: kernel TLS on/off
 # SECCOMP=unconfined: proxy container without Docker's seccomp profile
 # (needed by io_uring DUTs; use it for every DUT of such a comparison).
 if [[ "${SECCOMP:-default}" == unconfined ]]; then

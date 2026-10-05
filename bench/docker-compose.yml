@@ -35,7 +35,7 @@ services:
       nofile: { soft: 524288, hard: 524288 }
 
   proxy:
-    image: ${PROXY_IMAGE:-myproxy:bench}
+    image: ${PROXY_IMAGE:-rustle:bench}
     environment:
       AUTH: ${AUTH:-on}
       WORKERS: ${WORKERS:-1}

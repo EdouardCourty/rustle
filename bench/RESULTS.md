@@ -1,6 +1,8 @@
-# Results — myproxy vs 3proxy
+# Results — rustle vs 3proxy
 
-Dates: 2026-09-27/28/29 · `{myproxy, 3proxy} × {auth=on, auth=off}`,
+> The proxy was named `myproxy` until M23; older rows keep the numbers measured under that name.
+
+Dates: 2026-09-27/28/29 · `{rustle, 3proxy} × {auth=on, auth=off}`,
 median of 3 runs (± warmup), local Docker client (no Internet access).
 
 ## Environment
@@ -22,18 +24,18 @@ that day), 15 s wall-clock budget, **1 KB keep-alive moved to ×64 conns** (M10.
 ×16 the ceiling was the harness latency — conns/RTT — not the proxy; new protocol for
 both proxies).
 
-| Workload | **myproxy M10.3** | 3proxy | Verdict |
+| Workload | **rustle M10.3** | 3proxy | Verdict |
 |---|---|---|---|
-| HTTP 1 KB, keep-alive ×64 | **14,822 rps · p50 4.1 ms** | 1,555 rps · p50 41 ms | **myproxy ×9.5*** |
+| HTTP 1 KB, keep-alive ×64 | **14,822 rps · p50 4.1 ms** | 1,555 rps · p50 41 ms | **rustle ×9.5*** |
 | HTTP 10 KB, ×16 | **13,754 rps (141 MB/s)** · CPU 12.6 s | 12,347 rps (126 MB/s) · CPU 15.3 s | **ahead: +11 % rps, +11 % MB/s, CPU −18 %** |
 | HTTP 1 MB, ×16 | **2,866 rps (3,005 MB/s)** | 2,455 rps (2,574 MB/s) | **ahead: +17 %** |
 | HTTP 10 MB, ×8 | **350 rps (3,668 MB/s)** | 294 rps (3,087 MB/s) | **ahead: +19 %** |
-| HTTP 1 KB, 1 req/conn ×64 | **4,896 rps · p50 5.9 ms** | 3,218 rps · p50 13.3 ms | **myproxy +52 %** |
+| HTTP 1 KB, 1 req/conn ×64 | **4,896 rps · p50 5.9 ms** | 3,218 rps · p50 13.3 ms | **rustle +52 %** |
 | CONNECT flood ×8 | **18.87 Gbps · CPU 4.19 s** | 17.84 Gbps · CPU 4.53 s | **ahead: +6 % throughput, CPU −8 %** |
 | Hold 1,000 tunnels | **5,236 conn/s** | 4,149 conn/s | **ahead: +26 %** |
 | Hold 5,000 | 956 conn/s | 955 conn/s | parity (noise) |
 | Hold 10,000 | 1,741 conn/s (open 5.7 s) | 4,000 conn/s (open 2.5 s) | ⚠️ see caveat 6 (3proxy bimodal) |
-| Hold 25,000 | **25,000/25,000 · rate 2,642 · CPU 3.9 s** | 16,792/25,000 (CPU 22.6 s) | **myproxy the only one to hold (CPU ÷5.8)** |
+| Hold 25,000 | **25,000/25,000 · rate 2,642 · CPU 3.9 s** | 16,792/25,000 (CPU 22.6 s) | **rustle the only one to hold (CPU ÷5.8)** |
 | RAM per idle tunnel | ~1.3 KB/conn | ~0.35 KB/conn | 3proxy ×4 (pooling M11) |
 
 ## CPU cost per request (new — the metric that predicts the ceiling)
@@ -131,7 +133,7 @@ invisible on p50.** No reason to disable it.
 
 ## Conclusions
 
-- **myproxy is ahead EVERYWHERE on the data plane with the M10.3 protocol**: 10 KB +11 %
+- **rustle is ahead EVERYWHERE on the data plane with the M10.3 protocol**: 10 KB +11 %
   (CPU −18 %), 1 MB +17 %, 10 MB +19 %, flood +6 % throughput at CPU −8 %, short +52 %,
   hold-1k +26 %, hold-25k 25,000/25,000 (CPU ÷5.8).
 - **1 KB ×64 is a harness latency wall** (~15-16k whatever the fastest proxy) — the
@@ -139,7 +141,7 @@ invisible on p50.** No reason to disable it.
 - **The 50k wall is DOUBLE on this box**: proxy ~21-24k (CPU/req) AND bench side
   ~23 µs/req — not "physically impossible", but two core budgets to divide by ~3 each
   (proxy: io_uring/FSM without Tokio; harness: a lighter upstream than nginx).
-- **Connection setup + tunnels: myproxy dominates** (×36 on small objects, +62 % on short
+- **Connection setup + tunnels: rustle dominates** (×36 on small objects, +62 % on short
   connections, and the only one to hold 25,000 concurrent tunnels on this machine).
 - **Reliability note**: inter-pass variance stays ±3-5 % on the box (2 shared cores,
   neighbouring containers). Deltas ≥ +5 % are above noise; micro-gaps are not significant.
@@ -260,7 +262,7 @@ kind for everyone. 0 HTTP errors everywhere.
 
 ### Plain (HTTP/1.1)
 
-| Test | **myproxy** | 3proxy | Squid | gost | Tinyproxy |
+| Test | **rustle** | 3proxy | Squid | gost | Tinyproxy |
 |---|---|---|---|---|---|
 | 1 KB ×64 | **14,291** · 49 µs | 1,555¹ · 75 µs | 9,113 · 120 µs | 1,913 · 570 µs | 2,806 · 347 µs |
 | 10 KB ×16 | **13,532** · 62 µs | 12,475 · 80 µs | 7,308 · 149 µs | 1,847 · 580 µs | 2,394 · 411 µs |
@@ -273,7 +275,7 @@ kind for everyone. 0 HTTP errors everywhere.
 
 ### TLS (HTTPS proxy, HTTP/1.1)
 
-| Test | **myproxy** | Squid | gost |
+| Test | **rustle** | Squid | gost |
 |---|---|---|---|
 | 1 KB ×64 | **14,122** · 57 µs | 7,790 · 140 µs | 1,614 · 656 µs |
 | 10 KB ×16 | **13,375** · 62 µs | 6,089 · 180 µs | 1,539 · 685 µs |
@@ -286,7 +288,7 @@ kind for everyone. 0 HTTP errors everywhere.
 
 ### HTTP/2 (TLS, ALPN h2; 1 h2 connection per generator "conn")
 
-| Test | **myproxy** | gost |
+| Test | **rustle** | gost |
 |---|---|---|
 | 1 KB ×64 | **12,975** · 70 µs | 3,934 · 280 µs |
 | 10 KB ×16 | **11,958** · 83 µs | 3,676 · 298 µs |
@@ -300,9 +302,9 @@ kind for everyone. 0 HTTP errors everywhere.
 ¹ 3proxy's 40 ms delayed ACK (historical caveat). ² container died during the test (no
 more measurable CPU, peak 0): the box's RAM (4 GB) was exceeded — gost ≈ 135-175 KB/tunnel.
 ³ limited by the **generator** (one TLS+h2 connection per tunnel: 39 s CPU on its core,
-868 MB, 145 s to open; myproxy 21 s CPU) — inconclusive on this box.
+868 MB, 145 s to open; rustle 21 s CPU) — inconclusive on this box.
 
-**Reading**: myproxy is first on every plain and TLS row, with the lowest CPU/req and the
+**Reading**: rustle is first on every plain and TLS row, with the lowest CPU/req and the
 lowest RAM. Over TLS, small keep-alive requests cost almost nothing (1 KB +15 % CPU/req,
 10 KB ≈ 0); bulk pays for encryption and the loss of splice (1 MB ×2.5, 10 MB ×4.4 CPU/req,
 flood ×5.6 CPU/GB) — the kTLS target (M13.3). In h2: ahead of gost everywhere except the
@@ -310,7 +312,7 @@ flood (−14 % throughput, equivalent CPU/GB); the h2 path is slower than TLS+HT
 bulk (1 MB 726 vs 1,285): h2 framing + a `Bytes` copy per chunk — an optimization lead.
 
 **Caveats**: 2-core box, loopback, one seed; multi-core not measured here (VPS:
-`run-scaling.sh`). TLS tunnels: ~26 KB/tunnel for myproxy (rustls buffers) versus ~5 KB
+`run-scaling.sh`). TLS tunnels: ~26 KB/tunnel for rustle (rustls buffers) versus ~5 KB
 plain.
 
 ## M16 — access log cost — 2026-09-30, seed 2004113323, auth on, 1 core
@@ -351,11 +353,11 @@ bulk and per connection (setup: rustls drain + ULP + keys).
 
 monoio prototype (`bench/uring-proto`, DUT `uring-proto`; since removed from the repo,
 recoverable at commit `a2b11e3`) of the HTTP/1 keep-alive path (same rewrite, auth, kept
-upstream, Content-Length responses, per-operation timeout). Compared with myproxy with
+upstream, Content-Length responses, per-operation timeout). Compared with rustle with
 seccomp lifted for both (`SECCOMP=unconfined`: Docker's profile blocks io_uring and the
 filter costs per syscall). Alternating runs:
 
-| µs proxy CPU/req | io_uring (proto) | Tokio (myproxy) |
+| µs proxy CPU/req | io_uring (proto) | Tokio (rustle) |
 |---|---|---|
 | 1 KB ×64 | 53.7 | **49.8** |
 | 10 KB ×16 (2 runs) | **57.1 / 57.5** | 62.4 / 62.0 |
@@ -370,13 +372,13 @@ migration; to be retested on the multi-core VPS (submission batching).
 
 `bench/run-campaign.sh` (5 proxies × every supported transport), tables by
 `bench/tools/campaign-table.py`. Cell = throughput · proxy CPU per request (http: µs/req,
-flood: ms/GB); holds = tunnels open / requested · peak RAM. Default myproxy configuration
+flood: ms/GB); holds = tunnels open / requested · peak RAM. Default rustle configuration
 (kTLS off, log off). No errors (`err_kinds` empty); only Tinyproxy's reconnects (1 per
 request, it closes without announcing it).
 
 ### plain
 
-| test | myproxy | 3proxy | squid | gost | tinyproxy |
+| test | rustle | 3proxy | squid | gost | tinyproxy |
 |---|---|---|---|---|---|
 | http-1kb | 14,332 rps 49µs | 1,558 rps 74µs | 8,841 rps 124µs | 1,930 rps 561µs | 2,627 rps 366µs |
 | http-10kb | 14,024 rps 61µs | 13,207 rps 79µs | 7,174 rps 152µs | 1,864 rps 575µs | 2,606 rps 396µs |
@@ -391,7 +393,7 @@ request, it closes without announcing it).
 
 ### tls
 
-| test | myproxy | squid | gost |
+| test | rustle | squid | gost |
 |---|---|---|---|
 | http-1kb | 14,018 rps 57µs | 7,837 rps 141µs | 1,566 rps 676µs |
 | http-10kb | 13,540 rps 62µs | 5,999 rps 183µs | 1,550 rps 690µs |
@@ -406,7 +408,7 @@ request, it closes without announcing it).
 
 ### h2
 
-| test | myproxy | gost |
+| test | rustle | gost |
 |---|---|---|
 | http-1kb | 13,028 rps 70µs | 3,922 rps 281µs |
 | http-10kb | 12,232 rps 82µs | 3,709 rps 295µs |
@@ -422,12 +424,12 @@ request, it closes without announcing it).
 Notes: 3proxy 1 KB = 40 ms delayed ACK (historical caveat); 3proxy holds 24,959 / 25,000
 tunnels this time (17,146 in M13 — known variance of its wall at ~17-25k); gost: container
 killed for lack of RAM at 25k (plain and TLS) and right after hold-10k in h2 (peak 0);
-myproxy h2 hold-25k limited by the generator (one TLS+h2 connection per tunnel), as in
+rustle h2 hold-25k limited by the generator (one TLS+h2 connection per tunnel), as in
 M13. Gaps to M13 within noise.
 
 ## M20 — HTTP/2 tunnels: catch up with, then pass gost — 2026-10-02, seed 2004113323
 
-Finding (M19): h2 flood 6.6 Gbps vs gost 7.7, at equal CPU/GB — myproxy used only 87 % of
+Finding (M19): h2 flood 6.6 Gbps vs gost 7.7, at equal CPU/GB — rustle used only 87 % of
 its core (gost 104 %): it was waiting. Step-by-step measurements (flood-8, PROXY_H2=1):
 
 | Step | Throughput | Proxy CPU | Reading |
@@ -437,7 +439,7 @@ its core (gost 104 %): it was waiting. Step-by-step measurements (flood-8, PROXY
 | B. windows 1 → 4 MB per stream, 8 → 16 MB per connection | **7.86** | 101 % | bottleneck lifted; the generator spends 7.7 → 6.2 s CPU |
 | C. read-ahead under rustls (rustls reads 4 KB at a time: ~4 recv per 16 KB record; adaptive 64 KB buffer, released when the flow becomes light again) | ≈ | −3 % CPU/GB | h2 bound by the harness core; HTTP/1 over TLS: flood 9.3 → 9.6 Gbps, −5 % CPU/GB |
 
-Final alternating A/B (3 passes each): **myproxy 7.64 / 7.54 / 7.58 Gbps (0.97 s CPU/GB)
+Final alternating A/B (3 passes each): **rustle 7.64 / 7.54 / 7.58 Gbps (0.97 s CPU/GB)
 vs gost 7.40 / 7.41 / 7.55 (1.08 s/GB)** — ahead in every pair, −11 % CPU per GB. h2
 throughput is capped by the harness core (generator + sink): the throughput gap stays
 narrow, the efficiency gap is clear. Full TLS and h2 matrices: no regression (every other
@@ -501,7 +503,7 @@ for gost (flood noise ±15 %), 0.91 vs 1.05 s CPU/GB.
 
 #### plain
 
-| test | myproxy | 3proxy | squid | gost | tinyproxy |
+| test | rustle | 3proxy | squid | gost | tinyproxy |
 |---|---|---|---|---|---|
 | http-1kb | 14,594 rps 44µs | 1,557 rps 67µs | 8,964 rps 110µs | 1,935 rps 510µs | 2,962 rps 313µs |
 | http-10kb | 14,211 rps 54µs | 12,343 rps 74µs | 7,292 rps 136µs | 1,850 rps 521µs | 2,601 rps 353µs |
@@ -516,7 +518,7 @@ for gost (flood noise ±15 %), 0.91 vs 1.05 s CPU/GB.
 
 #### tls
 
-| test | myproxy | squid | gost |
+| test | rustle | squid | gost |
 |---|---|---|---|
 | http-1kb | 14,128 rps 50µs | 7,826 rps 126µs | 1,611 rps 601µs |
 | http-10kb | 12,895 rps 59µs | 5,993 rps 165µs | 1,536 rps 615µs |
@@ -531,7 +533,7 @@ for gost (flood noise ±15 %), 0.91 vs 1.05 s CPU/GB.
 
 #### h2
 
-| test | myproxy | gost |
+| test | rustle | gost |
 |---|---|---|
 | http-1kb | 14,896 rps 57µs | 3,904 rps 254µs |
 | http-10kb | 11,924 rps 76µs | 3,700 rps 266µs |

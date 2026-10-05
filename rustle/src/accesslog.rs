@@ -134,7 +134,7 @@ impl AccessLog {
         let counters = Arc::new(Counters::default());
         let c = counters.clone();
         std::thread::Builder::new()
-            .name("myproxy-accesslog".into())
+            .name("rustle-accesslog".into())
             .spawn(move || writer(rx, out, dest, c))?;
         Ok(Self {
             level,
@@ -423,7 +423,7 @@ mod tests {
     fn levels() {
         let off = AccessLog::disabled();
         assert!(!off.errors() && !off.all());
-        let dir = std::env::temp_dir().join(format!("myproxy-log-unit-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("rustle-log-unit-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let f = dir.join("a.log");
         let e = AccessLog::start(

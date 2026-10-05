@@ -5,7 +5,7 @@
 #
 # Usage (VPS, >= 2*max(n) CPUs recommended):
 #   ./run-scaling.sh                                  # defaults below
-#   PROXIES="myproxy squid" NCPUS="1 2 4 8" AUTH=on ./run-scaling.sh
+#   PROXIES="rustle squid" NCPUS="1 2 4 8" AUTH=on ./run-scaling.sh
 #   BENCH_ONLY=http-1kb ./run-scaling.sh              # one step per point
 #   PROXY_TLS=1 ./run-scaling.sh                      # HTTPS proxy
 #   PROXY_H2=1 ./run-scaling.sh                       # HTTP/2 proxy (TLS, ALPN h2)
@@ -16,7 +16,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-PROXIES="${PROXIES:-myproxy 3proxy squid gost tinyproxy}"
+PROXIES="${PROXIES:-rustle 3proxy squid gost tinyproxy}"
 NCPUS="${NCPUS:-1 2 4}"
 AUTH="${AUTH:-on}"
 export BENCH_SEED="${BENCH_SEED:-2004113323}"

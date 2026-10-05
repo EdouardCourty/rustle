@@ -1,5 +1,5 @@
 [package]
-name = "myproxy"
+name = "rustle"
 version = "0.1.0"
 edition = "2021"
 description = "Ultra-minimal, high-performance HTTP forward proxy"

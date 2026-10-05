@@ -149,11 +149,11 @@ enum Cmd {
     },
 }
 
-// Standalone binary (not part of the myproxy workspace build profile):
+// Standalone binary (not part of the rustle workspace build profile):
 // the sink mode spawns tens of thousands of tasks at 25k tunnels — the
 // default 2 MB stacks cost ~25 KB touched per task (627 MB RSS at 25k,
 // measured) and OOM-pressure the 4 GB box. A hand-built runtime with
-// small stacks (like myproxy's) cuts that ~4x.
+// small stacks (like rustle's) cuts that ~4x.
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     // Servers run their own per-thread runtimes (never returns).
