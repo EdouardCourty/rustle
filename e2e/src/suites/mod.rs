@@ -1,6 +1,7 @@
 //! Scenario suites, one file per feature. Each suite exposes `scenarios()`;
 //! names are `<suite>/<...>` and the first segment is the report category.
 
+pub mod cli;
 pub mod connect;
 pub mod h2;
 pub mod http;
@@ -32,6 +33,7 @@ pub fn all() -> Vec<Scenario> {
     v.extend(security::scenarios());
     v.extend(robustness::scenarios());
     v.extend(process::scenarios());
+    v.extend(cli::scenarios());
     v.extend(logs::scenarios());
     v.extend(interop_curl::scenarios());
     v
