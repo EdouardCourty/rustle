@@ -867,9 +867,12 @@ mod tests {
         let _c = TcpStream::connect(addr).await.unwrap();
         let (s, _) = ln.accept().await.unwrap();
         assert!(s.nodelay().unwrap());
+        // Compared with the listener, not with the requested size: the
+        // kernel caps it at net.core.{r,w}mem_max (208 KB on CI runners).
+        let l = socket2::SockRef::from(&ln);
         let s = socket2::SockRef::from(&s);
-        assert!(s.send_buffer_size().unwrap() >= SOCK_BUF.load(Relaxed));
-        assert!(s.recv_buffer_size().unwrap() >= SOCK_BUF.load(Relaxed));
+        assert!(s.send_buffer_size().unwrap() >= l.send_buffer_size().unwrap());
+        assert!(s.recv_buffer_size().unwrap() >= l.recv_buffer_size().unwrap());
     }
 
     fn test_config(workers: usize, max_connections: usize) -> Arc<Config> {
