@@ -1,5 +1,7 @@
 # Three-machine benchmark
 
+The full procedure (machines, preflight, campaigns, publishing) is in [`RUNBOOK.md`](RUNBOOK.md); this page is the reference for the pieces.
+
 On one host the load generator, origin and sink share cores with (or next to) the proxy and cap the load: a fast proxy measures the harness. Here every role has its own machine.
 
 ```

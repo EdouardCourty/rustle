@@ -9,6 +9,8 @@
 #
 #   REPORT_ONLY=1  no campaign: rebuild report, charts and README table from the newest indexes
 #   SKIP_WS=1      only the HTTP/CONNECT campaign
+#   FLOOD_FROM=<index>  take the tunnel throughput row and chart from another campaign
+#                  (run on one big host over loopback: the three-machine link caps tunnels)
 #   NO_README=1    do not touch README.md (charts and report only)
 #   AUTH=on|off, PROXIES="...", BENCH_SEED, REPEAT: as run-campaign.sh
 #
@@ -48,10 +50,17 @@ echo "==> report: $report"
 status=0
 ./tools/validity.py "$http_idx" ${ws_idx:+"$ws_idx"} | tee -a "$report" || status=1
 
-python3 tools/charts.py "$http_idx" >/dev/null && echo "==> charts: docs/benchmarks/ (HTTP/CONNECT)"
+if [[ -n "${FLOOD_FROM:-}" ]]; then
+    # the link of the three machines caps tunnel throughput: its chart comes from FLOOD_FROM
+    python3 tools/charts.py "$http_idx" --except plain-flood.svg >/dev/null
+    python3 tools/charts.py "$FLOOD_FROM" --only plain-flood.svg >/dev/null
+    echo "==> charts: docs/benchmarks/ (tunnel chart from $FLOOD_FROM)"
+else
+    python3 tools/charts.py "$http_idx" >/dev/null && echo "==> charts: docs/benchmarks/ (HTTP/CONNECT)"
+fi
 [[ -n "$ws_idx" ]] && python3 tools/charts.py "$ws_idx" >/dev/null && echo "==> charts: docs/benchmarks/ (WebSocket)"
 if [[ "${NO_README:-0}" != 1 ]]; then
-    ./tools/readme-table.py "$http_idx" ${ws_idx:+"$ws_idx"} --write ../README.md || status=1
+    ./tools/readme-table.py "$http_idx" ${ws_idx:+"$ws_idx"} ${FLOOD_FROM:+--flood-from "$FLOOD_FROM"} --write ../README.md || status=1
 fi
 ((status == 0)) && echo "==> done, nothing to review" || echo "==> done: review the points above before committing" >&2
 exit $status

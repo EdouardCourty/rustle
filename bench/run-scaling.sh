@@ -45,7 +45,11 @@ fi
 total=$(awk -F',' '{ n=0; for (i=1;i<=NF;i++) { split($i,a,"-");
     n += (a[2]==""?1:a[2]-a[1]+1) } print n }' \
     <<<"$(cat /sys/fs/cgroup/cpuset.cpus.effective 2>/dev/null \
-        || grep Cpus_allowed_list /proc/self/status | awk '{print $2}')")
+        || grep Cpus_allowed_list /proc/self/status 2>/dev/null | awk '{print $2}' \
+        || true)")
+# macOS: the CPUs of Docker's Linux VM
+[[ "$total" -ge 1 ]] 2>/dev/null && [[ -n "$(cat /sys/fs/cgroup/cpuset.cpus.effective 2>/dev/null)" ]] \
+    || total=$(docker info --format '{{.NCPU}}')
 index="results/scaling-$(date +%Y%m%d-%H%M%S).txt"
 mkdir -p results
 echo "# scaling proxies=[$PROXIES] ncpus=[$NCPUS] auth=$AUTH tls=${PROXY_TLS:-0} h2=${PROXY_H2:-0} seed=$BENCH_SEED cpus=$total" | tee "$index"

@@ -9,6 +9,16 @@ campaign-table.py."""
 import os, sys
 from xml.sax.saxutils import escape
 
+ONLY = None
+if "--only" in sys.argv:  # --only plain-flood.svg,plain-ram.svg
+    k = sys.argv.index("--only")
+    ONLY = set(sys.argv[k + 1].split(","))
+    del sys.argv[k:k + 2]
+EXCEPT = set()
+if "--except" in sys.argv:  # every chart but these
+    k = sys.argv.index("--except")
+    EXCEPT = set(sys.argv[k + 1].split(","))
+    del sys.argv[k:k + 2]
 idx = sys.argv[1]
 out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "docs", "benchmarks")
@@ -32,6 +42,8 @@ CSS = """
 
 def chart(fname, title, sub, items, fmt, lower_better=False):
     """items: [(proxy, value)]; missing values dropped. Best first."""
+    if (ONLY is not None and fname not in ONLY) or fname in EXCEPT:
+        return
     items = sorted([i for i in items if i[1] == i[1]], key=lambda i: i[1], reverse=not lower_better)
     if not items:
         return

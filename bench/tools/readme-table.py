@@ -13,6 +13,11 @@ import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from benchlib import load_index  # noqa: E402
 
+flood_from = None
+if "--flood-from" in sys.argv:
+    k = sys.argv.index("--flood-from")
+    flood_from = sys.argv[k + 1]
+    del sys.argv[k:k + 2]
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 write = None
 if "--write" in sys.argv:
@@ -50,6 +55,7 @@ WS_ROWS = [
 
 allt = load_index(args[0])
 plain = allt.get("plain", {})
+flood = load_index(flood_from).get("plain", {}) if flood_from else None
 ws = load_index(args[1]).get("plain", {}) if len(args) > 1 else {}
 procs = [p for p in ORDER if any(p in v for v in allt.values()) or p in ws]
 if "rustle" not in procs:
@@ -72,6 +78,8 @@ tls_rows = [(l, t, k, h, f, tr) for (l, t, k, h, f, tr) in TLS_ROWS if allt.get(
 all_rows = [(l, t, k, h, f, "plain") for (l, t, k, h, f) in ROWS] + tls_rows + [(l, t, k, h, f, "ws") for (l, t, k, h, f) in (WS_ROWS if ws else [])]
 for label, test, key, higher, fmt, tr in all_rows:
     src = ws if tr == "ws" else allt.get(tr, {})
+    if test == "flood" and flood is not None:
+        src, label = flood, label + " (single host, loopback)"
     vals = cell_values(src, test, key)
     present = [v for v in vals.values() if v is not None]
     if not present:

@@ -11,7 +11,14 @@
 if [ -z "${_BENCH_ENV_LOADED:-}" ]; then
     _BENCH_ENV_LOADED=1
     ALL_CPUS=$(cat /sys/fs/cgroup/cpuset.cpus.effective 2>/dev/null \
-        || grep Cpus_allowed_list /proc/self/status | awk '{print $2}')
+        || grep Cpus_allowed_list /proc/self/status 2>/dev/null | awk '{print $2}') || true
+    # macOS (Docker Desktop): the containers run in a Linux VM whose CPUs are
+    # the ones to pin; the host has no cgroup or /proc to read.
+    if [ -z "$ALL_CPUS" ]; then
+        _ncpu=$(docker info --format '{{.NCPU}}' 2>/dev/null || true)
+        [ -n "$_ncpu" ] && [ "$_ncpu" -ge 2 ] 2>/dev/null && ALL_CPUS="0-$((_ncpu - 1))"
+    fi
+    [ -n "$ALL_CPUS" ] || { echo "env.sh: cannot determine the CPUs (need Linux, or Docker running)" >&2; return 1 2>/dev/null || exit 1; }
     # "0-2,5" -> "0 1 2 5"
     _expand() { awk -F',' '{ for (i=1;i<=NF;i++) { split($i,a,"-"); e=(a[2]==""?a[1]:a[2]);
         for (c=a[1];c<=e;c++) printf "%s ", c } }' <<<"$1"; }

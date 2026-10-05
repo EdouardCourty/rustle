@@ -37,19 +37,27 @@ run() { # <proxy> <mode> [ENV=...]
         | grep -a '^==> results in' | sed "s/^==> results in /$p $mode /" >> "$index"
 }
 
-for p in $PROXIES; do run "$p" plain PROXY_TLS=0 PROXY_H2=0; done
-for p in $PROXIES; do
-    grep -q '^# bench-ports:.*tls=' "dut/$p/Dockerfile" && run "$p" tls PROXY_TLS=1
-done
+# MODES="plain tls tlsfull h2" by default; e.g. MODES=plain for a tunnel-only run.
+MODES="${MODES:-plain tls tlsfull h2}"
+want() { [[ " $MODES " == *" $1 "* ]]; }
+
+if want plain; then
+    for p in $PROXIES; do run "$p" plain PROXY_TLS=0 PROXY_H2=0; done
+fi
+if want tls; then
+    for p in $PROXIES; do
+        grep -q '^# bench-ports:.*tls=' "dut/$p/Dockerfile" && run "$p" tls PROXY_TLS=1
+    done
+fi
 # Same short TLS connections without session resumption (a client with no
 # session cache pays the full handshake, certificate signature included).
-if [[ "${MATRIX:-}" != ws ]]; then
+if want tlsfull && [[ "${MATRIX:-}" != ws ]]; then
     for p in $PROXIES; do
         grep -q '^# bench-ports:.*tls=' "dut/$p/Dockerfile" \
             && run "$p" tlsfull PROXY_TLS=1 TLS_RESUME=0 BENCH_ONLY=http-1kb-short
     done
 fi
-if [[ "${MATRIX:-}" != ws ]]; then
+if want h2 && [[ "${MATRIX:-}" != ws ]]; then
     for p in $PROXIES; do
         grep -q '^# bench-ports:.*h2=' "dut/$p/Dockerfile" && run "$p" h2 PROXY_H2=1
     done

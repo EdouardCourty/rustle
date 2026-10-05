@@ -64,6 +64,8 @@ bench/
   matrix.sh                                workload list + seeded shuffle, sourced by run-bench.sh and run-remote.sh; `MATRIX=ws` = WebSocket workloads
   run-remote.sh <proxy> <on|off>           same matrix on three machines (generator / proxy / origin+sink over SSH, host network); see REMOTE.md. run-scaling.sh REMOTE=1 = scaling curve on it
   FAIRNESS.md                              competitor versions, settings and the A/B behind each one (read before touching dut/*)
+  RUNBOOK.md                               the final-benchmark procedure, step by step (phase A: three machines, phase B: tunnels on the Mac); start here
+  preflight.sh, remote/                    bootstrap.sh (prepare a machine), probe.sh + preflight.sh (compare the three machines, measure links, results/preflight-<ts>.txt), apply-proxy-host.sh (APPLY=1: NIC interrupts and hyperthread siblings off the proxy cores)
   REMOTE.md                                three-machine setup: sizing, sysctls, validity checks (`gen_saturated`)
   tools/charts.py                          SVG charts for the README from a campaign index → docs/benchmarks/ (`make charts`)
   RESULTS.md                               published summary and measurement history

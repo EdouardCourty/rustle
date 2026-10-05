@@ -20,7 +20,7 @@
 #   PROXY_CPUS                    REQUIRED: cpuset of the proxy container (0 = one core, 0-3 = four);
 #                                 WORKERS must equal the number of cores (same cores for every proxy)
 #   WORKERS                       shards of the proxy (default 1; rustle, squid)
-#   GEN_THREADS UP_THREADS SINK_THREADS   harness threads (default: 4 / 4 / 4)
+#   GEN_THREADS UP_THREADS SINK_THREADS   harness threads (default: sized from each host's CPUs)
 #   REPEAT BENCH_SEED BENCH_ONLY ACCESS_LOG KTLS PROXY_TLS PROXY_H2   as run-bench.sh
 #   MATRIX=ws                     WebSocket workloads instead of the HTTP/CONNECT matrix
 #   TLS_RESUME=0 (with PROXY_TLS=1) every TLS connection is a full handshake
@@ -41,7 +41,6 @@ REPEAT="${REPEAT:-3}"
 WORKERS="${WORKERS:-1}"
 ACCESS_LOG="${ACCESS_LOG:-off}"
 KTLS="${KTLS:-false}"
-GEN_THREADS="${GEN_THREADS:-4}"; UP_THREADS="${UP_THREADS:-4}"; SINK_THREADS="${SINK_THREADS:-4}"
 PROXY_TLS="${PROXY_TLS:-0}"; PROXY_H2="${PROXY_H2:-0}"
 ncpus=$(awk -F, '{ n=0; for (i=1;i<=NF;i++) { split($i,a,"-"); n += (a[2]==""?1:a[2]-a[1]+1) } print n }' <<<"$PROXY_CPUS")
 [[ "$WORKERS" == "$ncpus" ]] || { echo "WORKERS=$WORKERS but PROXY_CPUS=$PROXY_CPUS is $ncpus core(s): set WORKERS=$ncpus" >&2; exit 2; }
@@ -54,6 +53,17 @@ on() { local host="$1"; shift
     if [[ "$DRY_RUN" == 1 ]]; then echo "[$host] $*" >&2; return 0; fi
     ssh -o BatchMode=yes "$host" "$*"
 }
+
+# Harness threads sized to each machine unless given: the generator gets half the
+# threads of its host (it is the heaviest part of the harness), the origin and the
+# sink a quarter each. The saturation flags in the results say if that was enough.
+threads_for() { # <host> <divisor> <min> <max>
+    local n; n=$(on "$1" nproc 2>/dev/null | tr -dc '0-9'); n=${n:-8}
+    local t=$(( n / $2 )); (( t < $3 )) && t=$3; (( t > $4 )) && t=$4; echo "$t"
+}
+GEN_THREADS="${GEN_THREADS:-$(threads_for "$GEN_HOST" 2 2 24)}"
+UP_THREADS="${UP_THREADS:-$(threads_for "$UP_HOST" 4 2 12)}"
+SINK_THREADS="${SINK_THREADS:-$(threads_for "$UP_HOST" 4 2 12)}"
 
 _port() { sed -n "s/^# bench-ports:.*$1=\([0-9]*\).*/\1/p" "dut/$PROXY/Dockerfile"; }
 proxy_port=8080; GEN_ARGS=(--threads "$GEN_THREADS"); LABEL="$PROXY"
