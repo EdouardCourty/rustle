@@ -33,6 +33,8 @@ mod socket;
 mod tests;
 
 use control::{admin_loop, control_loop};
+#[cfg(target_os = "linux")]
+use cpu::steer_by_cpu;
 use cpu::{allowed_cpus, pin_to_cpu};
 pub use live::Reloaded;
 use live::{reload_from_file, Live};
