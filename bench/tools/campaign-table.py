@@ -21,7 +21,10 @@ for line in open(idx):
         cols.append((f"{parts[0]} {parts[1]}", os.path.join(base, parts[2])))
 
 def load(p):
-    rows = {}
+    """Best valid sweep level of each test (rows are RESULT lines of the same
+    test at several --conns; a level with client errors only counts when no
+    level is clean)."""
+    pts = {}  # name -> [(valid, metric, cell)]
     for line in open(p, errors="replace"):
         if not line.startswith("RESULT median"):
             continue
@@ -32,6 +35,7 @@ def load(p):
         cpu = float(m.group(1)) if m else float("nan")
         mode = kv["mode"]
         err = kv.get("err_kinds", "")
+        at = f" @{kv['conns']}" if "conns" in kv and mode != "hold" else ""
         if mode == "http":
             name = "http-" + kv["url"].rsplit("/", 1)[1] + ("" if kv["keepalive"] == "true" else "-short")
             thr = float(kv["rps"]); per = cpu / (thr * float(kv["elapsed_s"])) * 1e6 if thr else float("nan")
@@ -43,6 +47,7 @@ def load(p):
             per = cpu / (thr * el) * 1e6 if thr else float("nan")
             if size >= 1024:
                 gb = float(kv["mbps"]) * el / 1024
+                thr = float(kv["mbps"])
                 cell = f"{float(kv['mbps']) * 8 / 1000:.1f} Gbps {cpu / gb * 1e3 if gb else float('nan'):.0f}ms/GB"
             else:
                 cell = f"{thr:,.0f} msg/s p99 {float(kv['p99_ms']):.2f}ms {per:.0f}µs"
@@ -51,11 +56,21 @@ def load(p):
             per = cpu / (float(kv["mb"]) / 1024) * 1e3 if float(kv["mb"]) else float("nan")
             cell = f"{thr:.1f} Gbps {per:.0f}ms/GB"
         else:
-            name = "hold-" + kv["conns"]
+            name = "hold-" + kv["conns"]; thr = 0.0
             cell = f"{float(kv['opened']):,.0f}/{kv['conns']} {kv.get('peak_rss_mb','?')}MB"
-        if err:
-            cell += f" ERR[{err}]"
-        rows[name] = cell
+            if float(kv["opened"]) < float(kv["conns"]):
+                err = err or "opened<conns"
+        cell += at
+        if "proxy_unsaturated" in kv:
+            cell += f" UNSAT({kv.get('proxy_util', '?')})"
+        for flag in ("origin_saturated", "sink_saturated"):
+            if flag in kv:
+                cell += f" {flag.upper()}"
+        pts.setdefault(name, []).append((not err, thr, cell + (f" ERR[{err}]" if err else "")))
+    rows = {}
+    for name, v in pts.items():
+        # clean levels first, then the highest throughput
+        rows[name] = max(v, key=lambda t: (t[0], t[1]))[2]
     return rows
 
 order = ["ws-64b", "ws-64kb", "ws-short", "http-1kb", "http-10kb", "http-1mb", "http-10mb", "http-1kb-short", "flood",

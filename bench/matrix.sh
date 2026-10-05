@@ -83,3 +83,51 @@ check_valid() { # <test name> <RESULT line>
         fi
     fi
 }
+
+# --- Concurrency sweep -------------------------------------------------------
+# A fixed connection count measures the harness as much as the proxy: a
+# proxy that needs many connections to fill its core (3proxy: 19 % CPU at 64
+# connections, 99 % at 1024) is understated, one that degrades with
+# concurrency is flattered. Every load test therefore runs at several levels;
+# the table keeps the best valid level of each proxy (tools/campaign-table.py).
+# NO_SWEEP=1 runs only the level written in the workload list.
+sweep_levels() { # <test name>
+    case "$1" in
+        http-1kb|http-10kb|http-1kb-short|ws-64b) echo "64 256 1024" ;;
+        http-1mb) echo "16 64 256" ;;
+        http-10mb) echo "8 32 128" ;;
+        flood-8|ws-64kb) echo "8 32" ;;
+        ws-short) echo "64 256" ;;
+        *) echo "" ;;
+    esac
+}
+
+run_entry() { # <workload command>
+    local entry="$1" name levels lvl
+    name=$(awk '{print $2}' <<<"$entry")
+    levels=$([[ "${NO_SWEEP:-0}" == 1 ]] && echo "" || sweep_levels "$name")
+    if [[ -z "$levels" ]]; then eval "$entry"; return; fi
+    for lvl in $levels; do
+        eval "$(sed -E "s/--conns [0-9]+/--conns $lvl/" <<<"$entry")"
+        sleep "${SWEEP_PAUSE:-5}"   # let TIME_WAIT sockets drain between levels
+    done
+}
+
+# --- Saturation: did this run reach the proxy's limit? ----------------------
+# The proxy is at its limit when its CPU is ~100 % of the cores it was given;
+# below that the harness (too few connections, a slow generator, origin or
+# sink) or a latency-bound proxy set the number. Origin and sink are flagged
+# above 90 % of their threads.
+saturation_fields() { # <RESULT line> <proxy cpu s> <origin cpu s> <sink cpu s> <proxy cores> <origin threads> <sink threads>
+    awk -v line="$1" -v p="$2" -v u="$3" -v k="$4" -v pc="$5" -v ut="$6" -v st="$7" 'BEGIN {
+        if (!match(line, /elapsed_s=[0-9.]+/)) exit
+        el = substr(line, RSTART + 10, RLENGTH - 10) + 0
+        mode = ""; if (match(line, /mode=[a-z]+/)) mode = substr(line, RSTART + 5, RLENGTH - 5)
+        if (el <= 0) exit
+        pu = p / (el * pc); ou = u / (el * ut); su = k / (el * st)
+        printf "proxy_util=%.2f origin_util=%.2f sink_util=%.2f", pu, ou, su
+        if (mode != "hold" && pu < 0.90) printf " proxy_unsaturated=1"
+        if (ou > 0.90) printf " origin_saturated=1"
+        if (su > 0.90) printf " sink_saturated=1"
+    }'
+}

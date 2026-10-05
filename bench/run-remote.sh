@@ -106,6 +106,7 @@ echo "# $PROXY remote auth=$AUTH tls=$PROXY_TLS h2=$PROXY_H2 repeat=$REPEAT work
 cpu_ticks() { on "$PROXY_HOST" "docker exec proxy cat /sys/fs/cgroup/cpu.stat" | awk '/^usage_usec/{printf "%d", $2/10000}'; }
 _sum_status() { on "$PROXY_HOST" "docker exec proxy sh -c 'cat /proc/[0-9]*/status 2>/dev/null'" \
     | awk -v k="$1:" '$1=="Name:"{n=$2} $1==k && n!="sh" && n!="cat"{s+=$2} END{printf "%.1f", s/1024}'; }
+sink_ticks() { on "$UP_HOST" "docker exec sink sh -c 'cat /proc/[0-9]*/stat 2>/dev/null | awk \"{s+=\\\$14+\\\$15} END{print s+0}\"'" ; }
 up_ticks() { on "$UP_HOST" "docker exec upstream sh -c 'cat /proc/[0-9]*/stat 2>/dev/null | awk \"{s+=\\\$14+\\\$15} END{print s+0}\"'" ; }
 # The proxy host's TCP counters (host network: the whole machine).
 tcp_counters() {
@@ -135,16 +136,17 @@ run_test() {
     echo; echo "### $name"
     start_proxy; sleep 1   # fresh state + fresh CPU counters
     gen --warmup-only "${GEN_ARGS[@]}" "$@" >/dev/null 2>&1 || true
-    local tick0 tick1 up0 up1 tcp0 tcp1 median
-    tick0=$(cpu_ticks); up0=$(up_ticks); tcp0=$(tcp_counters)
+    local tick0 tick1 up0 up1 sk0 sk1 tcp0 tcp1 median
+    tick0=$(cpu_ticks); up0=$(up_ticks); sk0=$(sink_ticks); tcp0=$(tcp_counters)
     gen --repeat "$REPEAT" --no-warmup "${GEN_ARGS[@]}" "$@" | tee /dev/stderr | grep '^RESULT median' > "$out/.median.txt" || true
-    tick1=$(cpu_ticks); up1=$(up_ticks); tcp1=$(tcp_counters)
+    tick1=$(cpu_ticks); up1=$(up_ticks); sk1=$(sink_ticks); tcp1=$(tcp_counters)
     median=$(cat "$out/.median.txt")
     if [[ -z "$median" ]]; then echo "!! no RESULT median line for $name" | tee -a "$out/results.txt"; return; fi
-    local cpu up_cpu
+    local cpu up_cpu sink_cpu
+    sink_cpu=$(awk -v a="$sk1" -v b="$sk0" -v n="$REPEAT" 'BEGIN{printf "%.2f", (a-b)/100/n}')
     cpu=$(awk -v a="$tick1" -v b="$tick0" -v n="$REPEAT" 'BEGIN{printf "%.3f", (a-b)/100/n}')
     up_cpu=$(awk -v a="$up1" -v b="$up0" -v n="$REPEAT" 'BEGIN{printf "%.2f", (a-b)/100/n}')
-    local line="$median cpu_s_per_run=$cpu up_cpu_s_per_run=$up_cpu rss_mb=$(_sum_status VmRSS) peak_rss_mb=$(_sum_status VmHWM) $(tcp_delta "$tcp0" "$tcp1" "$REPEAT") $(check_generator "$median")"
+    local line="$median cpu_s_per_run=$cpu up_cpu_s_per_run=$up_cpu rss_mb=$(_sum_status VmRSS) peak_rss_mb=$(_sum_status VmHWM) $(tcp_delta "$tcp0" "$tcp1" "$REPEAT") $(saturation_fields "$median" "$cpu" "$up_cpu" "$sink_cpu" "$ncpus" "$UP_THREADS" "$SINK_THREADS") $(check_generator "$median")"
     echo "$line" | tee -a "$out/results.txt"
     check_valid "$name" "$line"
 }
@@ -164,7 +166,7 @@ gen --repeat 1 --no-warmup "${GEN_ARGS[@]}" http "http://$UP_HTTP/1mb" --conns 1
 gen --repeat 1 --no-warmup "${GEN_ARGS[@]}" flood "$UP_SINK" --conns 8 --duration 3 >/dev/null 2>&1 || true
 
 matrix_select_and_shuffle
-for entry in "${shuffled[@]}"; do eval "$entry"; done
+for entry in "${shuffled[@]}"; do run_entry "$entry"; done
 
 echo; echo "==> results in $out/results.txt"
 [[ "${INVALID:-0}" == 1 ]] && { echo "!! this run is INVALID: see the INVALID lines in results.txt" >&2; exit 3; }

@@ -19,29 +19,39 @@ NAMES = {"myproxy": "rustle", "rustle": "rustle"}
 
 
 def load(path):
-    rows = {}
+    """Best valid sweep level of each test (see campaign-table.py)."""
+    best = {}  # name -> (valid, metric, row)
     for line in open(path, errors="replace"):
         if not line.startswith("RESULT median"):
             continue
         kv = dict(re.findall(r"(\w+)=(\S*)", line))
         m = re.search(r" (?<!gen_)(?<!up_)cpu_s_per_run=([0-9.]+)", line)
         cpu = float(m.group(1)) if m else float("nan")
+        valid = not kv.get("err_kinds")
         if kv["mode"] == "http":
             name = "http-" + kv["url"].rsplit("/", 1)[1] + ("" if kv["keepalive"] == "true" else "-short")
             rps = float(kv["rps"])
-            rows[name] = {"rps": rps, "us": cpu / (rps * float(kv["elapsed_s"])) * 1e6}
+            row, metric = {"rps": rps, "us": cpu / (rps * float(kv["elapsed_s"])) * 1e6}, rps
         elif kv["mode"] == "ws":
             size, el = int(kv["size"]), float(kv["elapsed_s"])
             name = "ws-short" if kv["short"] == "true" else "ws-" + (f"{size}b" if size < 1024 else f"{size // 1024}kb")
             rps = float(kv["rps"])
-            rows[name] = {"rps": rps, "us": cpu / (rps * el) * 1e6 if rps else float("nan"),
-                          "p99": float(kv["p99_ms"]), "gbps": float(kv["mbps"]) * 8 / 1000}
+            row = {"rps": rps, "us": cpu / (rps * el) * 1e6 if rps else float("nan"),
+                   "p99": float(kv["p99_ms"]), "gbps": float(kv["mbps"]) * 8 / 1000}
+            metric = row["gbps"] if size >= 1024 else rps
         elif kv["mode"] == "flood":
-            rows["flood"] = {"gbps": float(kv["gbps"])}
+            name = "flood"
+            row = {"gbps": float(kv["gbps"])}; metric = row["gbps"]
         else:
-            rows["hold-" + kv["conns"]] = {"opened": float(kv["opened"]), "conns": float(kv["conns"]),
-                                           "mb": float(kv.get("peak_rss_mb", "nan"))}
-    return rows
+            name = "hold-" + kv["conns"]
+            row = {"opened": float(kv["opened"]), "conns": float(kv["conns"]),
+                   "mb": float(kv.get("peak_rss_mb", "nan"))}
+            metric = 0.0
+            valid = valid and row["opened"] >= row["conns"]
+        key = (valid, metric)
+        if name not in best or key > best[name][:2]:
+            best[name] = (valid, metric, row)
+    return {n: v[2] for n, v in best.items()}
 
 
 data = {}  # transport -> proxy -> rows

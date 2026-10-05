@@ -117,13 +117,21 @@ up_ticks() {
         'cat /proc/[0-9]*/stat 2>/dev/null | awk "{s+=\$14+\$15} END{print s+0}"'
 }
 
+# Same for the sink (flood and hold targets).
+sink_ticks() {
+    docker compose exec -T sink sh -c \
+        'cat /proc/[0-9]*/stat 2>/dev/null | awk "{s+=\$14+\$15} END{print s+0}"'
+}
+# Cores the proxy was given (PROXY_CPU like "0" or "0,1,2").
+proxy_cores=$(awk -F, '{ n=0; for (i=1;i<=NF;i++) { split($i,a,"-"); n += (a[2]==""?1:a[2]-a[1]+1) } print n }' <<<"$PROXY_CPU")
+
 run_test() {
     local name="$1"; shift
     echo
     echo "### $name"
     docker compose restart proxy >/dev/null  # fresh state + fresh CPU counters
     sleep 0.5
-    local tick0 tick1 median cpu_s_per_run up0 up1 up_cpu_s_per_run tcp0 tcp1
+    local tick0 tick1 median cpu_s_per_run up0 up1 up_cpu_s_per_run sk0 sk1 sink_cpu_s_per_run tcp0 tcp1
     # Warmup in its own generator run, before the counters are sampled:
     # the proxy's CPU then covers the measured runs only (it used to
     # include the warmup, amortized over REPEAT: ~+6 % on every figure).
@@ -131,12 +139,14 @@ run_test() {
         --warmup-only "${GEN_ARGS[@]}" "$@" >/dev/null 2>&1 || true
     tick0=$(cpu_ticks)
     up0=$(up_ticks)
+    sk0=$(sink_ticks)
     tcp0=$(tcp_counters)
     docker compose --profile generator run --rm -T generator \
         --repeat "$REPEAT" --no-warmup "${GEN_ARGS[@]}" "$@" | tee /dev/stderr | grep '^RESULT median' > "$out/.median.txt" \
         || true  # no RESULT (generator/proxy died): reported below, the matrix goes on
     tick1=$(cpu_ticks)
     up1=$(up_ticks)
+    sk1=$(sink_ticks)
     tcp1=$(tcp_counters)
     median=$(cat "$out/.median.txt")
     if [ -z "$median" ]; then
@@ -148,7 +158,8 @@ run_test() {
         'BEGIN{printf "%.3f", (a-b)/100/n}')
     up_cpu_s_per_run=$(awk -v a="$up1" -v b="$up0" -v n="$REPEAT" \
         'BEGIN{printf "%.2f", (a-b)/100/n}')
-    line="$median cpu_s_per_run=$cpu_s_per_run up_cpu_s_per_run=$up_cpu_s_per_run rss_mb=$(rss_mb) peak_rss_mb=$(peak_rss_mb) $(tcp_delta "$tcp0" "$tcp1" "$REPEAT")"
+    sink_cpu_s_per_run=$(awk -v a="$sk1" -v b="$sk0" -v n="$REPEAT" 'BEGIN{printf "%.2f", (a-b)/100/n}')
+    line="$median cpu_s_per_run=$cpu_s_per_run up_cpu_s_per_run=$up_cpu_s_per_run rss_mb=$(rss_mb) peak_rss_mb=$(peak_rss_mb) $(tcp_delta "$tcp0" "$tcp1" "$REPEAT") $(saturation_fields "$median" "$cpu_s_per_run" "$up_cpu_s_per_run" "$sink_cpu_s_per_run" "$proxy_cores" "$UP_THREADS" "$SINK_THREADS")"
     echo "$line" | tee -a "$out/results.txt"
     check_valid "$name" "$line"
 }
@@ -209,7 +220,7 @@ docker compose --profile generator run --rm -T generator --repeat 1 --no-warmup 
 matrix_select_and_shuffle
 
 for entry in "${shuffled[@]}"; do
-    eval "$entry"
+    run_entry "$entry"
 done
 
 echo

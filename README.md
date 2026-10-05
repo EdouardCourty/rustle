@@ -35,7 +35,7 @@ Table of Contents
 Benchmarks
 ----------
 
-rustle against 3proxy, Squid, gost and Tinyproxy, each pinned to **one core** with authentication on, in Docker, every competitor on its latest stable release with the tuning its own documentation recommends ([versions, settings and the A/B behind each one](bench/FAIRNESS.md)). Load generator, origin and sink run on the other core. Fixed-seed shuffled test order, median of 3 runs, no error in any test.
+rustle against 3proxy, Squid, gost and Tinyproxy, each pinned to **one core** with authentication on, in Docker, every competitor on its latest stable release with the tuning its own documentation recommends, at the connection count where it performs best ([versions, settings and the A/B behind each one](bench/FAIRNESS.md)). Load generator, origin and sink run on the other core. Fixed-seed shuffled test order, median of 3 runs, no error in any test.
 
 ![1 KB requests](docs/benchmarks/plain-1kb.svg)
 ![1 MB requests](docs/benchmarks/plain-1mb.svg)

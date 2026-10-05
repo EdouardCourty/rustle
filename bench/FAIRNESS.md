@@ -72,6 +72,9 @@ Upstream connections opened per proxied request (TCP `ActiveOpens` of the proxy'
 
 ## Run rules (enforced by the scripts)
 
+* **Every proxy at its own best concurrency.** Each load test runs at several connection counts (`sweep_levels` in `matrix.sh`: 64/256/1024 for small objects, 16/64/256 for 1 MB, 8/32/128 for 10 MB, 8/32 for tunnels) and the published figure is the best level without client errors. A fixed count understated 3proxy 5.8× (19 % CPU at 64 connections, 99 % at 1024) while proxies that degrade with concurrency would have been flattered. `NO_SWEEP=1` disables it.
+* **Saturation is measured, not assumed.** Every result carries `proxy_util` (proxy CPU / cores given), `origin_util` and `sink_util`; `proxy_unsaturated=1` (below 90 % at the level shown) or `origin_saturated` / `sink_saturated` (above 90 %) mean the number is limited by the harness or by a latency-bound proxy, not by the CPU of the proxy. A published best level must not carry those flags.
+
 * **Same cores for everybody.** `run-remote.sh` refuses to start without `PROXY_CPUS` (0 = one core, 0-3 = four) and requires `WORKERS` to equal that core count, so a 1-core proxy is never compared with a thread-per-connection one using the whole machine.
 * **A run is invalid, and the script exits non-zero, when** any client-side error kind appears (`err_kinds` not empty), a hold test opens fewer tunnels than asked (a kernel or harness limit, never a proxy result), or the generator saturates. The generator also checks each response body against the exact size of the object it asked for.
 * **Thread-per-connection proxies** get `vm.max_map_count`, `pid_max`, `threads-max` raised and an unlimited container pids limit, the same for every proxy, so their tunnel walls are the proxy's and not the kernel's default.
@@ -79,7 +82,7 @@ Upstream connections opened per proxied request (TCP `ActiveOpens` of the proxy'
 
 ## Known limits of this benchmark (stated, not hidden)
 
-* Latency is closed-loop at fixed concurrency (no open-loop rate); CPU per request is measured at saturation, not at an equal offered load.
+* Latency is closed-loop at each concurrency level (no open-loop rate); CPU per request is measured at saturation, not at an equal offered load.
 * Three repeats, medians, noise about ±3 to 5 %; no confidence intervals.
 * DNS is resolved once by the generator (names are never looked up per request), IPv6, many origins, large header sets, uploads and SOCKS5 are not part of the matrix (they are covered functionally by `e2e/`).
 * TLS: rustle prefers AES-128-GCM and issues session tickets; the other proxies' negotiated cipher and resumption are not logged yet.
