@@ -8,6 +8,8 @@ A fast, single-binary forward proxy in Rust: HTTP/1.1, HTTPS (CONNECT), HTTPS pr
 Table of Contents
 -----------------
 
+*   [Benchmarks](#benchmarks)
+*   [Under the Hood](#under-the-hood)
 *   [Features](#features)
 *   [Requirements](#requirements)
 *   [Installation](#installation)
@@ -24,12 +26,60 @@ Table of Contents
     *   [`[log]`](#log)
     *   [Certificate for the HTTPS port](#certificate-for-the-https-port)
 *   [Reloading](#reloading)
-*   [Benchmarks](#benchmarks)
 *   [Limitations](#limitations)
 *   [Contributing](#contributing)
 *   [License](#license)
 
 * * *
+
+Benchmarks
+----------
+
+rustle against 3proxy, Squid, gost and Tinyproxy, each pinned to **one core** with authentication on, in Docker, every competitor on its latest stable release with the tuning its own documentation recommends ([versions, settings and the A/B behind each one](bench/FAIRNESS.md)). Load generator, origin and sink run on the other core. Fixed-seed shuffled test order, median of 3 runs, no error in any test.
+
+![1 KB requests](docs/benchmarks/plain-1kb.svg)
+![1 MB requests](docs/benchmarks/plain-1mb.svg)
+![CPU per request](docs/benchmarks/plain-cpu.svg)
+![25,000 tunnels](docs/benchmarks/plain-ram.svg)
+![HTTPS proxy](docs/benchmarks/tls-1kb.svg)
+![HTTP/2 proxy](docs/benchmarks/h2-1kb.svg)
+
+| 1 core | rustle | 3proxy | Squid | gost | Tinyproxy |
+|---|---|---|---|---|---|
+| 1 KB, req/s | **77,959** | 1,504¹ | 27,558 | 4,610 | 15,509 |
+| 1 MB, req/s | **6,731** | 2,292 | 910 | 2,147 | 537 |
+| 10 MB, req/s | **370** | 342 | 81 | 285 | 49 |
+| Tunnels, Gbit/s | **48.4** | 42.9 | 35.4 | 43.4 | 4.6 |
+| 25,000 tunnels, RAM | **80 MB** | 785 MB | 1.5 GB | 3.7 GB | 468 MB |
+
+¹ 3proxy measured without its `TCP_NODELAY` option (Nagle + delayed ACK, ~40 ms per request): that figure predates the revised configs and is replaced by the next campaign (see [`bench/FAIRNESS.md`](bench/FAIRNESS.md)).
+
+_Campaign of 2026-10-05, before the competitors' configurations were revised: a new campaign is pending and will replace these figures._
+
+Reading the numbers:
+
+*   Small requests and memory are where rustle is far ahead (2.8× the next proxy at 1 KB, 5× less RAM than the next one at 25,000 tunnels).
+*   On bulk transfers (10 MB, tunnels) the kernel TCP stack dominates and every serious proxy converges: rustle leads, but by 10 to 15 %. 3proxy spends fewer CPU ms per GB on tunnels.
+*   HTTP/2 tunnels: gost is slightly ahead on raw throughput (within noise).
+*   The load generator is the bottleneck on a shared 2-core host, so absolute numbers are a floor. Multi-core results need a dedicated three-machine setup (in progress).
+
+Full tables, TLS and HTTP/2 matrices, and the measurement history: [`bench/RESULTS.md`](bench/RESULTS.md). To reproduce (Docker, Linux):
+
+```sh
+make bench P=rustle A=on      # one proxy (rustle|3proxy|squid|gost|tinyproxy)
+make bench-all                # 5 proxies × plain / TLS / h2
+make bench-ws P=rustle        # WebSocket matrix
+make charts                   # regenerate the SVGs above from the latest campaign
+```
+
+Under the Hood
+--------------
+
+*   **Shared-nothing, one core = one shard.** `workers` threads, each with its own single-threaded Tokio runtime, its own `SO_REUSEPORT` listener and its own upstream pool. A connection never leaves its core: no locks on the hot path, no work stealing, no cross-core wakeups (measured −11 % CPU per request on short connections against a multi-threaded runtime).
+*   **Zero-copy relay.** Tunnels and large bodies move through `splice()` and pooled 1 MB pipes, so payload bytes never enter user space; small flows start with an adaptive copy and only switch when the flow is sustained.
+*   **Allocation-free hot path.** Request heads are parsed in place (spans into the read buffer), scratch buffers live as long as the connection, and a keep-alive request costs about two `recv` and two `send` syscalls.
+*   **Socket options set once.** `TCP_NODELAY`, `TCP_DEFER_ACCEPT` and 1 MB buffers are applied on the listener and inherited by every accepted socket: no per-request `setsockopt`.
+*   **Optional extras.** `pin_cores` steers each connection to the shard of the CPU that received its SYN (`SO_ATTACH_REUSEPORT_CBPF`); `ktls` hands TLS sessions to the kernel after the handshake (+13 % on tunnels, −30 % memory, at a cost on large HTTP bodies, hence off by default).
 
 Features
 --------
@@ -208,44 +258,6 @@ The file is validated first; if anything is wrong (syntax, a CIDR, a missing cer
 *   **Applied to new connections**: `api_keys`, `allow_clients`, the ban settings, `[filter]`, `[limits]`, `[timeouts]`, `[dns]`, `http.max_*_body_bytes`, `http.allow_websocket`, `tls.cert` / `key` / `http2` / `handshake_timeout`. A renewed certificate is picked up without dropping anyone.
 *   **Restart required**: `listen` addresses, `workers`, `pin_cores`, `socket_buffer_bytes`, `tls.listen` / `ktls`, `socks5.listen`, `admin_listen`, the upstream pool and `[log]`. `rustle reload` lists the ones you changed and keeps their running value.
 *   Connections already open keep the config they were accepted under until they close, so a revoked key stays valid on an existing keep-alive connection until it ends (at most `timeouts.idle` once idle).
-
-Benchmarks
-----------
-
-rustle against 3proxy, Squid, gost and Tinyproxy, each pinned to **one core** with authentication on, in Docker. Load generator, origin and sink run on the other core. Fixed-seed shuffled test order, median of 3 runs, no error in any test.
-
-![1 KB requests](docs/benchmarks/plain-1kb.svg)
-![1 MB requests](docs/benchmarks/plain-1mb.svg)
-![CPU per request](docs/benchmarks/plain-cpu.svg)
-![25,000 tunnels](docs/benchmarks/plain-ram.svg)
-![HTTPS proxy](docs/benchmarks/tls-1kb.svg)
-![HTTP/2 proxy](docs/benchmarks/h2-1kb.svg)
-
-| 1 core | rustle | 3proxy | Squid | gost | Tinyproxy |
-|---|---|---|---|---|---|
-| 1 KB, req/s | **77,959** | 1,504¹ | 27,558 | 4,610 | 15,509 |
-| 1 MB, req/s | **6,731** | 2,292 | 910 | 2,147 | 537 |
-| 10 MB, req/s | **370** | 342 | 81 | 285 | 49 |
-| Tunnels, Gbit/s | **48.4** | 42.9 | 35.4 | 43.4 | 4.6 |
-| 25,000 tunnels, RAM | **80 MB** | 785 MB | 1.5 GB | 3.7 GB | 468 MB |
-
-¹ 3proxy is held back at 1 KB by TCP delayed ACKs (40 ms), not by its code: do not read this cell as a CPU comparison. Its CPU cost per request is shown in the chart above.
-
-Reading the numbers:
-
-*   Small requests and memory are where rustle is far ahead (2.8× the next proxy at 1 KB, 5× less RAM than the next one at 25,000 tunnels).
-*   On bulk transfers (10 MB, tunnels) the kernel TCP stack dominates and every serious proxy converges: rustle leads, but by 10 to 15 %. 3proxy spends fewer CPU ms per GB on tunnels.
-*   HTTP/2 tunnels: gost is slightly ahead on raw throughput (within noise).
-*   The load generator is the bottleneck on a shared 2-core host, so absolute numbers are a floor. Multi-core results need a dedicated three-machine setup (in progress).
-
-Full tables, TLS and HTTP/2 matrices, and the measurement history: [`bench/RESULTS.md`](bench/RESULTS.md). To reproduce (Docker, Linux):
-
-```sh
-make bench P=rustle A=on      # one proxy (rustle|3proxy|squid|gost|tinyproxy)
-make bench-all                # 5 proxies × plain / TLS / h2
-make bench-ws P=rustle        # WebSocket matrix
-make charts                   # regenerate the SVGs above from the latest campaign
-```
 
 Limitations
 -----------
