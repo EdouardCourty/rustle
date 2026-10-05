@@ -154,6 +154,7 @@ Optional features: `jemalloc`, `mimalloc` (mutually exclusive; default = glibc m
 ## Conventions
 
 - Commits: see [Commits](#commits). Every performance claim is gated by a fixed-seed matrix.
+- Test layout (Rust standard): unit tests stay inline at the bottom of the file (`#[cfg(test)] mod tests { use super::*; … }`) so they see private items. When that block passes ~300 lines, move it to `<module>/tests.rs` (or `<module>/tests/` split by feature, shared helpers in `tests/mod.rs`) and keep `#[cfg(test)] mod tests;` in the parent, as `server/` does. No crate-level `tests/` directory (the crate is a binary, no `[lib]`): black-box tests live in `e2e/`.
 - Tests: `make check` (quick e2e included) before every commit, full `make e2e` before every release and after any proxy change (relay, pipeline, policy, TLS). New feature = new scenario in `e2e/src/suites/<feature>.rs` (and in the matrix when it depends on a config).
 - No internal milestone or review labels in code comments: history belongs in commits and `bench/RESULTS.md`.
 - `unsafe` confined to libc/fd (a `SAFETY` comment is expected on every new block): `relay/splice.rs` (pipes, splice, dup), `server/mod.rs` (setsockopt, CPU affinity, malloc_trim), `ktls_offload.rs` (TCP_ULP, SOL_TLS, sendmsg close_notify), `stream.rs` (ReadAhead: set_len after the read), `http/request.rs::span_of` (`offset_from`).
