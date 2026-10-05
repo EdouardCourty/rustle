@@ -45,6 +45,27 @@ for idx in sys.argv[1:]:
             elif r["harness_sat"]:
                 print(f"[{os.path.basename(idx)}] {proxy} ({tr}) {test} {at}: origin or sink saturated: add harness threads")
                 problems += 1
+# TLS parity: every proxy on the same version and cipher, and resumption
+# actually on ("tls") or off ("tlsfull").
+for idx in sys.argv[1:]:
+    data = load_index(idx)
+    for tr in ("tls", "tlsfull"):
+        seen = {}
+        for proxy, rows in data.get(tr, {}).items():
+            for test, r in rows.items():
+                if r.get("tls_negotiated"):
+                    seen.setdefault(r["tls_negotiated"], set()).add(proxy)
+                rs = r.get("tls_resumed")
+                if rs is not None and tr == "tls" and test.endswith("-short") and rs < 0.5:
+                    print(f"[{os.path.basename(idx)}] {proxy} (tls) {test}: only {rs:.0%} of the connections were resumed (does it issue session tickets?)")
+                    problems += 1
+                if rs is not None and tr == "tlsfull" and rs > 0.05:
+                    print(f"[{os.path.basename(idx)}] {proxy} (tlsfull) {test}: {rs:.0%} resumed, expected none")
+                    problems += 1
+        if len(seen) > 1:
+            detail = "; ".join(f"{k}: {', '.join(sorted(v))}" for k, v in sorted(seen.items()))
+            print(f"[{os.path.basename(idx)}] {tr}: the proxies did not negotiate the same TLS version/cipher ({detail}): align them or say so next to the numbers")
+            problems += 1
 if problems:
     print(f"\n{problems} point(s) need attention before publishing.")
     sys.exit(1)

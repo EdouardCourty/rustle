@@ -52,6 +52,8 @@ elif [[ "$PROXY_TLS" == 1 ]]; then
     [[ -n "$p" ]] || { echo "$PROXY has no HTTPS proxy listener (PROXY_TLS=1)" >&2; exit 2; }
     GEN_ARGS+=(--proxy "proxy:$p" --proxy-tls)
     LABEL="$PROXY-tls"
+    # TLS_RESUME=0: no session resumption, every connection is a full handshake.
+    if [[ "${TLS_RESUME:-1}" == 0 ]]; then GEN_ARGS+=(--no-resume); LABEL="$PROXY-tlsfull"; fi
 fi
 # MATRIX=ws: WebSocket workloads (matrix.sh); results land under <label>-ws.
 if [[ "${MATRIX:-}" == ws ]]; then

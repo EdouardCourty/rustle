@@ -80,12 +80,22 @@ Upstream connections opened per proxied request (TCP `ActiveOpens` of the proxy'
 * **Thread-per-connection proxies** get `vm.max_map_count`, `pid_max`, `threads-max` raised and an unlimited container pids limit, the same for every proxy, so their tunnel walls are the proxy's and not the kernel's default.
 * Check `dmesg | grep -i oom` on the proxy host after every hold test.
 
+## TLS: resumed and full handshakes
+
+The short-connection TLS test runs twice: with session resumption (a client that remembers its tickets) and without (`TLS_RESUME=0`, every connection a full handshake with the certificate signature, the cost a new client pays; campaign mode `tlsfull`). The client's ticket store never runs dry: rustls' default keeps 8 tickets per server, which at 64 parallel connections made the resumed share depend on how fast each proxy was (rustle 55 %, gost 51 %, Squid 99 %), so the store is replaced by one that holds every ticket in flight (resumed share 100 % for all three). CPU per new connection on the A/B box (1 core, 64 connections):
+
+| Proxy | resumed | full handshake |
+|---|---|---|
+| rustle | 83 µs | 97 µs |
+| Squid 7.7 | 198 µs | 220 µs |
+| gost 3.3.0 | 207 µs | 232 µs |
+
 ## Known limits of this benchmark (stated, not hidden)
 
 * Latency is closed-loop at each concurrency level (no open-loop rate); CPU per request is measured at saturation, not at an equal offered load.
 * Three repeats, medians, noise about ±3 to 5 %; no confidence intervals.
 * DNS is resolved once by the generator (names are never looked up per request), IPv6, many origins, large header sets, uploads and SOCKS5 are not part of the matrix (they are covered functionally by `e2e/`).
-* TLS: rustle prefers AES-128-GCM and issues session tickets; the other proxies' negotiated cipher and resumption are not logged yet.
+* TLS footing is checked, not assumed: the generator offers AES-128-GCM first (as hardware-AES clients do), logs the version/cipher negotiated and the share of resumed handshakes on every TLS result, and `tools/validity.py` flags proxies that differ. Measured on the A/B box: rustle, Squid 7.7 and gost all negotiate TLS 1.3 / AES-128-GCM; with the generator's default order (ring: AES-256 first) Squid negotiated AES-256-GCM, which is why the order is set.
 * The HTTP/2 test opens one connection per client connection and sends sequential requests (no multiplexing); gost's h2 is a dedicated listener, rustle's is ALPN on the TLS port.
 * Proxy CPU is the container cgroup's (user + system); softirq time spent on other vCPUs is not attributed.
 * Flood counts bytes written by the client and measures the upload direction only.

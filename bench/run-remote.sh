@@ -23,6 +23,7 @@
 #   GEN_THREADS UP_THREADS SINK_THREADS   harness threads (default: 4 / 4 / 4)
 #   REPEAT BENCH_SEED BENCH_ONLY ACCESS_LOG KTLS PROXY_TLS PROXY_H2   as run-bench.sh
 #   MATRIX=ws                     WebSocket workloads instead of the HTTP/CONNECT matrix
+#   TLS_RESUME=0 (with PROXY_TLS=1) every TLS connection is a full handshake
 #   SKIP_BUILD=1                  images already built on every host
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -61,6 +62,8 @@ if [[ "$PROXY_H2" == 1 ]]; then
     [[ -n "$proxy_port" ]] || { echo "$PROXY has no HTTP/2 proxy listener" >&2; exit 2; }
 elif [[ "$PROXY_TLS" == 1 ]]; then
     proxy_port=$(_port tls); LABEL="$PROXY-tls"; GEN_ARGS+=(--proxy-tls)
+    # TLS_RESUME=0: no session resumption, every connection is a full handshake.
+    if [[ "${TLS_RESUME:-1}" == 0 ]]; then GEN_ARGS+=(--no-resume); LABEL="$PROXY-tlsfull"; fi
     [[ -n "$proxy_port" ]] || { echo "$PROXY has no HTTPS proxy listener" >&2; exit 2; }
 fi
 if [[ "${MATRIX:-}" == ws ]]; then

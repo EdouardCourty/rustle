@@ -38,15 +38,20 @@ ROWS = [
     ("Tunnels, Gbit/s", "flood", "gbps", True, lambda v: f"{v:.1f}"),
     ("25,000 tunnels, RAM", "hold-25000", "mb", False, fmt_ram),
 ]
+TLS_ROWS = [
+    ("HTTPS, new connection, resumed, req/s", "http-1kb-short", "rps", True, lambda v: f"{v:,.0f}", "tls"),
+    ("HTTPS, new connection, full handshake, req/s", "http-1kb-short", "rps", True, lambda v: f"{v:,.0f}", "tlsfull"),
+]
 WS_ROWS = [
     ("WebSocket 64 B, msg/s", "ws-64b", "rps", True, lambda v: f"{v:,.0f}"),
     ("WebSocket 64 KB, Gbit/s", "ws-64kb", "gbps", True, lambda v: f"{v:.1f}"),
     ("WebSocket handshakes/s", "ws-short", "rps", True, lambda v: f"{v:,.0f}"),
 ]
 
-plain = load_index(args[0]).get("plain", {})
+allt = load_index(args[0])
+plain = allt.get("plain", {})
 ws = load_index(args[1]).get("plain", {}) if len(args) > 1 else {}
-procs = [p for p in ORDER if p in plain or p in ws]
+procs = [p for p in ORDER if any(p in v for v in allt.values()) or p in ws]
 if "rustle" not in procs:
     sys.exit("no rustle results in the index")
 
@@ -63,8 +68,10 @@ def cell_values(src, test, key):
 
 
 lines = ["| 1 core | " + " | ".join(LABEL.get(p, p) for p in procs) + " |", "|---|" + "---|" * len(procs)]
-for label, test, key, higher, fmt in ROWS + (WS_ROWS if ws else []):
-    src = ws if test.startswith("ws-") else plain
+tls_rows = [(l, t, k, h, f, tr) for (l, t, k, h, f, tr) in TLS_ROWS if allt.get(tr)]
+all_rows = [(l, t, k, h, f, "plain") for (l, t, k, h, f) in ROWS] + tls_rows + [(l, t, k, h, f, "ws") for (l, t, k, h, f) in (WS_ROWS if ws else [])]
+for label, test, key, higher, fmt, tr in all_rows:
+    src = ws if tr == "ws" else allt.get(tr, {})
     vals = cell_values(src, test, key)
     present = [v for v in vals.values() if v is not None]
     if not present:

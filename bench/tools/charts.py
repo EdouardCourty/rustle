@@ -83,5 +83,9 @@ chart("ws-cpu.svg", "CPU cost per WebSocket message", f"Microseconds of proxy CP
       col("plain", "ws-64b", "us"), lambda v: f"{v:.1f} µs", True)
 chart("ws-64kb-gbps.svg", "WebSocket, 64 KB messages", f"Gbit/s of payload (8 connections, 8 frames in flight), higher is better · {one}",
       col("plain", "ws-64kb", "gbps"), lambda v: f"{v:.1f} Gbit/s")
+chart("tls-short.svg", "HTTPS proxy, a new connection per request", f"Requests per second with TLS session resumption, higher is better · {one}",
+      col("tls", "http-1kb-short", "rps"), rps)
+chart("tls-short-full.svg", "HTTPS proxy, full handshake every time", f"Requests per second without session resumption (certificate signature each time), higher is better · {one}",
+      col("tlsfull", "http-1kb-short", "rps"), rps)
 chart("tls-1kb.svg", "HTTPS proxy (TLS), 1 KB responses", f"Requests per second, higher is better · {one}", col("tls", "http-1kb", "rps"), rps)
 chart("h2-1kb.svg", "HTTP/2 proxy, 1 KB responses", f"Requests per second, higher is better · {one}", col("h2", "http-1kb", "rps"), rps)

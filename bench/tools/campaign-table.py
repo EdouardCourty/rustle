@@ -3,7 +3,7 @@
 
     tools/campaign-table.py results/campaign-<ts>.txt
 
-One table per transport (plain / tls / h2); rows = tests, columns = DUTs.
+One table per transport (plain / tls / tlsfull = TLS without session resumption / h2); rows = tests, columns = DUTs.
 Cell: throughput and proxy CPU per unit (http: µs/req, flood: ms/GB, ws:
 msg/s with p99 and µs/msg, or Gbps and ms/GB for large frames);
 holds: tunnels opened / asked and peak RSS. A missing RESULT (DUT died)
@@ -75,7 +75,7 @@ def load(p):
 
 order = ["ws-64b", "ws-64kb", "ws-short", "http-1kb", "http-10kb", "http-1mb", "http-10mb", "http-1kb-short", "flood",
          "hold-1000", "hold-5000", "hold-10000", "hold-25000"]
-for mode in ["plain", "tls", "h2"]:
+for mode in ["plain", "tls", "tlsfull", "h2"]:
     data = [(c.split()[0], load(p)) for c, p in cols if c.split()[1] == mode and os.path.exists(p)]
     if not data:
         continue

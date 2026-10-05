@@ -21,7 +21,9 @@ def load(path):
         valid = not kv.get("err_kinds")
         info = {"conns_level": kv.get("conns"), "unsat": "proxy_unsaturated" in kv,
                 "harness_sat": "origin_saturated" in kv or "sink_saturated" in kv,
-                "util": kv.get("proxy_util")}
+                "util": kv.get("proxy_util"),
+                "tls_negotiated": kv.get("tls_negotiated"),
+                "tls_resumed": float(kv["tls_resumed"]) if "tls_resumed" in kv else None}
         if kv["mode"] == "http":
             name = "http-" + kv["url"].rsplit("/", 1)[1] + ("" if kv["keepalive"] == "true" else "-short")
             rps = float(kv["rps"])

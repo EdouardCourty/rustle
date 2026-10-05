@@ -71,6 +71,9 @@ struct Cli {
     /// HTTP/2 to the proxy (implies --proxy-tls; ALPN h2).
     #[arg(long)]
     proxy_h2: bool,
+    /// Disable TLS session resumption: every connection is a full handshake.
+    #[arg(long)]
+    no_resume: bool,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -194,9 +197,21 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// ` tls_negotiated=<version>/<suite> tls_resumed=<share>` when the run used TLS
+/// towards the proxy (nothing otherwise).
+fn tls_tag(negotiated: &str, conns: u64, resumed: u64) -> String {
+    if conns == 0 {
+        return String::new();
+    }
+    format!(
+        " tls_negotiated={negotiated} tls_resumed={:.2}",
+        resumed as f64 / conns as f64
+    )
+}
+
 async fn amain(cli: Cli) {
     if cli.proxy_tls || cli.proxy_h2 {
-        connect::enable_proxy_tls(cli.proxy_h2);
+        connect::enable_proxy_tls(cli.proxy_h2, !cli.no_resume);
     }
     // Own RSS (MB): the hold/flood generators spawn tens of thousands of
     // tasks; knowing the harness footprint matters on small boxes (the
@@ -215,12 +230,22 @@ async fn amain(cli: Cli) {
         // Generator CPU over the measured runs only (warmup excluded),
         // attributed per run like the proxy's cpu_s_per_run.
         let gen_ticks0 = cpu_ticks();
+        let _ = connect::tls_stats_take(); // the warmup's handshakes do not count
+        let (mut tls_conns, mut tls_resumed) = (0u64, 0u64);
+        let mut negotiated = String::new();
         let mut runs = Vec::new();
         for k in 1..=cli.repeat {
             let m = modes::run_once(&cli, &cli.cmd).await;
+            let st = connect::tls_stats_take();
+            tls_conns += st.conns;
+            tls_resumed += st.resumed;
+            negotiated = st.negotiated.clone();
             println!(
                 "{}",
-                m.line(&format!("run={k} own_rss_mb={own_rss_start:.1}"))
+                m.line(&format!(
+                    "run={k} own_rss_mb={own_rss_start:.1}{}",
+                    tls_tag(&st.negotiated, st.conns, st.resumed)
+                ))
             );
             runs.push(m);
         }
@@ -234,7 +259,8 @@ async fn amain(cli: Cli) {
             "{}",
             median_metrics(runs).line(&format!(
                 "median own_rss_mb={own_rss_start:.1} own_rss_end={own_rss_end:.1} \
-                 gen_cpu_s_per_run={gen_cpu_per_run:.2}"
+                 gen_cpu_s_per_run={gen_cpu_per_run:.2}{}",
+                tls_tag(&negotiated, tls_conns, tls_resumed)
             ))
         );
     }

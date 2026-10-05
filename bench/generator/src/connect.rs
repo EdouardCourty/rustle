@@ -4,6 +4,7 @@
 //! CONNECT tunnels through it.
 
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::task::{Context, Poll};
 
@@ -21,19 +22,139 @@ static PROXY_H2: OnceLock<()> = OnceLock::new();
 /// HTTP/2. The proxy's certificate is not validated (self-signed bench
 /// certificates); the handshake signatures are, so the crypto cost stays
 /// the real one.
-pub(crate) fn enable_proxy_tls(h2: bool) {
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
+pub(crate) fn enable_proxy_tls(h2: bool, resume: bool) {
+    // AES-128-GCM first, as a browser with AES hardware offers it: servers that
+    // follow the client's order (OpenSSL / Squid) then negotiate the same
+    // suite as rustle and Go (gost), instead of ring's AES-256-first default.
+    let mut provider = rustls::crypto::ring::default_provider();
+    provider.cipher_suites.sort_by_key(|s| match s.suite() {
+        rustls::CipherSuite::TLS13_AES_128_GCM_SHA256
+        | rustls::CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+        | rustls::CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 => 0,
+        _ => 1,
+    });
+    let provider = Arc::new(provider);
     let mut cfg = rustls::ClientConfig::builder_with_provider(provider.clone())
         .with_safe_default_protocol_versions()
         .expect("tls versions")
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(AnyCert(provider)))
         .with_no_client_auth();
+    cfg.resumption = if resume {
+        // rustls' default store keeps 8 tickets per server: at 64 parallel
+        // connections most of them would start without one and do a full
+        // handshake, and the resumed share would depend on how fast each proxy
+        // is. A store that never runs dry makes "resumed" mean resumed.
+        rustls::client::Resumption::store(Arc::new(TicketStore::default()))
+    } else {
+        // Every connection is a full handshake (certificate, signature): the
+        // cost a client without a session cache pays.
+        rustls::client::Resumption::disabled()
+    };
     if h2 {
         cfg.alpn_protocols = vec![b"h2".to_vec()];
         let _ = PROXY_H2.set(());
     }
     let _ = PROXY_TLS.set(tokio_rustls::TlsConnector::from(Arc::new(cfg)));
+}
+
+/// Client session store with room for every ticket in flight (tickets are
+/// single use in TLS 1.3, and each handshake brings several).
+#[derive(Debug, Default)]
+struct TicketStore {
+    kx: std::sync::Mutex<std::collections::HashMap<String, rustls::NamedGroup>>,
+    tls13: std::sync::Mutex<
+        std::collections::HashMap<
+            String,
+            std::collections::VecDeque<rustls::client::Tls13ClientSessionValue>,
+        >,
+    >,
+}
+
+const MAX_TICKETS: usize = 65_536;
+
+impl rustls::client::ClientSessionStore for TicketStore {
+    fn set_kx_hint(&self, name: rustls::pki_types::ServerName<'static>, group: rustls::NamedGroup) {
+        self.kx
+            .lock()
+            .unwrap()
+            .insert(name.to_str().into_owned(), group);
+    }
+    fn kx_hint(&self, name: &rustls::pki_types::ServerName<'_>) -> Option<rustls::NamedGroup> {
+        self.kx.lock().unwrap().get(name.to_str().as_ref()).copied()
+    }
+    fn set_tls12_session(
+        &self,
+        _: rustls::pki_types::ServerName<'static>,
+        _: rustls::client::Tls12ClientSessionValue,
+    ) {
+    }
+    fn tls12_session(
+        &self,
+        _: &rustls::pki_types::ServerName<'_>,
+    ) -> Option<rustls::client::Tls12ClientSessionValue> {
+        None
+    }
+    fn remove_tls12_session(&self, _: &rustls::pki_types::ServerName<'static>) {}
+    fn insert_tls13_ticket(
+        &self,
+        name: rustls::pki_types::ServerName<'static>,
+        value: rustls::client::Tls13ClientSessionValue,
+    ) {
+        let mut m = self.tls13.lock().unwrap();
+        let q = m.entry(name.to_str().into_owned()).or_default();
+        if q.len() >= MAX_TICKETS {
+            q.pop_front();
+        }
+        q.push_back(value);
+    }
+    fn take_tls13_ticket(
+        &self,
+        name: &rustls::pki_types::ServerName<'static>,
+    ) -> Option<rustls::client::Tls13ClientSessionValue> {
+        self.tls13
+            .lock()
+            .unwrap()
+            .get_mut(name.to_str().as_ref())?
+            .pop_back()
+    }
+}
+
+static TLS_CONNS: AtomicU64 = AtomicU64::new(0);
+static TLS_RESUMED: AtomicU64 = AtomicU64::new(0);
+static TLS_NEGOTIATED: OnceLock<String> = OnceLock::new();
+
+/// What the TLS handshakes of a run looked like, to check that every proxy
+/// was compared on the same footing (same version and cipher, resumed or not).
+pub(crate) struct TlsStats {
+    pub(crate) conns: u64,
+    pub(crate) resumed: u64,
+    pub(crate) negotiated: String,
+}
+
+/// Returns and resets the handshake counters.
+pub(crate) fn tls_stats_take() -> TlsStats {
+    TlsStats {
+        conns: TLS_CONNS.swap(0, Ordering::Relaxed),
+        resumed: TLS_RESUMED.swap(0, Ordering::Relaxed),
+        negotiated: TLS_NEGOTIATED.get().cloned().unwrap_or_default(),
+    }
+}
+
+fn note_handshake(conn: &rustls::ClientConnection) {
+    TLS_CONNS.fetch_add(1, Ordering::Relaxed);
+    if matches!(conn.handshake_kind(), Some(rustls::HandshakeKind::Resumed)) {
+        TLS_RESUMED.fetch_add(1, Ordering::Relaxed);
+    }
+    TLS_NEGOTIATED.get_or_init(|| {
+        format!(
+            "{}/{}",
+            conn.protocol_version()
+                .map_or_else(|| "?".to_string(), |v| format!("{v:?}")),
+            conn.negotiated_cipher_suite()
+                .map_or_else(|| "?".to_string(), |s| format!("{:?}", s.suite()))
+        )
+    });
 }
 
 pub(crate) fn h2_enabled() -> bool {
@@ -130,7 +251,9 @@ pub(crate) async fn connect_proxy(proxy: &str) -> std::io::Result<ProxyStream> {
             let host = proxy.rsplit_once(':').map(|(h, _)| h).unwrap_or(proxy);
             let name = rustls::pki_types::ServerName::try_from(host.to_string())
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
-            Ok(ProxyStream::Tls(Box::new(tls.connect(name, s).await?)))
+            let t = tls.connect(name, s).await?;
+            note_handshake(t.get_ref().1);
+            Ok(ProxyStream::Tls(Box::new(t)))
         }
     }
 }
