@@ -44,9 +44,17 @@ const BLOCKING_THREADS_TOTAL: usize = 512;
 /// rmem_max of 208 KB it bounds a 100 ms path to ~33 Mbit/s).
 fn set_socket_buffers(bytes: usize) {
     SOCK_BUF.store(bytes, Relaxed);
-    if bytes == 0 {
-        return;
+    #[cfg(not(target_os = "linux"))]
+    let _ = bytes;
+    #[cfg(target_os = "linux")]
+    if bytes != 0 {
+        warn_if_capped(bytes);
     }
+}
+
+/// `/proc/sys/net/core/{r,w}mem_max` below `bytes`: warn.
+#[cfg(target_os = "linux")]
+fn warn_if_capped(bytes: usize) {
     for sysctl in ["rmem_max", "wmem_max"] {
         let max = std::fs::read_to_string(format!("/proc/sys/net/core/{sysctl}"))
             .ok()
@@ -105,6 +113,7 @@ struct Shared {
     /// HTTPS proxy listener's acceptor (None = plain only).
     tls: Option<tokio_rustls::TlsAcceptor>,
     /// Hand TLS sessions to the kernel after the handshake.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     ktls: bool,
     /// Sessions offloaded to the kernel (stats, tests).
     ktls_sessions: AtomicU64,
@@ -156,7 +165,16 @@ fn bind_group(
     let addr = first.local_addr()?;
     let mut v = vec![first];
     for _ in 1..n {
+        // Linux: one SO_REUSEPORT socket per shard, the kernel balances.
+        // Elsewhere SO_REUSEPORT does not balance (BSD/macOS deliver to a
+        // single socket): the shards share one listening socket instead.
+        #[cfg(target_os = "linux")]
         v.push(bind(addr, true).with_context(|| format!("binding {what} {addr}"))?);
+        #[cfg(not(target_os = "linux"))]
+        v.push(
+            v[0].try_clone()
+                .with_context(|| format!("binding {what} {addr}"))?,
+        );
     }
     Ok((addr, v))
 }
@@ -177,9 +195,9 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
     let n = shard_count(cfg.server.workers);
     let (addr, plain) = bind_group(&cfg.server.listen, n, "listen")?;
     // kTLS: wanted and supported by this kernel (probed once).
-    let ktls = !cfg.tls.listen.is_empty() && cfg.tls.ktls && crate::ktls_offload::available();
+    let ktls = !cfg.tls.listen.is_empty() && cfg.tls.ktls && ktls_available();
     if !cfg.tls.listen.is_empty() && cfg.tls.ktls && !ktls {
-        tracing::warn!("kTLS unavailable (kernel module `tls` not loaded?): userspace TLS");
+        tracing::warn!("kTLS unavailable (Linux only; kernel module `tls` loaded?): userspace TLS");
     }
     // HTTPS proxy and SOCKS5 listeners: same sharding.
     let (tls, tls_addr, mut tls_listeners) = if cfg.tls.listen.is_empty() {
@@ -214,6 +232,7 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
     // One pinned shard per CPU: steer each connection to the shard on the
     // CPU that received its SYN (kernel processing and the proxy stay on
     // the same core). Shards sharing CPUs keep the default hash.
+    #[cfg(target_os = "linux")]
     if n > 1 && n <= cpus.len() {
         for group in [&plain, &tls_listeners, &socks_listeners] {
             if let Some(first) = group.first() {
@@ -503,10 +522,12 @@ async fn run_shard(
                 let Some(acceptor) = shared.tls.clone() else {
                     continue;
                 };
+                #[cfg(target_os = "linux")]
                 let shared = shared.clone();
                 tokio::spawn(async move {
                     let _slot = slot;
                     let hs = svc.cfg.tls.handshake_timeout;
+                    #[cfg(target_os = "linux")]
                     if shared.ktls {
                         // Handshake in rustls, then the kernel takes over.
                         let accept = async {
@@ -598,6 +619,7 @@ async fn trim_after_bursts(shared: Arc<Shared>) {
 }
 
 /// CPUs this process may run on (honours Docker's cpuset), in order.
+#[cfg(target_os = "linux")]
 fn allowed_cpus() -> Vec<usize> {
     // SAFETY: cpu_set_t is plain data; sched_getaffinity fills it.
     unsafe {
@@ -611,10 +633,32 @@ fn allowed_cpus() -> Vec<usize> {
     }
 }
 
+/// No CPU affinity API off Linux: `pin_cores` is ignored.
+#[cfg(not(target_os = "linux"))]
+fn allowed_cpus() -> Vec<usize> {
+    Vec::new()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn pin_to_cpu(_cpu: usize) {}
+
+/// kTLS exists on Linux only.
+fn ktls_available() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        crate::ktls_offload::available()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
 /// Attaches a classic BPF program to the SO_REUSEPORT group of `listener`:
 /// a connection whose SYN is processed on `cpus[i]` goes to the i-th socket
 /// of the group (bind order = shard order). Other CPUs return an
 /// out-of-range index, for which the kernel falls back to its hash.
+#[cfg(target_os = "linux")]
 fn steer_by_cpu(listener: &std::net::TcpListener, cpus: &[usize]) -> std::io::Result<()> {
     use std::os::unix::io::AsRawFd;
     let insn = |code: u32, jt: u8, jf: u8, k: u32| libc::sock_filter {
@@ -663,6 +707,7 @@ fn steer_by_cpu(listener: &std::net::TcpListener, cpus: &[usize]) -> std::io::Re
 }
 
 /// Pins the calling thread to `cpu` (best effort).
+#[cfg(target_os = "linux")]
 fn pin_to_cpu(cpu: usize) {
     // SAFETY: cpu_set_t is plain data; tid 0 = calling thread.
     unsafe {
@@ -735,9 +780,12 @@ fn reject(mut sock: TcpStream) {
 fn bind(addr: SocketAddr, reuse_port: bool) -> anyhow::Result<std::net::TcpListener> {
     let socket = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
     socket.set_reuse_address(true)?;
+    #[cfg(target_os = "linux")]
     if reuse_port {
         socket.set_reuse_port(true)?;
     }
+    #[cfg(not(target_os = "linux"))]
+    let _ = reuse_port;
     // Inherited by every accepted socket (Linux clones the listener's
     // options): no setsockopt per connection. SO_RCVBUF before listen()
     // also sizes the window scale advertised in the SYN-ACK.
@@ -745,18 +793,21 @@ fn bind(addr: SocketAddr, reuse_port: bool) -> anyhow::Result<std::net::TcpListe
     // Every protocol served here (HTTP, TLS, SOCKS5) is client-speaks-first:
     // the kernel wakes accept() only once the first bytes are in, so the
     // first read never hits EAGAIN + an extra epoll round.
-    let secs: libc::c_int = 1;
-    // SAFETY: valid listening fd owned by `socket`, option value is a c_int
-    // that outlives the call.
-    unsafe {
-        use std::os::unix::io::AsRawFd;
-        libc::setsockopt(
-            socket.as_raw_fd(),
-            libc::IPPROTO_TCP,
-            libc::TCP_DEFER_ACCEPT,
-            &secs as *const libc::c_int as *const libc::c_void,
-            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-        );
+    #[cfg(target_os = "linux")]
+    {
+        let secs: libc::c_int = 1;
+        // SAFETY: valid listening fd owned by `socket`, option value is a c_int
+        // that outlives the call.
+        unsafe {
+            use std::os::unix::io::AsRawFd;
+            libc::setsockopt(
+                socket.as_raw_fd(),
+                libc::IPPROTO_TCP,
+                libc::TCP_DEFER_ACCEPT,
+                &secs as *const libc::c_int as *const libc::c_void,
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            );
+        }
     }
     let buf = SOCK_BUF.load(Relaxed);
     if buf > 0 {
@@ -778,6 +829,7 @@ mod tests {
     /// The CPU steering program is accepted by the kernel and a group
     /// with it still accepts connections (on any CPU: unknown ones fall
     /// back to the hash).
+    #[cfg(target_os = "linux")]
     #[test]
     fn cpu_steering_attaches() {
         use std::io::Write;
@@ -1027,6 +1079,7 @@ mod tests {
         (Arc::new(cfg), der)
     }
 
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn https_proxy_serves_keepalive_http_and_chunked() {
         let (cfg, der) = tls_config();

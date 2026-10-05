@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: fmt + clippy (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: tests + e2e (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux: reference platform (splice, kTLS, SO_REUSEPORT shards).
+          - { os: ubuntu-latest, e2e: full }
+          - { os: ubuntu-24.04-arm, e2e: full }
+          # macOS: portable fallback (no splice/kTLS), quick e2e subset.
+          - { os: macos-latest, e2e: quick }
+          - { os: macos-15-intel, e2e: quick }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Load the kTLS kernel module (Linux)
+        if: runner.os == 'Linux'
+        run: sudo modprobe tls || echo "kTLS module unavailable, kTLS scenarios skip"
+      - name: Unit + in-process end-to-end tests
+        run: cargo test -p myproxy
+      - name: Build the proxy (release)
+        run: cargo build --release -p myproxy
+      - name: e2e (${{ matrix.e2e }})
+        shell: bash
+        run: |
+          flag=""
+          [ "${{ matrix.e2e }}" = quick ] && flag="--quick"
+          cargo run -q --profile e2e -p e2e -- $flag

@@ -274,6 +274,7 @@ impl Proxy {
     }
 
     /// Resident memory (VmRSS), KB.
+    #[cfg(target_os = "linux")]
     pub fn rss_kb(&self) -> u64 {
         let s = std::fs::read_to_string(format!("/proc/{}/status", self.pid())).unwrap_or_default();
         s.lines()
@@ -282,10 +283,30 @@ impl Proxy {
             .unwrap_or(0)
     }
 
+    #[cfg(not(target_os = "linux"))]
+    pub fn rss_kb(&self) -> u64 {
+        let o = std::process::Command::new("ps")
+            .args(["-o", "rss=", "-p", &self.pid().to_string()])
+            .output();
+        o.ok()
+            .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok())
+            .unwrap_or(0)
+    }
+
+    #[cfg(target_os = "linux")]
     pub fn fds(&self) -> usize {
         std::fs::read_dir(format!("/proc/{}/fd", self.pid()))
             .map(|d| d.count())
             .unwrap_or(0)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn fds(&self) -> usize {
+        // lsof -F: one `f<fd>` line per open file.
+        self.lsof(&[])
+            .lines()
+            .filter(|l| l.starts_with('f'))
+            .count()
     }
 
     fn listen_ports(&self) -> Vec<u16> {
@@ -306,10 +327,12 @@ impl Proxy {
     /// Leaked client connections: closed by the client (CLOSE_WAIT) but
     /// still held by the proxy. Live clients' connections are not leaks.
     pub fn leaked_sockets(&self) -> usize {
-        self.client_sockets_in(|st| st == "08")
+        self.client_sockets_in(|close_wait| close_wait)
     }
 
-    fn client_sockets_in(&self, state: impl Fn(&str) -> bool) -> usize {
+    /// `f(is_close_wait)` selects among the non-LISTEN client sockets.
+    #[cfg(target_os = "linux")]
+    fn client_sockets_in(&self, f: impl Fn(bool) -> bool) -> usize {
         let pid = self.pid();
         let mut inodes = std::collections::HashSet::new();
         if let Ok(d) = std::fs::read_dir(format!("/proc/{pid}/fd")) {
@@ -324,11 +347,11 @@ impl Proxy {
         }
         let ports = self.listen_ports();
         let mut n = 0;
-        for f in ["tcp", "tcp6"] {
-            let t = std::fs::read_to_string(format!("/proc/{pid}/net/{f}")).unwrap_or_default();
+        for t in ["tcp", "tcp6"] {
+            let t = std::fs::read_to_string(format!("/proc/{pid}/net/{t}")).unwrap_or_default();
             for l in t.lines().skip(1) {
                 let c: Vec<&str> = l.split_whitespace().collect();
-                if c.len() < 10 || c[3] == "0A" || !state(c[3]) || !inodes.contains(c[9]) {
+                if c.len() < 10 || c[3] == "0A" || !f(c[3] == "08") || !inodes.contains(c[9]) {
                     continue;
                 }
                 let port = c[1]
@@ -341,6 +364,47 @@ impl Proxy {
             }
         }
         n
+    }
+
+    /// Same, from `lsof -F` records (`n<local>-><peer>`, `TST=<state>`).
+    #[cfg(not(target_os = "linux"))]
+    fn client_sockets_in(&self, f: impl Fn(bool) -> bool) -> usize {
+        let ports = self.listen_ports();
+        let (mut n, mut local, mut state) = (0, None::<u16>, String::new());
+        let mut flush = |local: &mut Option<u16>, state: &mut String| {
+            if let Some(p) = local.take() {
+                if ports.contains(&p) && state != "LISTEN" && f(state == "CLOSE_WAIT") {
+                    n += 1;
+                }
+            }
+            state.clear();
+        };
+        for l in self.lsof(&["-iTCP"]).lines() {
+            if l.starts_with('f') {
+                flush(&mut local, &mut state);
+            } else if let Some(name) = l.strip_prefix('n') {
+                // "127.0.0.1:8080->127.0.0.1:5555" or "*:8080"
+                local = name
+                    .split("->")
+                    .next()
+                    .and_then(|a| a.rsplit(':').next())
+                    .and_then(|p| p.parse().ok());
+            } else if let Some(st) = l.strip_prefix("TST=") {
+                state = st.to_string();
+            }
+        }
+        flush(&mut local, &mut state);
+        n
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn lsof(&self, extra: &[&str]) -> String {
+        let o = std::process::Command::new("lsof")
+            .args(["-nP", "-F", "fnT", "-a", "-p", &self.pid().to_string()])
+            .args(extra)
+            .output();
+        o.map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default()
     }
 
     /// Waits until `cond` holds (polling), or fails with `what`.

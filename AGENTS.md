@@ -3,6 +3,8 @@
 Forward HTTP/HTTPS (CONNECT) proxy in Rust, Tokio architecture.
 **Goal: beat every open-source proxy on throughput, first on 1 core, then multi-core.** Current reference: 3proxy.
 
+Platforms: **Linux (reference, all fast paths) and macOS (dev/test)**. Off Linux: no splice (`relay/splice_stub.rs`: adaptive copy only), no kTLS, no `TCP_QUICKACK`/`DEFER_ACCEPT`, `pin_cores` ignored, shards share one cloned listener (macOS `SO_REUSEPORT` does not balance). Bench = Docker/Linux only. e2e on macOS uses `lsof`/`ps` instead of `/proc`; UDP matrix capped at 8 KB.
+
 Language: **everything in English** — code, comments, commit messages, README, RESULTS.md, all docs. (Commits before 2026-10-04 are in French; history is not rewritten.)
 
 ## Layout

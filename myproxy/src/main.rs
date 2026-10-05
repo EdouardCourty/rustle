@@ -3,6 +3,7 @@ mod auth;
 mod config;
 mod dns;
 mod http;
+#[cfg(target_os = "linux")]
 mod ktls_offload;
 mod policy;
 mod proxy;

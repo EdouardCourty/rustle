@@ -201,6 +201,7 @@ async fn serve<C: ClientStream>(client: &mut C, peer: IpAddr, svc: &Services) ->
     // B: TCP_QUICKACK once per connection — the kernel re-arms it per
     // segment; per-request setsockopts were pure syscall overhead in the
     // keep-alive hot path.
+    #[cfg(target_os = "linux")]
     if let Some(tcp) = client.tcp() {
         tcp.set_quickack(true).ok();
     }
