@@ -36,6 +36,9 @@ struct Plan {
     /// h2: absolute URI + Proxy-Authorization value.
     uri: String,
     auth: String,
+    /// Body size the benchmark origin serves at this path (`/1kb` .. `/10mb`):
+    /// any other length is a failure, not a success with fewer bytes.
+    expect: Option<u64>,
 }
 
 /// One thread's share of the results.
@@ -76,6 +79,13 @@ pub(crate) async fn run_http(
         req_close: head("close"),
         uri: format!("http://{host}:{port}{path}"),
         auth: format!("Basic {auth}"),
+        expect: match path.as_str() {
+            "/1kb" => Some(1024),
+            "/10kb" => Some(10 * 1024),
+            "/1mb" => Some(1024 * 1024),
+            "/10mb" => Some(10 * 1024 * 1024),
+            _ => None,
+        },
     });
 
     let start = Instant::now();
@@ -245,9 +255,9 @@ async fn conn_task(
                     } else {
                         &plan.req_ka
                     };
-                    http_get(stream, req, !no_keepalive, &mut buf).await
+                    http_get(stream, req, !no_keepalive, &mut buf, plan.expect).await
                 }
-                Conn::H2(send) => h2_get(send, &plan.uri, &plan.auth).await,
+                Conn::H2(send) => h2_get(send, &plan.uri, &plan.auth, plan.expect).await,
             };
             match res {
                 Ok((body_bytes, reusable)) => {
@@ -302,6 +312,7 @@ async fn http_get(
     req: &[u8],
     keepalive: bool,
     buf: &mut Vec<u8>,
+    expect: Option<u64>,
 ) -> anyhow::Result<(u64, bool)> {
     stream.write_all(req).await?;
     stream.flush().await?;
@@ -340,6 +351,11 @@ async fn http_get(
                         }
                     }
                 }
+                if let Some(want) = expect {
+                    if cl != Some(want) {
+                        anyhow::bail!("bad response: body length {cl:?}, expected {want}");
+                    }
+                }
                 break (len, cl.unwrap_or(0), reusable && keepalive);
             }
             Ok(httparse::Status::Partial) => {}
@@ -368,6 +384,7 @@ async fn h2_get(
     send: &mut h2::client::SendRequest<bytes::Bytes>,
     uri: &str,
     auth: &str,
+    expect: Option<u64>,
 ) -> anyhow::Result<(u64, bool)> {
     let req = http::Request::get(uri)
         .header("proxy-authorization", auth)
@@ -384,6 +401,11 @@ async fn h2_get(
         let chunk = chunk?;
         let _ = body.flow_control().release_capacity(chunk.len());
         got += chunk.len() as u64;
+    }
+    if let Some(want) = expect {
+        if got != want {
+            anyhow::bail!("bad response: body length {got}, expected {want}");
+        }
     }
     Ok((got, true))
 }

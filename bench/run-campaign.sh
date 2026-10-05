@@ -19,7 +19,13 @@ PROXIES="${PROXIES:-rustle 3proxy squid gost tinyproxy}"
 AUTH="${AUTH:-on}"
 export BENCH_SEED="${BENCH_SEED:-2004113323}"
 mkdir -p results
-if [[ "${REMOTE:-0}" == 1 ]]; then RUNNER=remote; else RUNNER=bench; fi
+if [[ "${REMOTE:-0}" == 1 ]]; then
+    RUNNER=remote
+    # Same cores for every proxy (one core unless told otherwise).
+    export PROXY_CPUS="${PROXY_CPUS:-0}" WORKERS="${WORKERS:-1}"
+else
+    RUNNER=bench
+fi
 if [[ "${MATRIX:-}" == ws ]]; then pfx=campaign-ws; else pfx=campaign; fi
 index="results/$pfx-$(date +%Y%m%d-%H%M%S).txt"
 echo "# campaign proxies=[$PROXIES] auth=$AUTH seed=$BENCH_SEED $(date)" | tee "$index"

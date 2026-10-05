@@ -148,7 +148,9 @@ run_test() {
         'BEGIN{printf "%.3f", (a-b)/100/n}')
     up_cpu_s_per_run=$(awk -v a="$up1" -v b="$up0" -v n="$REPEAT" \
         'BEGIN{printf "%.2f", (a-b)/100/n}')
-    echo "$median cpu_s_per_run=$cpu_s_per_run up_cpu_s_per_run=$up_cpu_s_per_run rss_mb=$(rss_mb) peak_rss_mb=$(peak_rss_mb) $(tcp_delta "$tcp0" "$tcp1" "$REPEAT")" | tee -a "$out/results.txt"
+    line="$median cpu_s_per_run=$cpu_s_per_run up_cpu_s_per_run=$up_cpu_s_per_run rss_mb=$(rss_mb) peak_rss_mb=$(peak_rss_mb) $(tcp_delta "$tcp0" "$tcp1" "$REPEAT")"
+    echo "$line" | tee -a "$out/results.txt"
+    check_valid "$name" "$line"
 }
 
 # Hold with optional 2-replica split (single client exhausts ephemeral ports).
@@ -188,7 +190,9 @@ run_hold() {
     local rate cpu_s_per_run
     rate=$(awk -v o="$opened" -v e="$maxelapsed" 'BEGIN{printf "%.0f", o/e}')
     cpu_s_per_run=$(awk -v a="$tick1" -v b="$tick0" 'BEGIN{printf "%.3f", (a-b)/100}')
-    echo "RESULT median mode=hold conns=$conns replicas=2 opened=$opened failed=$failed rate=$rate elapsed_s=$maxelapsed cpu_s_per_run=$cpu_s_per_run rss_mb=$(rss_mb) peak_rss_mb=$(peak_rss_mb)" | tee -a "$out/results.txt"
+    line="RESULT median mode=hold conns=$conns replicas=2 opened=$opened failed=$failed rate=$rate elapsed_s=$maxelapsed cpu_s_per_run=$cpu_s_per_run rss_mb=$(rss_mb) peak_rss_mb=$(peak_rss_mb)"
+    echo "$line" | tee -a "$out/results.txt"
+    check_valid "hold-${conns}" "$line"
 }
 
 # --- Network warmup (before any measurement): conntrack growth, DNS/kernel
@@ -210,3 +214,5 @@ done
 
 echo
 echo "==> results in $out/results.txt"
+[[ "${INVALID:-0}" == 1 ]] && { echo "!! this run is INVALID: see the INVALID lines in results.txt" >&2; exit 3; }
+exit 0

@@ -17,7 +17,8 @@
 #   GEN_ADDR PROXY_ADDR UP_ADDR   addresses as seen by the other machines,
 #                                 ideally the private network (default = *_HOST)
 #   REMOTE_DIR                    repo checkout on every host (default ~/rustle)
-#   PROXY_CPUS                    cpuset of the proxy container, e.g. 0-3 (default: all)
+#   PROXY_CPUS                    REQUIRED: cpuset of the proxy container (0 = one core, 0-3 = four);
+#                                 WORKERS must equal the number of cores (same cores for every proxy)
 #   WORKERS                       shards of the proxy (default 1; rustle, squid)
 #   GEN_THREADS UP_THREADS SINK_THREADS   harness threads (default: 4 / 4 / 4)
 #   REPEAT BENCH_SEED BENCH_ONLY ACCESS_LOG KTLS PROXY_TLS PROXY_H2   as run-bench.sh
@@ -29,6 +30,10 @@ cd "$(dirname "$0")"
 PROXY="${1:-rustle}"
 AUTH="${2:-on}"
 : "${GEN_HOST:?set GEN_HOST}" "${PROXY_HOST:?set PROXY_HOST}" "${UP_HOST:?set UP_HOST}"
+# Every proxy must get the same cores: unset, the 1-core proxies (rustle, Squid) would
+# be compared with thread-per-connection ones (3proxy, Tinyproxy) and Go (gost) using
+# the whole machine. 0 = one core, 0-3 = four cores (and WORKERS=4).
+: "${PROXY_CPUS:?set PROXY_CPUS (e.g. 0 for the 1-core campaign, 0-3 for four cores)}"
 GEN_ADDR="${GEN_ADDR:-$GEN_HOST}"; PROXY_ADDR="${PROXY_ADDR:-$PROXY_HOST}"; UP_ADDR="${UP_ADDR:-$UP_HOST}"
 REMOTE_DIR="${REMOTE_DIR:-~/rustle}"
 REPEAT="${REPEAT:-3}"
@@ -37,6 +42,8 @@ ACCESS_LOG="${ACCESS_LOG:-off}"
 KTLS="${KTLS:-false}"
 GEN_THREADS="${GEN_THREADS:-4}"; UP_THREADS="${UP_THREADS:-4}"; SINK_THREADS="${SINK_THREADS:-4}"
 PROXY_TLS="${PROXY_TLS:-0}"; PROXY_H2="${PROXY_H2:-0}"
+ncpus=$(awk -F, '{ n=0; for (i=1;i<=NF;i++) { split($i,a,"-"); n += (a[2]==""?1:a[2]-a[1]+1) } print n }' <<<"$PROXY_CPUS")
+[[ "$WORKERS" == "$ncpus" ]] || { echo "WORKERS=$WORKERS but PROXY_CPUS=$PROXY_CPUS is $ncpus core(s): set WORKERS=$ncpus" >&2; exit 2; }
 DRY_RUN="${DRY_RUN:-0}"
 export BENCH_SEED="${BENCH_SEED:-2004113323}"
 ULIMIT=(--ulimit nofile=524288:524288)
@@ -78,7 +85,7 @@ trap cleanup EXIT
 
 start_proxy() {
     on "$PROXY_HOST" "docker rm -f proxy" >/dev/null 2>&1 || true
-    on "$PROXY_HOST" "docker run -d --name proxy --network host ${PROXY_CPUS:+--cpuset-cpus $PROXY_CPUS} ${ULIMIT[*]} \
+    on "$PROXY_HOST" "docker run -d --name proxy --network host --pids-limit -1 --cpuset-cpus $PROXY_CPUS ${ULIMIT[*]} \
         -e AUTH=$AUTH -e WORKERS=$WORKERS -e ACCESS_LOG=$ACCESS_LOG -e KTLS=$KTLS -e SOCK_BUF=${SOCK_BUF:-1048576} $PROXY:bench" >/dev/null
 }
 echo "==> starting origin and sink on $UP_HOST, proxy ($PROXY) on $PROXY_HOST"
@@ -92,7 +99,7 @@ sleep 2
 
 out="results/${LABEL}/remote-auth-${AUTH}/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$out"; : > "$out/results.txt"
-echo "# $PROXY remote auth=$AUTH tls=$PROXY_TLS h2=$PROXY_H2 repeat=$REPEAT workers=$WORKERS proxy_cpus=${PROXY_CPUS:-all} gen_threads=$GEN_THREADS up_threads=$UP_THREADS sink_threads=$SINK_THREADS gen=$GEN_HOST proxy=$PROXY_HOST up=$UP_HOST $(date)" | tee -a "$out/results.txt"
+echo "# $PROXY remote auth=$AUTH tls=$PROXY_TLS h2=$PROXY_H2 repeat=$REPEAT workers=$WORKERS proxy_cpus=$PROXY_CPUS gen_threads=$GEN_THREADS up_threads=$UP_THREADS sink_threads=$SINK_THREADS gen=$GEN_HOST proxy=$PROXY_HOST up=$UP_HOST $(date)" | tee -a "$out/results.txt"
 
 # --- Probes on the proxy host ----------------------------------------------
 # Whole container (cgroup v2): multi-process DUTs included. Unit: 1/100 s.
@@ -137,7 +144,9 @@ run_test() {
     local cpu up_cpu
     cpu=$(awk -v a="$tick1" -v b="$tick0" -v n="$REPEAT" 'BEGIN{printf "%.3f", (a-b)/100/n}')
     up_cpu=$(awk -v a="$up1" -v b="$up0" -v n="$REPEAT" 'BEGIN{printf "%.2f", (a-b)/100/n}')
-    echo "$median cpu_s_per_run=$cpu up_cpu_s_per_run=$up_cpu rss_mb=$(_sum_status VmRSS) peak_rss_mb=$(_sum_status VmHWM) $(tcp_delta "$tcp0" "$tcp1" "$REPEAT") $(check_generator "$median")" | tee -a "$out/results.txt"
+    local line="$median cpu_s_per_run=$cpu up_cpu_s_per_run=$up_cpu rss_mb=$(_sum_status VmRSS) peak_rss_mb=$(_sum_status VmHWM) $(tcp_delta "$tcp0" "$tcp1" "$REPEAT") $(check_generator "$median")"
+    echo "$line" | tee -a "$out/results.txt"
+    check_valid "$name" "$line"
 }
 
 # A dedicated generator host has its own ephemeral ports: no replica split.
@@ -158,3 +167,5 @@ matrix_select_and_shuffle
 for entry in "${shuffled[@]}"; do eval "$entry"; done
 
 echo; echo "==> results in $out/results.txt"
+[[ "${INVALID:-0}" == 1 ]] && { echo "!! this run is INVALID: see the INVALID lines in results.txt" >&2; exit 3; }
+exit 0

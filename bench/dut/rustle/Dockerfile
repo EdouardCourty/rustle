@@ -11,7 +11,7 @@ WORKDIR /build
 ARG ALLOCATOR
 # Built with the release profile and no target-cpu: the benchmarked binary is
 # the one users download (release.yml), not a CPU-specific build.
-COPY Cargo.toml ./
+COPY Cargo.toml Cargo.lock ./
 COPY rustle ./rustle
 COPY bench/generator ./bench/generator
 # Workspace member, not built here: its manifest and a stub main suffice.
@@ -24,13 +24,13 @@ RUN mkdir -p rustle/src bench/generator/src e2e/src && \
     printf 'fn main() {}\n' > rustle/src/main.rs && \
     printf 'fn main() {}\n' > bench/generator/src/main.rs && \
     printf 'fn main() {}\n' > e2e/src/main.rs && \
-    cargo build --release -p rustle
+    cargo build --locked --release -p rustle
 COPY rustle/src ./rustle/src
 COPY bench/generator/src ./bench/generator/src
 # Touch: source mtimes from the context can be older than the dummy-built
 # artifacts, which would make cargo keep the dummy binaries (mtime trap).
 RUN find rustle/src bench/generator/src -type f -exec touch {} + && \
-    cargo build --release -p rustle $ALLOCATOR
+    cargo build --locked --release -p rustle $ALLOCATOR
 
 FROM debian:bookworm-slim
 COPY --from=build /build/target/release/rustle /usr/local/bin/rustle

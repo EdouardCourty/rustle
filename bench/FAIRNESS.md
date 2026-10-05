@@ -8,8 +8,8 @@ Common to all proxies (identical harness for everyone, `bench/docker-compose.yml
 
 | Proxy | Version | How it is built | Settings that go beyond the defaults |
 |---|---|---|---|
-| **rustle** | this repository | `cargo build --release` (LTO, no `target-cpu`: the binary users download) | `socket_buffer_bytes = 1048576` (also the shipped default); `SOCK_BUF=0` runs it with kernel autotuning like the others |
-| **3proxy** | 1.0.0 (latest; code identical to 0.9.9 LTS) | from source, `Makefile.Linux` | `proxy -osTCP_NODELAY -ocTCP_NODELAY` (documented for small exchanges), `maxconn`, `nscache`, timeouts |
+| **rustle** | this repository | `cargo build --locked --release` (LTO, no `target-cpu`, `Cargo.lock`: as in `release.yml`) | `socket_buffer_bytes = 1048576` (also the shipped default); `SOCK_BUF=0` runs it with kernel autotuning like the others |
+| **3proxy** | 1.0.0 (latest; code identical to 0.9.9 LTS) | from source, `Makefile.Linux` | `proxy -a -osTCP_NODELAY -ocTCP_NODELAY` (documented for small exchanges; `-a` = no `Forwarded` header, like the others), `maxconn`, `nscache`, timeouts |
 | **Squid** | 7.7 (latest) | from source, upstream's default flags, OpenSSL | `cache deny all`, `cache_mem 0`, `tcp_recv_bufsize 1 MB`, `read_ahead_gap 1 MB`, `forwarded_for delete`, `via off`, auth helper results cached 2 h, `workers N` for N cores |
 | **gost** | 3.3.0 (latest) | official image | `GOGC=400`, logger level `error`; Go sizes `GOMAXPROCS` from the cpuset |
 | **Tinyproxy** | 1.11.3 (latest) | from source (19.3k req/s at 1 KB on the A/B box) | `MaxClients 200000`, `LogLevel Critical`, no `Via`, no filters; it has no upstream keep-alive (documented limitation of the project) |
@@ -43,6 +43,8 @@ So the earlier "×9.5 against 3proxy at 1 KB" was the cost of a missing document
 | `GOMAXPROCS=1` | 7,500 | (same as default: already sized from the cpuset) |
 | handler option `keepalive=true` | 4,960 | (slower than the default, so not used) |
 
+Upstream connections opened per proxied request (TCP `ActiveOpens` of the proxy's network namespace over a 5 s run): **1.00** with the default handler, **0.82** with `keepalive=true`. gost therefore reopens an upstream connection for almost every request either way (its HTTP handler disables keep-alive by default, and with the option on, Go's transport keeps only two idle connections per host while the test runs 64). This is gost's behaviour, not a missing setting on our side; it is re-checked on the real hosts and both numbers are published. `GOST_LOGGER_LEVEL=error` is honoured by the image (0 log lines per run against ~96,000 without it).
+
 `GOGC=400` keeps most of the gain for a moderate memory cost; the 25,000-tunnel RAM test would punish a larger value.
 
 **Squid** (5.7 from the Debian package for the directive A/B below; 7.7 built from source with the kept directives then measured 38,400 req/s at 1 KB and 1,000 at 1 MB, i.e. +19 % over 5.7 with the same directives):
@@ -67,6 +69,23 @@ So the earlier "×9.5 against 3proxy at 1 KB" was the cost of a missing document
 * **Tinyproxy** closes the upstream connection after every request; the generator replays an idempotent GET once on a reused connection closed without notice (counted in `reconnects`).
 * **Features differ**: only rustle, Squid and gost speak TLS to the client, and only rustle and gost HTTP/2; 3proxy and Tinyproxy appear in the plain tables only. WebSocket upgrades on the plain-HTTP path are tested separately (`make bench-ws`); a proxy that does not support them is listed as unsupported, never as zero.
 * **Single core.** The multi-core curve needs the three-machine setup (`bench/REMOTE.md`).
+
+## Run rules (enforced by the scripts)
+
+* **Same cores for everybody.** `run-remote.sh` refuses to start without `PROXY_CPUS` (0 = one core, 0-3 = four) and requires `WORKERS` to equal that core count, so a 1-core proxy is never compared with a thread-per-connection one using the whole machine.
+* **A run is invalid, and the script exits non-zero, when** any client-side error kind appears (`err_kinds` not empty), a hold test opens fewer tunnels than asked (a kernel or harness limit, never a proxy result), or the generator saturates. The generator also checks each response body against the exact size of the object it asked for.
+* **Thread-per-connection proxies** get `vm.max_map_count`, `pid_max`, `threads-max` raised and an unlimited container pids limit, the same for every proxy, so their tunnel walls are the proxy's and not the kernel's default.
+* Check `dmesg | grep -i oom` on the proxy host after every hold test.
+
+## Known limits of this benchmark (stated, not hidden)
+
+* Latency is closed-loop at fixed concurrency (no open-loop rate); CPU per request is measured at saturation, not at an equal offered load.
+* Three repeats, medians, noise about ±3 to 5 %; no confidence intervals.
+* DNS is resolved once by the generator (names are never looked up per request), IPv6, many origins, large header sets, uploads and SOCKS5 are not part of the matrix (they are covered functionally by `e2e/`).
+* TLS: rustle prefers AES-128-GCM and issues session tickets; the other proxies' negotiated cipher and resumption are not logged yet.
+* The HTTP/2 test opens one connection per client connection and sends sequential requests (no multiplexing); gost's h2 is a dedicated listener, rustle's is ALPN on the TLS port.
+* Proxy CPU is the container cgroup's (user + system); softirq time spent on other vCPUs is not attributed.
+* Flood counts bytes written by the client and measures the upload direction only.
 
 ## Checklist when a version or a config changes
 

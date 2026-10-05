@@ -4,7 +4,7 @@ workers = 1
 socket_buffer_bytes = 1048576
 
 [auth]
-api_keys = ["secret1"]
+api_keys = []
 
 [limits]
 max_connections = 200000

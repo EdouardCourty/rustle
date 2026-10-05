@@ -31,6 +31,8 @@ Setup per machine: Docker, this repository at the same path, SSH key access from
 ```sh
 sudo sysctl -w net.core.somaxconn=65535 net.ipv4.ip_local_port_range="1024 65535" net.ipv4.tcp_tw_reuse=1
 sudo sysctl -w net.core.rmem_max=16777216 net.core.wmem_max=16777216
+# Thread-per-connection proxies (3proxy, Tinyproxy) hit these walls long before 25,000 tunnels:
+sudo sysctl -w vm.max_map_count=1048576 kernel.pid_max=4194304 kernel.threads-max=4194304
 ```
 
 The proxy is the active closer of the tunnels to the sink: without `tcp_tw_reuse` and a wide port range, TIME_WAIT sockets exhaust the ephemeral ports. Open the proxy port (8080, plus the TLS/h2 ports), 8000 and 9000 between the machines. Keep `net.core.somaxconn` and the other sysctls identical for every proxy compared.

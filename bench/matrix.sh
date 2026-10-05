@@ -64,3 +64,22 @@ matrix_select_and_shuffle() {
         tests[j]=${tests[i]}
     done
 }
+
+# A point is only publishable when the run was clean: no client-side error and,
+# for hold tests, every tunnel opened (a missing tunnel is a harness or kernel
+# limit, not a property of the proxy). Marks the run and returns non-zero at the
+# end of the script (INVALID=1).
+check_valid() { # <test name> <RESULT line>
+    local name="$1" line="$2"
+    if [[ "$line" =~ err_kinds=([^[:space:]]+) ]]; then
+        echo "!! INVALID $name: err_kinds=${BASH_REMATCH[1]}" | tee -a "$out/results.txt"
+        INVALID=1
+    fi
+    if [[ "$line" == *"mode=hold"* && "$line" =~ conns=([0-9]+) ]]; then
+        local want="${BASH_REMATCH[1]}"
+        if [[ "$line" =~ opened=([0-9]+) && "${BASH_REMATCH[1]}" -lt "$want" ]]; then
+            echo "!! INVALID $name: opened ${BASH_REMATCH[1]} of $want tunnels (check dmesg for OOM, vm.max_map_count, pids limit)" | tee -a "$out/results.txt"
+            INVALID=1
+        fi
+    fi
+}
