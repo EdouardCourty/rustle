@@ -61,3 +61,36 @@ jobs:
           flag=""
           [ "${{ matrix.e2e }}" = quick ] && flag="--quick"
           cargo run -q --profile e2e -p e2e -- $flag
+
+  installer:
+    name: install.sh (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: shellcheck
+        if: runner.os == 'Linux'
+        run: shellcheck -s sh install.sh && shellcheck .github/scripts/test-installer.sh
+      - name: Build and package a local release
+        shell: bash
+        run: |
+          set -eu
+          cargo build --locked --release -p rustle
+          target="$(target/release/rustle --version | sed 's/.*(\(.*\))/\1/')"
+          mkdir -p rel pkg
+          cp target/release/rustle pkg/
+          tar -czf "rel/rustle-${target}.tar.gz" -C pkg rustle
+          (cd rel && { sha256sum "rustle-${target}.tar.gz" 2>/dev/null || shasum -a 256 "rustle-${target}.tar.gz"; } > SHA256SUMS)
+      - name: Install in distro containers (glibc floor, musl refusal, tampering)
+        if: runner.os == 'Linux'
+        run: .github/scripts/test-installer.sh rel
+      - name: Install on macOS
+        if: runner.os == 'macOS'
+        run: |
+          RUSTLE_BASE_URL="file://$PWD/rel" RUSTLE_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh
+          "$RUNNER_TEMP/bin/rustle" --version

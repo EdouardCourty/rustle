@@ -15,7 +15,7 @@ Makefile              help build test e2e e2e-quick fmt check clippy images up d
 rustle/              the proxy
   config.toml.example
   src/
-    main.rs           tracing (RUST_LOG, on stderr, ANSI only on a TTY), config = argv[1] (default config.toml), signal handlers installed, then server::start, then wait for SIGTERM/SIGINT (SIGHUP = log reopen)
+    main.rs           dispatch (cli.rs: run | init | check | status | service | update | uninstall), `run`: tracing (RUST_LOG, on stderr, ANSI only on a TTY), config = path or lookup, RLIMIT_NOFILE raised, signal handlers installed, then server::start, then wait for SIGTERM/SIGINT (SIGHUP = log reopen)
     config/mod.rs     TOML → structs (humantime for durations)
     server/mod.rs     shards (thread + current_thread runtime + SO_REUSEPORT plain + TLS listeners + pool), TLS handshake then h2/h1 dispatch by ALPN, global max_connections counter, admin /health, trim, 5 s graceful shutdown
     stream.rs         ClientStream trait (TcpStream | TlsStream): tcp()/into_tcp() = splice/QUICKACK paths, TLS = user-space copy; ReadAhead under rustls (which reads 4 KB at a time): adaptive 64 KB buffer, only for sustained flows
@@ -37,6 +37,8 @@ rustle/              the proxy
     policy.rs         DestPolicy (allowed ports before DNS, non-public ranges + deny CIDRs on the resolved address); ClientPolicy (client IP allowlist, at accept); AuthLimiter (per-IP bans after N wrong keys, lock-free while nobody fails)
     dns.rs            positive cache, TTL (outside the lock), Mutex<HashMap>
     upstream.rs       per-origin keep-alive pool (LIFO)
+install.sh            curl|sh installer (POSIX sh): detects target, glibc gate, SHA-256 check, no sudo; tested by `.github/scripts/test-installer.sh` (CI `installer` job)
+.github/workflows/    ci.yml (lint, tests+e2e on Linux/macOS, installer), release.yml (tag vX.Y.Z → 4 targets → SHA256SUMS + VERSION + attestation → smoke install)
 e2e/                  black-box functional tests (see e2e/README.md): the release binary started per scenario (generated config, ports read from the `rustle listening` line), programmable local origins/targets, HTTP/1.1, TLS, h2, SOCKS5, curl clients
   src/harness/        proxy.rs (Config, Proxy: spawn, /proc, signals, finish = CLOSE_WAIT leak check + clean SIGTERM), origin.rs, targets.rs, payload.rs, certs.rs
   src/clients/        http1.rs, h2.rs, socks5.rs, curl.rs
@@ -69,7 +71,9 @@ bench/
 - **Limits**: `max_request_body_bytes` → 413, `max_response_body_bytes` → 502 (declared CL) or cut (unknown).
 - **Measured syscalls**: ~2 recv + 2 send / request, epoll_ctl ≈ 0. NODELAY 1×/socket, QUICKACK 1×/connection, SO_SNDBUF/RCVBUF 1 MB, 1 MB pipes.
 
-## Config (TOML, the only input; no CLI flags, no reload)
+## Config (TOML, the only input for the proxy itself; no reload)
+
+CLI (`rustle/src/cli.rs`, `cmd/`): `rustle [run] [CONFIG]` (a bare path = config, kept for Docker/e2e/bench), `init`, `check`, `status`, `service <install|uninstall|enable|disable|start|stop|restart|status|logs> [--system] [--dry-run]`, `update [--check]`, `uninstall`, `--version`. No flags change proxy behavior: everything is in the TOML. Default config lookup: `./config.toml`, `~/.config/rustle/config.toml`, `/etc/rustle/config.toml`.
 
 | Key | Default |
 |---|---|
