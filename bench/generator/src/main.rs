@@ -4,6 +4,7 @@
 mod connect;
 mod metrics;
 mod modes;
+mod rt;
 
 use clap::{Parser, Subcommand};
 use metrics::median_metrics;
@@ -59,10 +60,11 @@ struct Cli {
     /// CPU over the measured runs alone).
     #[arg(long)]
     warmup_only: bool,
-    /// Runtime worker threads (size to the cores given to the generator,
+    /// Worker threads, one `current_thread` runtime each (default: the CPUs
+    /// this process may use — size it to the cores given to the generator,
     /// or it saturates before a multi-core proxy does).
-    #[arg(long, default_value_t = 2)]
-    threads: usize,
+    #[arg(long)]
+    threads: Option<usize>,
     /// Talk TLS to the proxy (HTTPS proxy listener).
     #[arg(long)]
     proxy_tls: bool,
@@ -71,6 +73,16 @@ struct Cli {
     proxy_h2: bool,
     #[command(subcommand)]
     cmd: Cmd,
+}
+
+impl Cli {
+    fn threads(&self) -> usize {
+        self.threads
+            .unwrap_or_else(|| {
+                std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
+            })
+            .max(1)
+    }
 }
 
 #[derive(Subcommand, Clone)]
@@ -128,6 +140,13 @@ enum Cmd {
         #[arg(default_value = "0.0.0.0:9000")]
         listen: String,
     },
+    /// Static origin server: /1kb /10kb /1mb /10mb from memory, HTTP/1.1
+    /// keep-alive (replaces nginx as the benchmark origin).
+    Upstream {
+        /// Listen address.
+        #[arg(default_value = "0.0.0.0:8000")]
+        listen: String,
+    },
 }
 
 // Standalone binary (not part of the myproxy workspace build profile):
@@ -137,8 +156,16 @@ enum Cmd {
 // small stacks (like myproxy's) cuts that ~4x.
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    // Servers run their own per-thread runtimes (never returns).
+    match &cli.cmd {
+        Cmd::Sink { listen } => modes::sink::run_sink(listen, cli.threads()),
+        Cmd::Upstream { listen } => modes::upstream::run_upstream(listen, cli.threads()),
+        _ => {}
+    }
+    // Load modes: the work runs on per-thread runtimes (modes::*); this
+    // one only orchestrates (hold uses it for its tasks).
     let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(cli.threads.max(1))
+        .worker_threads(cli.threads())
         .enable_all()
         .thread_stack_size(128 * 1024)
         .build()?;
@@ -154,9 +181,7 @@ async fn amain(cli: Cli) {
     // tasks; knowing the harness footprint matters on small boxes (the
     // 4 GB dev instance once OOM'd mid-matrix). Read at start …
     let own_rss_start = rss_pages();
-    if let Cmd::Sink { listen } = &cli.cmd {
-        modes::sink::run_sink(listen).await;
-    } else {
+    {
         if !cli.no_warmup {
             if let Some(w) = modes::warmup_of(&cli.cmd) {
                 eprintln!("--- warmup");

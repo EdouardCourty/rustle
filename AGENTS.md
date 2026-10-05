@@ -46,7 +46,7 @@ bench/
   run-campaign.sh                          full campaign (5 proxies × plain/TLS/h2) → results/campaign-<ts>.txt; tables: tools/campaign-table.py
   run-scaling.sh                           multi-core curve (PROXIES, NCPUS, AUTH, PROXY_TLS, PROXY_H2) — VPS
   env.sh, docker-compose.yml               cpuset: proxy on PROXY_CPU, everything else on BENCH_CPU
-  generator/                               bench-client crate (http | flood | hold | sink)
+  generator/                               bench-client crate (http | flood | hold | sink | upstream): shared-nothing threads (one current_thread runtime each), prebuilt requests, per-thread histograms; `upstream` = static Rust origin (replaces nginx, ~3 µs/req vs ~9.5), `sink` = per-core SO_REUSEPORT discard
   dut/<proxy>/                             Dockerfiles + on/off configs (user bench / key secret1, port 8080); `# bench-ports: tls=<p> h2=<p>` line = supported modes (self-signed ECDSA P-256 cert generated at build); WORKERS read by the entrypoint (myproxy, squid); myproxy/Dockerfile.debug = strace; the myproxy Dockerfile stubs the e2e workspace member
   upstream/                                nginx (1kb/10kb/1mb/10mb objects)
   tools/local-upstream-http11.py           local HTTP/1.1 keep-alive upstream (up11.py)
@@ -119,6 +119,7 @@ Optional features: `jemalloc`, `mimalloc` (mutually exclusive; default = glibc m
 - Transports: `PROXY_TLS=1` (HTTPS proxy) / `PROXY_H2=1` (HTTP/2 over TLS) → results under `results/<proxy>-tls|-h2/`. TLS: myproxy, Squid, gost. h2: myproxy, gost (3proxy/Tinyproxy: plain only). Generator: `--proxy-tls`, `--proxy-h2` (1 h2 connection per conn, sequential requests; CONNECT = 1 stream on its own connection), certificate not verified but handshake signatures verified.
 - `KTLS=true|false` (myproxy, TLS port), `SECCOMP=unconfined` (io_uring).
 - Multi-core: `PROXY_NCPU=<n>` (first n CPUs to the proxy, the rest to the harness) or explicit `PROXY_CPU`/`BENCH_CPU`; `WORKERS=<n>`; `GEN_THREADS` = generator threads (size them on BENCH_CPU). The results.txt header = the run's parameters.
+- Harness threads: `GEN_THREADS`, `UP_THREADS` (origin), `SINK_THREADS` (compose reads them). Measured on 11 CPUs (proxy 0..n-1, harness 8-10): old harness (nginx + multi-thread generator) = 15.5 µs/req at 1 KB; new = 7 µs/req → myproxy 1 KB 264k → 330k rps (2 cores), 251k → 358k (4 cores). flood needs `GEN_THREADS=1 SINK_THREADS=2` on 3 harness cores (109 Gbps at 4 proxy cores; 1 sink thread caps ~75).
 - Generator: honors `Connection: close`/HTTP/1.0 (reconnect) and replays a GET once on a reused connection closed before any byte (RFC 9112 §9.3.1) → `reconnects` (Tinyproxy: 1 per request, it closes without announcing it).
 - Metric to track: **proxy CPU per request** (`cpu_s_per_run / (rps × duration)`), throughput being capped by the harness. Noise between two identical matrices: up to ±7 % CPU, ±15 % on flood.
 - Measured split (1kb): user ≈ 9 µs/req, sys ≈ 35 µs/req. Syscalls at the floor. Profiling: `dut/myproxy/Dockerfile.debug` image (strace). No perf on the box (paranoid=4).

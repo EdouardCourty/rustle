@@ -31,6 +31,8 @@ if [[ "${SECCOMP:-default}" == unconfined ]]; then
     export COMPOSE_FILE=docker-compose.yml:docker-compose.seccomp.yml
 fi
 GEN_THREADS="${GEN_THREADS:-2}"
+# Origin and sink threads (compose reads them): size to the CPUs they share.
+export UP_THREADS="${UP_THREADS:-1}" SINK_THREADS="${SINK_THREADS:-1}"
 # PROXY_TLS=1: HTTPS proxy benchmark (client -> proxy over TLS).
 # PROXY_H2=1: HTTP/2 over TLS (ALPN h2). Ports come from the DUT's
 # "# bench-ports: tls=<p> h2=<p>" line; a DUT without one lacks the mode.
@@ -72,7 +74,7 @@ sleep 1
 out="results/${LABEL}/auth-${AUTH}/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$out"
 : > "$out/results.txt"
-echo "# $PROXY auth=$AUTH tls=$PROXY_TLS h2=$PROXY_H2 repeat=$REPEAT workers=$WORKERS access_log=$ACCESS_LOG ktls=$KTLS seccomp=${SECCOMP:-default} proxy_cpu=$PROXY_CPU bench_cpu=$BENCH_CPU gen_threads=$GEN_THREADS $(date)" | tee -a "$out/results.txt"
+echo "# $PROXY auth=$AUTH tls=$PROXY_TLS h2=$PROXY_H2 repeat=$REPEAT workers=$WORKERS access_log=$ACCESS_LOG ktls=$KTLS seccomp=${SECCOMP:-default} proxy_cpu=$PROXY_CPU bench_cpu=$BENCH_CPU gen_threads=$GEN_THREADS up_threads=$UP_THREADS sink_threads=$SINK_THREADS $(date)" | tee -a "$out/results.txt"
 
 # CPU ticks and RSS (MB) of the proxy under test.
 # Whole container (cgroup v2), not PID 1: multi-process DUTs (Squid SMP

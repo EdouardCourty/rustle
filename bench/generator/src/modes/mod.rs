@@ -5,6 +5,7 @@ pub mod flood;
 pub mod hold;
 pub mod http;
 pub mod sink;
+pub mod upstream;
 
 use crate::metrics::Metrics;
 
@@ -38,7 +39,7 @@ pub(crate) fn warmup_of(cmd: &crate::Cmd) -> Option<crate::Cmd> {
             chunk: *chunk,
         }),
         crate::Cmd::Hold { .. } => None, // opening connections IS the test
-        crate::Cmd::Sink { .. } => None,
+        crate::Cmd::Sink { .. } | crate::Cmd::Upstream { .. } => None,
     }
 }
 
@@ -59,6 +60,7 @@ pub(crate) async fn run_once(cli: &crate::Cli, cmd: &crate::Cmd) -> Metrics {
                 *duration,
                 *requests,
                 *no_keepalive,
+                cli.threads(),
             )
             .await
         }
@@ -67,13 +69,24 @@ pub(crate) async fn run_once(cli: &crate::Cli, cmd: &crate::Cmd) -> Metrics {
             conns,
             duration,
             chunk,
-        } => flood::run_flood(&cli.proxy, &cli.api_key, target, *conns, *duration, *chunk).await,
+        } => {
+            flood::run_flood(
+                &cli.proxy,
+                &cli.api_key,
+                target,
+                *conns,
+                *duration,
+                *chunk,
+                cli.threads(),
+            )
+            .await
+        }
         crate::Cmd::Hold {
             target,
             conns,
             duration,
             ramp,
         } => hold::run_hold(&cli.proxy, &cli.api_key, target, *conns, *duration, *ramp).await,
-        crate::Cmd::Sink { .. } => unreachable!(),
+        crate::Cmd::Sink { .. } | crate::Cmd::Upstream { .. } => unreachable!(),
     }
 }
