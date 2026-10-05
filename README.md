@@ -3,7 +3,7 @@ rustle
 
 [![CI](https://github.com/EdouardCourty/rustle/actions/workflows/ci.yml/badge.svg)](https://github.com/EdouardCourty/rustle/actions/workflows/ci.yml)
 
-A fast, single-binary forward proxy in Rust: HTTP/1.1, HTTPS (CONNECT), HTTPS proxy with HTTP/2, and SOCKS5 (TCP + UDP). Built for personal use, tuned to beat the open-source proxies on throughput.
+A high-performance forward proxy written in Rust. One binary serves HTTP/1.1 and HTTPS (`CONNECT`), an HTTPS proxy with HTTP/2, WebSocket upgrades and SOCKS5 (TCP and UDP). Each CPU core runs its own event loop, connection pool and sockets, so it scales with cores while staying light on memory, and it is safe by default.
 
 Table of Contents
 -----------------
@@ -95,7 +95,7 @@ Requirements
 ------------
 
 *   Linux (x86_64, aarch64), glibc ≥ 2.35 (Debian 12, Ubuntu 22.04, RHEL 9 or newer). This is the reference platform, with all the fast paths.
-*   macOS (Apple Silicon, Intel): supported for development and personal use, without `splice`, kTLS or core pinning.
+*   macOS (Apple Silicon, Intel): fully functional, without the Linux-only fast paths (`splice`, kTLS, core pinning). Linux is the reference platform.
 
 Installation
 ------------
@@ -264,6 +264,7 @@ Limitations
 -----------
 
 *   `Upgrade` is supported for WebSocket only (not `h2c` or other protocols), over HTTP/1.1 clients; WebSocket over HTTP/2 (RFC 8441) is not. `wss://` and browsers' `ws://` go through `CONNECT`.
+*   Authentication is by API key: several keys can be configured, but there are no per-user accounts, per-user quotas or policies, and no LDAP/OIDC.
 *   Pipelined client requests are answered one at a time, then the connection closes.
 *   `Expect: 100-continue` is not fully supported.
 *   No HTTP/3 to the proxy itself (QUIC traffic works through SOCKS5 UDP).

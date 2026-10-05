@@ -31,7 +31,7 @@ api_keys = [
 ]
 # Client IPs/networks allowed to connect at all (CIDR), on every listener
 # (HTTP, HTTPS/h2, SOCKS5); others are closed before any byte is read.
-# Empty = everyone. Personal proxy behind a VPN, e.g. Tailscale:
+# Empty = everyone. A proxy behind a VPN such as Tailscale:
 # allow_clients = ["100.64.0.0/10", "fd7a:115c:a1e0::/48"]
 allow_clients = []
 # Wrong keys tolerated per client IP within failure_window, then the IP is
