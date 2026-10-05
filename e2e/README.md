@@ -1,6 +1,6 @@
 # e2e — black-box functional tests
 
-Runs **the real binary** (`target/release/myproxy`), one process per scenario, with a
+Runs **the real binary** (`target/release/rustle`), one process per scenario, with a
 generated config file. The proxy is driven from the outside by real clients: HTTP/1.1,
 HTTPS, HTTP/2, SOCKS5 TCP/UDP and the system's curl. On the other side are programmable
 local origins. Nothing is mocked, no proxy code is imported.
@@ -19,7 +19,7 @@ cargo run --profile e2e -p e2e -- [FILTER...] [--quick] [--jobs N] [--list] [--k
 - Exit code ≠ 0 when a scenario fails. On failure, the report shows the end of the
   stderr of the proxy involved.
 
-Before running the suite, build the binary under test: `cargo build --release -p myproxy`
+Before running the suite, build the binary under test: `cargo build --release -p rustle`
 (done by `make e2e`).
 
 ## Automatic checks
@@ -31,7 +31,7 @@ These checks apply to every scenario that ends with `Proxy::finish()`:
 - **shutdown**: SIGTERM must stop the process within 8 s, with exit code 0, without a
   panic and with the `shutdown complete` line.
 
-The real ports are read from the `myproxy listening` startup line, since every listener
+The real ports are read from the `rustle listening` startup line, since every listener
 is on `127.0.0.1:0`: no port races, safe parallel execution. The harness's own listeners
 have a deep accept queue (4096), so 1,000 simultaneous tunnels never overflow a target.
 

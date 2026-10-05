@@ -26,8 +26,8 @@ max_response_body_bytes = 0
 
 [tls]
 listen = "0.0.0.0:8443"
-cert = "/etc/myproxy/cert.pem"
-key = "/etc/myproxy/key.pem"
+cert = "/etc/rustle/cert.pem"
+key = "/etc/rustle/key.pem"
 ktls = false
 
 [filter]

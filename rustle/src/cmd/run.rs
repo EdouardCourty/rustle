@@ -1,36 +1,22 @@
-mod accesslog;
-mod auth;
-mod config;
-mod dns;
-mod http;
-mod ktls_offload;
-mod policy;
-mod proxy;
-mod relay;
-mod server;
-mod stream;
-mod tls;
-mod upstream;
+//! `rustle [run] [CONFIG]`: the proxy itself, until SIGTERM/SIGINT.
 
-// Global allocator selection (compile-time feature; glibc by default).
-// See myproxy/Cargo.toml [features]: jemalloc | mimalloc. The benchmark
-// measures RSS with each — per-connection alloc/free churn keeps pages
-// in RSS under glibc, the alternatives return them sooner.
-#[cfg(feature = "jemalloc")]
-#[global_allocator]
-static GLOBAL_ALLOCATOR: jemallocator::Jemalloc = jemallocator::Jemalloc;
-
-#[cfg(feature = "mimalloc")]
-#[global_allocator]
-static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Context;
-use config::Config;
 
-fn main() -> anyhow::Result<()> {
+use crate::config::Config;
+
+#[derive(clap::Args)]
+pub struct Args {
+    /// Config file (default: ./config.toml, ~/.config/rustle/config.toml,
+    /// /etc/rustle/config.toml — the first that exists)
+    pub config: Option<PathBuf>,
+}
+
+/// Runs the proxy until SIGTERM/SIGINT.
+pub fn run(args: Args) -> anyhow::Result<i32> {
+    let config_path = args.config;
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -42,10 +28,18 @@ fn main() -> anyhow::Result<()> {
         .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
         .init();
 
-    let config_path = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "config.toml".to_string());
-    let cfg = Arc::new(Config::load(Path::new(&config_path)).context("loading config")?);
+    let config_path = super::resolve_config(config_path)?;
+    let cfg = Arc::new(
+        Config::load(Path::new(&config_path))
+            .with_context(|| format!("loading config {}", config_path.display()))?,
+    );
+    if let Some((before, after)) = crate::sys::raise_nofile_limit() {
+        if after > before {
+            tracing::info!(before, after, "raised the open-file limit");
+        } else if before < 65536 {
+            tracing::warn!(limit = before, "low open-file limit: a tunnel holds ~6 fds");
+        }
+    }
 
     // The main thread only waits for signals (tiny runtime, no I/O of its
     // own): SIGHUP reopens the access log, SIGTERM/SIGINT stop and join
@@ -59,7 +53,7 @@ fn main() -> anyhow::Result<()> {
     let mut hup = signal(SignalKind::hangup()).context("SIGHUP handler")?;
     let mut term = signal(SignalKind::terminate()).context("SIGTERM handler")?;
     let mut int = signal(SignalKind::interrupt()).context("SIGINT handler")?;
-    let srv = server::start(cfg)?;
+    let srv = crate::server::start(cfg)?;
     rt.block_on(async {
         loop {
             tokio::select! {
@@ -71,5 +65,6 @@ fn main() -> anyhow::Result<()> {
         }
     });
     tracing::info!("shutdown signal: draining active connections");
-    srv.shutdown_and_join()
+    srv.shutdown_and_join()?;
+    Ok(0)
 }

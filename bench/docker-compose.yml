@@ -4,15 +4,30 @@ name: proxybench
 # BENCH_CPU hosts generator/upstream/sink. Defaults 0/1; env.sh derives
 # them from the cgroup cpuset (PROXY_NCPU=<n> for multi-core runs).
 services:
+  # Origin: Rust static server (bench-client upstream), one thread per
+  # UP_THREADS (size to the CPUs it gets). nginx (./upstream) cost ~12 us
+  # per request, twice the generator: kept as `upstream-nginx` (profile
+  # nginx) for comparison.
   upstream:
+    build: ./generator
+    entrypoint: ["bench-client"]
+    command: ["--threads", "${UP_THREADS:-1}", "upstream", "0.0.0.0:8000"]
+    cpuset: "${BENCH_CPU:-1}"
+    sysctls:
+      - net.core.somaxconn=65535
+    ulimits:
+      nofile: { soft: 524288, hard: 524288 }
+
+  upstream-nginx:
     build: ./upstream
+    profiles: ["nginx"]
     cpuset: "${BENCH_CPU:-1}"
 
   sink:
     # Rust discard server (no fork per connection, unlike socat).
     build: ./generator
     entrypoint: ["bench-client"]
-    command: ["sink", "0.0.0.0:9000"]
+    command: ["--threads", "${SINK_THREADS:-1}", "sink", "0.0.0.0:9000"]
     cpuset: "${BENCH_CPU:-1}"
     sysctls:
       - net.core.somaxconn=65535
@@ -20,7 +35,7 @@ services:
       nofile: { soft: 524288, hard: 524288 }
 
   proxy:
-    image: ${PROXY_IMAGE:-myproxy:bench}
+    image: ${PROXY_IMAGE:-rustle:bench}
     environment:
       AUTH: ${AUTH:-on}
       WORKERS: ${WORKERS:-1}

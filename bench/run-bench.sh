@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Benchmark one proxy (myproxy | 3proxy) inside Docker.
+# Benchmark one proxy (rustle | 3proxy) inside Docker.
 #
 # Usage:
-#   ./run-bench.sh [myproxy|3proxy] [on|off]
-#   REPEAT=5 ./run-bench.sh myproxy on     # more repetitions
-#   ALLOCATOR="--features mimalloc" ./run-bench.sh myproxy on   # allocator A/B
+#   ./run-bench.sh [rustle|3proxy] [on|off]
+#   REPEAT=5 ./run-bench.sh rustle on     # more repetitions
+#   ALLOCATOR="--features mimalloc" ./run-bench.sh rustle on   # allocator A/B
 #
 # Each client invocation does its own warmup + REPEAT measured runs and
 # prints one "RESULT median ..." line. This script additionally samples the
@@ -16,21 +16,23 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-PROXY="${1:-myproxy}"
+PROXY="${1:-rustle}"
 AUTH="${2:-on}"
 REPEAT="${REPEAT:-3}"
 # Multi-core: WORKERS = shards/workers of the proxy (DUTs that support it),
 # PROXY_NCPU = CPUs given to the proxy (env.sh), GEN_THREADS = generator
 # runtime threads (size to BENCH_CPU or the generator saturates first).
 export WORKERS="${WORKERS:-1}"
-export ACCESS_LOG="${ACCESS_LOG:-off}"   # myproxy: off | errors | all
-export KTLS="${KTLS:-false}"               # myproxy TLS listener: kernel TLS on/off
+export ACCESS_LOG="${ACCESS_LOG:-off}"   # rustle: off | errors | all
+export KTLS="${KTLS:-false}"               # rustle TLS listener: kernel TLS on/off
 # SECCOMP=unconfined: proxy container without Docker's seccomp profile
 # (needed by io_uring DUTs; use it for every DUT of such a comparison).
 if [[ "${SECCOMP:-default}" == unconfined ]]; then
     export COMPOSE_FILE=docker-compose.yml:docker-compose.seccomp.yml
 fi
 GEN_THREADS="${GEN_THREADS:-2}"
+# Origin and sink threads (compose reads them): size to the CPUs they share.
+export UP_THREADS="${UP_THREADS:-1}" SINK_THREADS="${SINK_THREADS:-1}"
 # PROXY_TLS=1: HTTPS proxy benchmark (client -> proxy over TLS).
 # PROXY_H2=1: HTTP/2 over TLS (ALPN h2). Ports come from the DUT's
 # "# bench-ports: tls=<p> h2=<p>" line; a DUT without one lacks the mode.
@@ -72,7 +74,7 @@ sleep 1
 out="results/${LABEL}/auth-${AUTH}/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$out"
 : > "$out/results.txt"
-echo "# $PROXY auth=$AUTH tls=$PROXY_TLS h2=$PROXY_H2 repeat=$REPEAT workers=$WORKERS access_log=$ACCESS_LOG ktls=$KTLS seccomp=${SECCOMP:-default} proxy_cpu=$PROXY_CPU bench_cpu=$BENCH_CPU gen_threads=$GEN_THREADS $(date)" | tee -a "$out/results.txt"
+echo "# $PROXY auth=$AUTH tls=$PROXY_TLS h2=$PROXY_H2 repeat=$REPEAT workers=$WORKERS access_log=$ACCESS_LOG ktls=$KTLS seccomp=${SECCOMP:-default} proxy_cpu=$PROXY_CPU bench_cpu=$BENCH_CPU gen_threads=$GEN_THREADS up_threads=$UP_THREADS sink_threads=$SINK_THREADS $(date)" | tee -a "$out/results.txt"
 
 # CPU ticks and RSS (MB) of the proxy under test.
 # Whole container (cgroup v2), not PID 1: multi-process DUTs (Squid SMP

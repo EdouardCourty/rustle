@@ -74,8 +74,8 @@ max_response_body_bytes = 0
 # Needs cert and key below. Browsers use it via PAC "HTTPS host:port";
 # curl via --proxy https://host:port (add --proxy-http2 for HTTP/2).
 listen = ""
-cert = "/etc/myproxy/cert.pem"
-key = "/etc/myproxy/key.pem"
+cert = "/etc/rustle/cert.pem"
+key = "/etc/rustle/key.pem"
 handshake_timeout = "10s"
 # Offer HTTP/2 through ALPN (CONNECT and plain requests as h2 streams).
 http2 = true

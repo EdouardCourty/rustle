@@ -230,7 +230,9 @@ fn sizes(v: &Variant, op: Op) -> Vec<usize> {
     match op {
         // Tiny bodies one byte at a time are slow and test nothing new.
         Op::Get("chunked-small") => s.retain(|&n| n <= 1 << 20),
-        Op::Udp => s = vec![1, 512, 1472, 8192, 65000],
+        // macOS caps a UDP send at net.inet.udp.maxdgram (9216).
+        Op::Udp if cfg!(target_os = "linux") => s = vec![1, 512, 1472, 8192, 65000],
+        Op::Udp => s = vec![1, 512, 1472, 8192],
         _ => {
             if v.big && !quick_mode() {
                 s.push(BIG);

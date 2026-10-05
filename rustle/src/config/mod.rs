@@ -271,8 +271,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
         for p in [
             "config.toml.example",
-            "../bench/dut/myproxy/myproxy-on.toml",
-            "../bench/dut/myproxy/myproxy-off.toml",
+            "../bench/dut/rustle/rustle-on.toml",
+            "../bench/dut/rustle/rustle-off.toml",
         ] {
             Config::load(&root.join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
         }

@@ -14,7 +14,7 @@ ARG ALLOCATOR
 # (AVX2/BMI on this class); rebuild on older hardware.
 ENV RUSTFLAGS="-C target-cpu=native"
 COPY Cargo.toml ./
-COPY myproxy ./myproxy
+COPY rustle ./rustle
 COPY bench/generator ./bench/generator
 # Workspace member, not built here: its manifest and a stub main suffice.
 COPY e2e/Cargo.toml ./e2e/Cargo.toml
@@ -22,26 +22,26 @@ COPY e2e/Cargo.toml ./e2e/Cargo.toml
 RUN if echo "$ALLOCATOR" | grep -q jemalloc; then \
         apt-get update && apt-get install -y --no-install-recommends autoconf make && \
         rm -rf /var/lib/apt/lists/*; fi
-RUN mkdir -p myproxy/src bench/generator/src e2e/src && \
-    printf 'fn main() {}\n' > myproxy/src/main.rs && \
+RUN mkdir -p rustle/src bench/generator/src e2e/src && \
+    printf 'fn main() {}\n' > rustle/src/main.rs && \
     printf 'fn main() {}\n' > bench/generator/src/main.rs && \
     printf 'fn main() {}\n' > e2e/src/main.rs && \
-    cargo build --release -p myproxy
-COPY myproxy/src ./myproxy/src
+    cargo build --release -p rustle
+COPY rustle/src ./rustle/src
 COPY bench/generator/src ./bench/generator/src
 # Touch: source mtimes from the context can be older than the dummy-built
 # artifacts, which would make cargo keep the dummy binaries (mtime trap).
-RUN find myproxy/src bench/generator/src -type f -exec touch {} + && \
-    cargo build --release -p myproxy $ALLOCATOR
+RUN find rustle/src bench/generator/src -type f -exec touch {} + && \
+    cargo build --release -p rustle $ALLOCATOR
 
 FROM debian:bookworm-slim
-COPY --from=build /build/target/release/myproxy /usr/local/bin/myproxy
-COPY --from=cert /cert.pem /key.pem /etc/myproxy/
-COPY bench/dut/myproxy/myproxy-on.toml /etc/myproxy/on.toml
-COPY bench/dut/myproxy/myproxy-off.toml /etc/myproxy/off.toml
+COPY --from=build /build/target/release/rustle /usr/local/bin/rustle
+COPY --from=cert /cert.pem /key.pem /etc/rustle/
+COPY bench/dut/rustle/rustle-on.toml /etc/rustle/on.toml
+COPY bench/dut/rustle/rustle-off.toml /etc/rustle/off.toml
 ENV AUTH=on WORKERS=1 ACCESS_LOG=off KTLS=false
 # bench-ports: tls=8443 h2=8443 (HTTP/2 via ALPN on the HTTPS listener)
 EXPOSE 8080 8443
 # WORKERS (multi-core runs), ACCESS_LOG (access log cost) and KTLS
 # (kernel TLS A/B) are patched into the config by the harness.
-ENTRYPOINT ["sh", "-c", "sed -e \"s/^workers = .*/workers = ${WORKERS:-1}/\" -e \"s/^access = .*/access = \\\"${ACCESS_LOG:-off}\\\"/\" -e \"s/^ktls = .*/ktls = ${KTLS:-false}/\" /etc/myproxy/${AUTH:-on}.toml > /tmp/myproxy.toml && exec myproxy /tmp/myproxy.toml"]
+ENTRYPOINT ["sh", "-c", "sed -e \"s/^workers = .*/workers = ${WORKERS:-1}/\" -e \"s/^access = .*/access = \\\"${ACCESS_LOG:-off}\\\"/\" -e \"s/^ktls = .*/ktls = ${KTLS:-false}/\" /etc/rustle/${AUTH:-on}.toml > /tmp/rustle.toml && exec rustle /tmp/rustle.toml"]

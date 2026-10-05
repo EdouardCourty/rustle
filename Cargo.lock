@@ -580,33 +580,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "myproxy"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "bytes",
- "h2",
- "http",
- "httparse",
- "humantime",
- "jemallocator",
- "ktls",
- "libc",
- "mimalloc",
- "rcgen",
- "rustls",
- "serde",
- "socket2 0.5.10",
- "subtle",
- "tokio",
- "tokio-rustls",
- "toml",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "nix"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -848,6 +821,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf0c4a6ece9950b9abdb62b1cfcf2a68b3b67a10ba445b3bb85be2a293d0632"
 dependencies = [
  "nom",
+]
+
+[[package]]
+name = "rustle"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "bytes",
+ "clap",
+ "h2",
+ "http",
+ "httparse",
+ "humantime",
+ "jemallocator",
+ "ktls",
+ "libc",
+ "mimalloc",
+ "rcgen",
+ "ring",
+ "rustls",
+ "serde",
+ "socket2 0.5.10",
+ "subtle",
+ "tokio",
+ "tokio-rustls",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

@@ -3,17 +3,19 @@
 Forward HTTP/HTTPS (CONNECT) proxy in Rust, Tokio architecture.
 **Goal: beat every open-source proxy on throughput, first on 1 core, then multi-core.** Current reference: 3proxy.
 
+Platforms: **Linux (reference, all fast paths) and macOS (dev/test)**. Off Linux: no splice (`relay/splice_stub.rs`: adaptive copy only), no kTLS, no `TCP_QUICKACK`/`DEFER_ACCEPT`, `pin_cores` ignored, shards share one cloned listener (macOS `SO_REUSEPORT` does not balance). Bench = Docker/Linux only. e2e on macOS uses `lsof`/`ps` instead of `/proc`; UDP matrix capped at 8 KB.
+
 Language: **everything in English** — code, comments, commit messages, README, RESULTS.md, all docs. (Commits before 2026-10-04 are in French; history is not rewritten.)
 
 ## Layout
 
 ```
-Cargo.toml            workspace (myproxy + bench/generator + e2e), [profile.release] lto=fat, codegen-units=1; [profile.e2e] (release without LTO) for the e2e harness
+Cargo.toml            workspace (rustle + bench/generator + e2e), [profile.release] lto=fat, codegen-units=1; [profile.e2e] (release without LTO) for the e2e harness
 Makefile              help build test e2e e2e-quick fmt check clippy images up down smoke bench bench-all bench-scaling latest clean
-myproxy/              the proxy
+rustle/              the proxy
   config.toml.example
   src/
-    main.rs           tracing (RUST_LOG, on stderr, ANSI only on a TTY), config = argv[1] (default config.toml), signal handlers installed, then server::start, then wait for SIGTERM/SIGINT (SIGHUP = log reopen)
+    main.rs           dispatch (cli.rs: run | init | check | status | service | update | uninstall), `run`: tracing (RUST_LOG, on stderr, ANSI only on a TTY), config = path or lookup, RLIMIT_NOFILE raised, signal handlers installed, then server::start, then wait for SIGTERM/SIGINT (SIGHUP = log reopen)
     config/mod.rs     TOML → structs (humantime for durations)
     server/mod.rs     shards (thread + current_thread runtime + SO_REUSEPORT plain + TLS listeners + pool), TLS handshake then h2/h1 dispatch by ALPN, global max_connections counter, admin /health, trim, 5 s graceful shutdown
     stream.rs         ClientStream trait (TcpStream | TlsStream): tcp()/into_tcp() = splice/QUICKACK paths, TLS = user-space copy; ReadAhead under rustls (which reads 4 KB at a time): adaptive 64 KB buffer, only for sustained flows
@@ -35,17 +37,19 @@ myproxy/              the proxy
     policy.rs         DestPolicy (allowed ports before DNS, non-public ranges + deny CIDRs on the resolved address); ClientPolicy (client IP allowlist, at accept); AuthLimiter (per-IP bans after N wrong keys, lock-free while nobody fails)
     dns.rs            positive cache, TTL (outside the lock), Mutex<HashMap>
     upstream.rs       per-origin keep-alive pool (LIFO)
-e2e/                  black-box functional tests (see e2e/README.md): the release binary started per scenario (generated config, ports read from the `myproxy listening` line), programmable local origins/targets, HTTP/1.1, TLS, h2, SOCKS5, curl clients
+install.sh            curl|sh installer (POSIX sh): detects target, glibc gate, SHA-256 check, no sudo; tested by `.github/scripts/test-installer.sh` (CI `installer` job)
+.github/workflows/    ci.yml (lint, tests+e2e on Linux/macOS, installer), release.yml (tag vX.Y.Z → 4 targets → SHA256SUMS + VERSION + attestation → smoke install)
+e2e/                  black-box functional tests (see e2e/README.md): the release binary started per scenario (generated config, ports read from the `rustle listening` line), programmable local origins/targets, HTTP/1.1, TLS, h2, SOCKS5, curl clients
   src/harness/        proxy.rs (Config, Proxy: spawn, /proc, signals, finish = CLOSE_WAIT leak check + clean SIGTERM), origin.rs, targets.rs, payload.rs, certs.rs
   src/clients/        http1.rs, h2.rs, socks5.rs, curl.rs
   src/suites/         one file per feature: matrix http connect h2 socks5 uploads limits security robustness process logs interop_curl
 bench/
-  run-bench.sh <proxy> <on|off>            matrix (proxy = myproxy|3proxy|squid|gost|tinyproxy)
+  run-bench.sh <proxy> <on|off>            matrix (proxy = rustle|3proxy|squid|gost|tinyproxy)
   run-campaign.sh                          full campaign (5 proxies × plain/TLS/h2) → results/campaign-<ts>.txt; tables: tools/campaign-table.py
   run-scaling.sh                           multi-core curve (PROXIES, NCPUS, AUTH, PROXY_TLS, PROXY_H2) — VPS
   env.sh, docker-compose.yml               cpuset: proxy on PROXY_CPU, everything else on BENCH_CPU
-  generator/                               bench-client crate (http | flood | hold | sink)
-  dut/<proxy>/                             Dockerfiles + on/off configs (user bench / key secret1, port 8080); `# bench-ports: tls=<p> h2=<p>` line = supported modes (self-signed ECDSA P-256 cert generated at build); WORKERS read by the entrypoint (myproxy, squid); myproxy/Dockerfile.debug = strace; the myproxy Dockerfile stubs the e2e workspace member
+  generator/                               bench-client crate (http | flood | hold | sink | upstream): shared-nothing threads (one current_thread runtime each), prebuilt requests, per-thread histograms; `upstream` = static Rust origin (replaces nginx, ~3 µs/req vs ~9.5), `sink` = per-core SO_REUSEPORT discard
+  dut/<proxy>/                             Dockerfiles + on/off configs (user bench / key secret1, port 8080); `# bench-ports: tls=<p> h2=<p>` line = supported modes (self-signed ECDSA P-256 cert generated at build); WORKERS read by the entrypoint (rustle, squid); rustle/Dockerfile.debug = strace; the rustle Dockerfile stubs the e2e workspace member
   upstream/                                nginx (1kb/10kb/1mb/10mb objects)
   tools/local-upstream-http11.py           local HTTP/1.1 keep-alive upstream (up11.py)
   docker-compose.seccomp.yml               `SECCOMP=unconfined` overlay (io_uring; apply it to every compared DUT)
@@ -67,7 +71,9 @@ bench/
 - **Limits**: `max_request_body_bytes` → 413, `max_response_body_bytes` → 502 (declared CL) or cut (unknown).
 - **Measured syscalls**: ~2 recv + 2 send / request, epoll_ctl ≈ 0. NODELAY 1×/socket, QUICKACK 1×/connection, SO_SNDBUF/RCVBUF 1 MB, 1 MB pipes.
 
-## Config (TOML, the only input; no CLI flags, no reload)
+## Config (TOML, the only input for the proxy itself; no reload)
+
+CLI (clap derive: `rustle/src/cli.rs` = `Cli` + `Command`; one file per command in `rustle/src/cmd/` with its own `Args` + `run`): `rustle [run] [CONFIG]` (a bare path = config, kept for Docker/e2e/bench), `init`, `check`, `status`, `service <install|uninstall|enable|disable|start|stop|restart|status|logs> [--system] [--dry-run]`, `update [--check]`, `uninstall`, `--version`. No flags change proxy behavior: everything is in the TOML. Default config lookup: `./config.toml`, `~/.config/rustle/config.toml`, `/etc/rustle/config.toml`.
 
 | Key | Default |
 |---|---|
@@ -96,13 +102,13 @@ bench/
 ## Commands
 
 ```bash
-cargo build --release -p myproxy         # no target-cpu=native locally (only in the bench Dockerfile)
-cargo test -p myproxy                    # inline tests (#[cfg(test)]), including in-process end-to-end ones in server/mod.rs
+cargo build --release -p rustle         # no target-cpu=native locally (only in the bench Dockerfile)
+cargo test -p rustle                    # inline tests (#[cfg(test)]), including in-process end-to-end ones in server/mod.rs
 make check                               # fmt + clippy -D warnings + tests + e2e --quick (~20 s) — before every commit
 make e2e [F="filter"]                    # full e2e suite (~2 min, ~530 scenarios) — before every milestone
 cargo run --profile e2e -p e2e -- --list # scenarios; --keep keeps the directories (config, logs)
-make bench P=myproxy A=off R=3           # full matrix (see below)
-BENCH_ONLY=<test> BENCH_SEED=2004113323 bench/run-bench.sh myproxy off
+make bench P=rustle A=off R=3           # full matrix (see below)
+BENCH_ONLY=<test> BENCH_SEED=2004113323 bench/run-bench.sh rustle off
 ```
 
 Optional features: `jemalloc`, `mimalloc` (mutually exclusive; default = glibc malloc).
@@ -114,12 +120,13 @@ Optional features: `jemalloc`, `mimalloc` (mutually exclusive; default = glibc m
 - Reference seed **`2004113323`**. Shuffled test order (LCG), proxy restarted before each test. Noise ±3–5 %: below that, no conclusion.
 - Tests: http-1kb (64 conns), http-10kb (16), http-1mb (16), http-10mb (8), http-1kb-short (no keep-alive), flood-8, hold 1k/5k/10k/25k.
 - Output: `RESULT median ...` lines (rps, mbps, p50, errors, `err_kinds`, `reconnects`, proxy/generator/upstream CPU, `rss_mb` = residual after the test, `peak_rss_mb` = VmHWM = real cost). Proxy CPU = the container's cgroup, RSS = sum over processes (multi-process DUTs such as Squid SMP included).
-- Transports: `PROXY_TLS=1` (HTTPS proxy) / `PROXY_H2=1` (HTTP/2 over TLS) → results under `results/<proxy>-tls|-h2/`. TLS: myproxy, Squid, gost. h2: myproxy, gost (3proxy/Tinyproxy: plain only). Generator: `--proxy-tls`, `--proxy-h2` (1 h2 connection per conn, sequential requests; CONNECT = 1 stream on its own connection), certificate not verified but handshake signatures verified.
-- `KTLS=true|false` (myproxy, TLS port), `SECCOMP=unconfined` (io_uring).
+- Transports: `PROXY_TLS=1` (HTTPS proxy) / `PROXY_H2=1` (HTTP/2 over TLS) → results under `results/<proxy>-tls|-h2/`. TLS: rustle, Squid, gost. h2: rustle, gost (3proxy/Tinyproxy: plain only). Generator: `--proxy-tls`, `--proxy-h2` (1 h2 connection per conn, sequential requests; CONNECT = 1 stream on its own connection), certificate not verified but handshake signatures verified.
+- `KTLS=true|false` (rustle, TLS port), `SECCOMP=unconfined` (io_uring).
 - Multi-core: `PROXY_NCPU=<n>` (first n CPUs to the proxy, the rest to the harness) or explicit `PROXY_CPU`/`BENCH_CPU`; `WORKERS=<n>`; `GEN_THREADS` = generator threads (size them on BENCH_CPU). The results.txt header = the run's parameters.
+- Harness threads: `GEN_THREADS`, `UP_THREADS` (origin), `SINK_THREADS` (compose reads them). Measured on 11 CPUs (proxy 0..n-1, harness 8-10): old harness (nginx + multi-thread generator) = 15.5 µs/req at 1 KB; new = 7 µs/req → rustle 1 KB 264k → 330k rps (2 cores), 251k → 358k (4 cores). flood needs `GEN_THREADS=1 SINK_THREADS=2` on 3 harness cores (109 Gbps at 4 proxy cores; 1 sink thread caps ~75).
 - Generator: honors `Connection: close`/HTTP/1.0 (reconnect) and replays a GET once on a reused connection closed before any byte (RFC 9112 §9.3.1) → `reconnects` (Tinyproxy: 1 per request, it closes without announcing it).
 - Metric to track: **proxy CPU per request** (`cpu_s_per_run / (rps × duration)`), throughput being capped by the harness. Noise between two identical matrices: up to ±7 % CPU, ±15 % on flood.
-- Measured split (1kb): user ≈ 9 µs/req, sys ≈ 35 µs/req. Syscalls at the floor. Profiling: `dut/myproxy/Dockerfile.debug` image (strace). No perf on the box (paranoid=4).
+- Measured split (1kb): user ≈ 9 µs/req, sys ≈ 35 µs/req. Syscalls at the floor. Profiling: `dut/rustle/Dockerfile.debug` image (strace). No perf on the box (paranoid=4).
 - `ALLOCATOR="--features mimalloc" ./run-bench.sh …` for an allocator A/B (retested: neutral). **`err_kinds` must be empty.**
 - Do not build images in parallel (OOM on 4 GB). The harness shares 2 cores: ceiling ~23 µs/req on the generator+nginx side.
 - The ×9.5 vs 3proxy at 1 KB comes from 3proxy's 40 ms delayed ACK: **never publish it without that caveat**.
@@ -150,7 +157,7 @@ Optional features: `jemalloc`, `mimalloc` (mutually exclusive; default = glibc m
 
 ## Known state (2026-10-04, branch `m10.4-syscalls`, pushed as `origin/main`)
 
-- `make check` green: fmt, clippy `-D warnings` (workspace, e2e included), `cargo test -p myproxy` 63/63 (unit + in-process end-to-end), e2e `--quick` 62 scenarios. `make e2e`: 524 OK + 3 SKIP (curl 7.88 without `--proxy-http2`) out of 527, ~2 min, 3 consecutive runs without a flake. No CI.
+- `make check` green: fmt, clippy `-D warnings` (workspace, e2e included), `cargo test -p rustle` 63/63 (unit + in-process end-to-end), e2e `--quick` 62 scenarios. `make e2e`: 524 OK + 3 SKIP (curl 7.88 without `--proxy-http2`) out of 527, ~2 min, 3 consecutive runs without a flake. No CI.
 - Done since M10.4: chunked fixes, current_thread + SO_REUSEPORT shards (M12), HTTPS proxy + HTTP/2 (M13), policy/allowlist/bans/slowloris/SOCKS5 (M14), chunked uploads + SOCKS5 UDP (M15), access log (M16), opt-in kTLS (M17), io_uring prototype without gain (M18), h2 windows (M20), M21 optimization pass (splice/pipes, TLS AES-128, copy-free h2, pool 256, DEFER_ACCEPT, multi-core fixes, configurable buffers, bench protocol M21.5), e2e suite + 13 fixes it found (M22).
 - Reference campaign: 2026-10-03 (`results/campaign-20261003-015025.txt`), protocol M21.5. Produced by `bench/run-campaign.sh` (5 proxies × plain/TLS/h2), tables by `bench/tools/campaign-table.py`, summarized in `bench/RESULTS.md` and the README.
 - The bench (static nginx, Content-Length) exercises neither chunked, SOCKS5 nor uploads: covered by the tests and the e2e suite.

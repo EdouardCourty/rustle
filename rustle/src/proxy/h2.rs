@@ -151,7 +151,7 @@ fn reply(respond: &mut SendResponse<Bytes>, status: StatusCode) {
     if status == StatusCode::PROXY_AUTHENTICATION_REQUIRED {
         resp.headers_mut().insert(
             http::header::PROXY_AUTHENTICATE,
-            HeaderValue::from_static("Basic realm=\"myproxy\""),
+            HeaderValue::from_static("Basic realm=\"rustle\""),
         );
     }
     let _ = respond.send_response(resp, true);

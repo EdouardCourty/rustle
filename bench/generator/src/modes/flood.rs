@@ -1,17 +1,15 @@
 //! CONNECT tunnels with bulk upload: measures raw Gbps through the tunnel
-//! plus tunnel-establishment latencies.
+//! plus tunnel-establishment latencies. Shared-nothing threads like the
+//! HTTP mode (see `rt`).
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tokio::io::AsyncWriteExt;
 use tokio::task::JoinSet;
 
 use crate::connect::{connect_via_proxy, resolve_once};
-use crate::metrics::{pcts_ms, Metrics};
-
-// ---------------------------------------------------------------------------
+use crate::metrics::{Hist, Metrics};
+use crate::rt::{run_threads, share};
 
 pub(crate) async fn run_flood(
     proxy: &str,
@@ -20,59 +18,72 @@ pub(crate) async fn run_flood(
     conns: u32,
     duration: u64,
     chunk: usize,
+    threads: usize,
 ) -> Metrics {
     let deadline = Instant::now() + Duration::from_secs(duration);
     let target_owned = resolve_once(target)
         .await
         .unwrap_or_else(|e| panic!("resolve {target}: {e}"));
-    let target: &str = &target_owned;
-    let total_bytes = Arc::new(AtomicU64::new(0));
-    let errors = Arc::new(AtomicU64::new(0));
-    let est_lats: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
-
-    let mut set = JoinSet::new();
-    for _ in 0..conns {
-        let proxy = proxy.to_string();
-        let api_key = api_key.to_string();
-        let target = target.to_string();
-        let total_bytes = total_bytes.clone();
-        let errors = errors.clone();
-        let est_lats = est_lats.clone();
-        set.spawn(async move {
-            let t0 = Instant::now();
-            let mut stream = match connect_via_proxy(&proxy, &target, &api_key).await {
-                Ok(s) => s,
-                Err(e) => {
-                    errors.fetch_add(1, Ordering::Relaxed);
-                    eprintln!("flood connect error: {e}");
-                    return;
+    let (proxy_s, key_s, target_s) = (proxy.to_string(), api_key.to_string(), target_owned.clone());
+    let parts = tokio::task::spawn_blocking(move || {
+        run_threads(threads, move |ti| {
+            let (proxy, key, target) = (proxy_s.clone(), key_s.clone(), target_s.clone());
+            let mine = share(conns, threads, ti);
+            async move {
+                let mut set = JoinSet::new();
+                for _ in 0..mine {
+                    let (proxy, key, target) = (proxy.clone(), key.clone(), target.clone());
+                    set.spawn(async move {
+                        let t0 = Instant::now();
+                        let mut stream = match connect_via_proxy(&proxy, &target, &key).await {
+                            Ok(s) => s,
+                            Err(e) => {
+                                eprintln!("flood connect error: {e}");
+                                return (0u64, 1u64, None);
+                            }
+                        };
+                        let est = t0.elapsed();
+                        let buf = vec![0x5au8; chunk.max(1024)];
+                        let mut sent: u64 = 0;
+                        while Instant::now() < deadline {
+                            match stream.write(&buf).await {
+                                Ok(0) | Err(_) => break,
+                                Ok(n) => sent += n as u64,
+                            }
+                        }
+                        (sent, 0, Some(est))
+                    });
                 }
-            };
-            est_lats.lock().unwrap().push(t0.elapsed().as_secs_f64());
-            let buf = vec![0x5au8; chunk.max(1024)];
-            let mut sent: u64 = 0;
-            while Instant::now() < deadline {
-                match stream.write(&buf).await {
-                    Ok(0) => break,
-                    Ok(n) => sent += n as u64,
-                    Err(_) => break,
+                let (mut bytes, mut errors, mut hist) = (0u64, 0u64, Hist::new());
+                while let Some(res) = set.join_next().await {
+                    match res {
+                        Ok((b, e, est)) => {
+                            bytes += b;
+                            errors += e;
+                            if let Some(d) = est {
+                                hist.record(d);
+                            }
+                        }
+                        Err(e) => eprintln!("task error: {e}"),
+                    }
                 }
+                (bytes, errors, hist)
             }
-            total_bytes.fetch_add(sent, Ordering::Relaxed);
-        });
+        })
+    })
+    .await
+    .expect("worker threads");
+    let (mut bytes, mut errors, mut hist) = (0u64, 0u64, Hist::new());
+    for (b, e, h) in parts {
+        bytes += b;
+        errors += e;
+        hist.merge(&h);
     }
-    while let Some(res) = set.join_next().await {
-        if let Err(e) = res {
-            eprintln!("task error: {e}");
-        }
-    }
-    let bytes = total_bytes.load(Ordering::Relaxed);
-    let lat = est_lats.lock().unwrap().clone();
-    let (p50, p95, p99) = pcts_ms(&lat);
+    let (p50, p95, p99) = hist.pcts_ms();
     Metrics {
         statics: vec![
             ("mode", "flood".to_string()),
-            ("target", target.to_string()),
+            ("target", target_owned),
             ("conns", conns.to_string()),
             ("duration", duration.to_string()),
             ("chunk", chunk.to_string()),
@@ -83,7 +94,7 @@ pub(crate) async fn run_flood(
             ("p50_ms", p50),
             ("p95_ms", p95),
             ("p99_ms", p99),
-            ("errors", errors.load(Ordering::Relaxed) as f64),
+            ("errors", errors as f64),
         ],
     }
 }
