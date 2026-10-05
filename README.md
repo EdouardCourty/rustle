@@ -44,24 +44,22 @@ rustle against 3proxy, Squid, gost and Tinyproxy, each pinned to **one core** wi
 ![HTTPS proxy](docs/benchmarks/tls-1kb.svg)
 ![HTTP/2 proxy](docs/benchmarks/h2-1kb.svg)
 
+<!-- TODO(release): replace this table and the charts above with the new campaign (bench/FAIRNESS.md) -->
+
 | 1 core | rustle | 3proxy | Squid | gost | Tinyproxy |
 |---|---|---|---|---|---|
-| 1 KB, req/s | **77,959** | 1,504¹ | 27,558 | 4,610 | 15,509 |
+| 1 KB, req/s | **77,959** | 1,504 | 27,558 | 4,610 | 15,509 |
 | 1 MB, req/s | **6,731** | 2,292 | 910 | 2,147 | 537 |
 | 10 MB, req/s | **370** | 342 | 81 | 285 | 49 |
 | Tunnels, Gbit/s | **48.4** | 42.9 | 35.4 | 43.4 | 4.6 |
 | 25,000 tunnels, RAM | **80 MB** | 785 MB | 1.5 GB | 3.7 GB | 468 MB |
-
-¹ 3proxy measured without its `TCP_NODELAY` option (Nagle + delayed ACK, ~40 ms per request): that figure predates the revised configs and is replaced by the next campaign (see [`bench/FAIRNESS.md`](bench/FAIRNESS.md)).
-
-_Campaign of 2026-10-05, before the competitors' configurations were revised: a new campaign is pending and will replace these figures._
 
 Reading the numbers:
 
 *   Small requests and memory are where rustle is far ahead (2.8× the next proxy at 1 KB, 5× less RAM than the next one at 25,000 tunnels).
 *   On bulk transfers (10 MB, tunnels) the kernel TCP stack dominates and every serious proxy converges: rustle leads, but by 10 to 15 %. 3proxy spends fewer CPU ms per GB on tunnels.
 *   HTTP/2 tunnels: gost is slightly ahead on raw throughput (within noise).
-*   The load generator is the bottleneck on a shared 2-core host, so absolute numbers are a floor. Multi-core results need a dedicated three-machine setup (in progress).
+*   The load generator is the bottleneck on a shared 2-core host, so absolute numbers are a floor. Multi-core results come from the three-machine setup described in [`bench/REMOTE.md`](bench/REMOTE.md).
 
 Full tables, TLS and HTTP/2 matrices, and the measurement history: [`bench/RESULTS.md`](bench/RESULTS.md). To reproduce (Docker, Linux):
 

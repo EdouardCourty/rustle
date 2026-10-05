@@ -7,6 +7,8 @@
 #   ./run-campaign.sh                      # auth on, all DUTs
 #   AUTH=off PROXIES="rustle squid" ./run-campaign.sh
 #
+# REMOTE=1: the same campaign on three machines (run-remote.sh; GEN_HOST, PROXY_HOST,
+# UP_HOST and the *_ADDR variables of bench/REMOTE.md).
 # MATRIX=ws: the WebSocket matrix (plain and TLS only), index results/campaign-ws-<ts>.txt.
 # Index of the runs: results/campaign-<ts>.txt ("<proxy> <mode> <results.txt>").
 # Tables: tools/campaign-table.py results/campaign-<ts>.txt
@@ -17,6 +19,7 @@ PROXIES="${PROXIES:-rustle 3proxy squid gost tinyproxy}"
 AUTH="${AUTH:-on}"
 export BENCH_SEED="${BENCH_SEED:-2004113323}"
 mkdir -p results
+if [[ "${REMOTE:-0}" == 1 ]]; then RUNNER=remote; else RUNNER=bench; fi
 if [[ "${MATRIX:-}" == ws ]]; then pfx=campaign-ws; else pfx=campaign; fi
 index="results/$pfx-$(date +%Y%m%d-%H%M%S).txt"
 echo "# campaign proxies=[$PROXIES] auth=$AUTH seed=$BENCH_SEED $(date)" | tee "$index"
@@ -24,7 +27,7 @@ echo "# campaign proxies=[$PROXIES] auth=$AUTH seed=$BENCH_SEED $(date)" | tee "
 run() { # <proxy> <mode> [ENV=...]
     local p="$1" mode="$2"; shift 2
     echo "==> $p $mode" | tee -a "$index"
-    env "$@" ./run-bench.sh "$p" "$AUTH" 2>&1 | tee /dev/stderr \
+    env "$@" "./run-${RUNNER}.sh" "$p" "$AUTH" 2>&1 | tee /dev/stderr \
         | grep -a '^==> results in' | sed "s/^==> results in /$p $mode /" >> "$index"
 }
 

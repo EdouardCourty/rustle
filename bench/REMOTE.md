@@ -14,6 +14,18 @@ Same matrix, seed, shuffle and `RESULT` lines as `run-bench.sh` (shared `matrix.
 *   Proxy host: as many cores as the largest point of the scaling curve (`NCPUS`). Generator and origin hosts: at least as many cores as the proxy host, preferably twice (the generator needs ~7 µs of CPU per request).
 *   Docker and SSH key access (`BatchMode`) from the machine you run the script on, to all three. The repo is checked out at the same path on every host (`REMOTE_DIR`, default `~/rustle`); `git pull` it everywhere before a run.
 
+## Renting the machines
+
+Three on-demand VMs in the same region and private network, **dedicated vCPUs** (shared or burstable vCPUs make a proxy benchmark meaningless), billed by the hour: a full campaign is a few hours, i.e. a few euros.
+
+*   **Hetzner Cloud, CCX line (recommended: cheapest dedicated vCPUs, private network, hourly billing).** Proxy host CCX33 (8 vCPU), generator host CCX43 (16 vCPU, it must out-run the proxy), origin host CCX33. About €0.9 per hour for the three at 2026 list prices. Same location, one private network, Debian 12 or Ubuntu 24.04.
+*   **Scaleway Elastic Metal** (bare metal, 8C/16T, 10 Gbit/s private network option): the most deterministic and the best for the flood tests, about €1.2 per hour for three with the network option.
+*   **Avoid** AWS "up to 12.5 Gbit/s" instances (baseline 3 Gbit/s, burst credits: flood results would measure the credits) and any shared-vCPU or burstable class.
+
+Before the first run, measure what you actually have: `iperf3 -P 4 -c <origin>` from the generator and the proxy host. The tunnel (`flood`) numbers are capped by that link; the request-rate, latency and CPU-per-request numbers are not. If the link is under ~10 Gbit/s, read the flood results as CPU per GB, not as Gbit/s.
+
+Setup per machine: Docker, this repository at the same path, SSH key access from your workstation, the sysctls below. Destroy the machines when the campaign is done.
+
 ## Host settings (all three, once)
 
 ```sh
@@ -36,6 +48,9 @@ PROXY_TLS=1 ./bench/run-remote.sh rustle on                      # HTTPS proxy (
 
 REMOTE=1 NCPUS="1 2 4 8" PROXIES="rustle 3proxy squid gost" ./bench/run-scaling.sh   # scaling curve
 DRY_RUN=1 ./bench/run-remote.sh rustle on                        # print the commands only
+
+REMOTE=1 ./bench/run-campaign.sh                                 # the whole campaign (5 proxies x plain/TLS/h2) on the three machines
+REMOTE=1 MATRIX=ws ./bench/run-campaign.sh                       # the WebSocket campaign
 ```
 
 Results land in `bench/results/<proxy>/remote-auth-<on|off>/<timestamp>/results.txt` on the machine you run from; the header records the hosts and parameters.
