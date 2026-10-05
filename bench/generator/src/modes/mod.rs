@@ -6,6 +6,7 @@ pub mod hold;
 pub mod http;
 pub mod sink;
 pub mod upstream;
+pub mod ws;
 
 use crate::metrics::Metrics;
 
@@ -39,6 +40,21 @@ pub(crate) fn warmup_of(cmd: &crate::Cmd) -> Option<crate::Cmd> {
             chunk: *chunk,
         }),
         crate::Cmd::Hold { .. } => None, // opening connections IS the test
+        crate::Cmd::Ws {
+            url,
+            conns,
+            size,
+            window,
+            short,
+            ..
+        } => Some(crate::Cmd::Ws {
+            url: url.clone(),
+            conns: *conns,
+            duration: 2,
+            size: *size,
+            window: *window,
+            short: *short,
+        }),
         crate::Cmd::Sink { .. } | crate::Cmd::Upstream { .. } => None,
     }
 }
@@ -77,6 +93,27 @@ pub(crate) async fn run_once(cli: &crate::Cli, cmd: &crate::Cmd) -> Metrics {
                 *conns,
                 *duration,
                 *chunk,
+                cli.threads(),
+            )
+            .await
+        }
+        crate::Cmd::Ws {
+            url,
+            conns,
+            duration,
+            size,
+            window,
+            short,
+        } => {
+            ws::run_ws(
+                &cli.proxy,
+                &cli.api_key,
+                url,
+                *conns,
+                *duration,
+                *size,
+                *window,
+                *short,
                 cli.threads(),
             )
             .await

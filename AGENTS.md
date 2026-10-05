@@ -53,15 +53,15 @@ e2e/                  black-box functional tests (see e2e/README.md): the releas
   src/suites/         one file per feature: matrix http connect h2 socks5 uploads limits security robustness process logs interop_curl
 bench/
   run-bench.sh <proxy> <on|off>            matrix (proxy = rustle|3proxy|squid|gost|tinyproxy)
-  run-campaign.sh                          full campaign (5 proxies × plain/TLS/h2) → results/campaign-<ts>.txt; tables: tools/campaign-table.py
+  run-campaign.sh                          full campaign (5 proxies × plain/TLS/h2) → results/campaign-<ts>.txt; tables: tools/campaign-table.py; `MATRIX=ws` → campaign-ws-<ts>.txt
   run-scaling.sh                           multi-core curve (PROXIES, NCPUS, AUTH, PROXY_TLS, PROXY_H2) — VPS
   env.sh, docker-compose.yml               cpuset: proxy on PROXY_CPU, everything else on BENCH_CPU
-  generator/                               bench-client crate (http | flood | hold | sink | upstream): shared-nothing threads (one current_thread runtime each), prebuilt requests, per-thread histograms; `upstream` = static Rust origin (replaces nginx, ~3 µs/req vs ~9.5), `sink` = per-core SO_REUSEPORT discard
+  generator/                               bench-client crate (http | flood | hold | ws | sink | upstream): shared-nothing threads (one current_thread runtime each), prebuilt requests, per-thread histograms; `upstream` = static Rust origin (replaces nginx, ~3 µs/req vs ~9.5), `sink` = per-core SO_REUSEPORT discard
   dut/<proxy>/                             Dockerfiles + on/off configs (user bench / key secret1, port 8080); `# bench-ports: tls=<p> h2=<p>` line = supported modes (self-signed ECDSA P-256 cert generated at build); WORKERS read by the entrypoint (rustle, squid); rustle/Dockerfile.debug = strace; the rustle Dockerfile stubs the e2e workspace member
   upstream/                                nginx (1kb/10kb/1mb/10mb objects)
   tools/local-upstream-http11.py           local HTTP/1.1 keep-alive upstream (up11.py)
   docker-compose.seccomp.yml               `SECCOMP=unconfined` overlay (io_uring; apply it to every compared DUT)
-  matrix.sh                                workload list + seeded shuffle, sourced by run-bench.sh and run-remote.sh
+  matrix.sh                                workload list + seeded shuffle, sourced by run-bench.sh and run-remote.sh; `MATRIX=ws` = WebSocket workloads
   run-remote.sh <proxy> <on|off>           same matrix on three machines (generator / proxy / origin+sink over SSH, host network); see REMOTE.md. run-scaling.sh REMOTE=1 = scaling curve on it
   REMOTE.md                                three-machine setup: sizing, sysctls, validity checks (`gen_saturated`)
   tools/charts.py                          SVG charts for the README from a campaign index → docs/benchmarks/ (`make charts`)
@@ -151,6 +151,16 @@ Optional features: `jemalloc`, `mimalloc` (mutually exclusive; default = glibc m
 - Multi-core: not measured with the single-host harness (2 cores). Use the three-machine setup (`bench/REMOTE.md`, `run-remote.sh`): a result is valid only if the generator is not saturated.
 - Never compile or edit `run-bench.sh` during a bench (shared CPU; bash rereads the running script).
 
+### Benchmark tooling: from a run to the README charts
+
+1. **Run**: `bench/run-bench.sh <proxy> <on|off>` (one proxy, one Docker host; `make bench`) or `bench/run-remote.sh` (generator / proxy / origin on three machines over SSH, `bench/REMOTE.md`). Both source `bench/matrix.sh` (workload list + seeded shuffle) and write `bench/results/<label>/auth-<on|off>/<ts>/results.txt` (`<label>` = proxy, `-tls`, `-h2`, `-ws` suffixes; gitignored).
+2. **Campaign**: `bench/run-campaign.sh` runs every DUT on every transport it supports and writes the index `bench/results/campaign-<ts>.txt` (`<proxy> <plain|tls|h2> <results.txt>` lines). `make bench-all` = campaign + tables.
+3. **Tables**: `bench/tools/campaign-table.py <index>` prints Markdown tables (one per transport, rows = tests, columns = DUTs; throughput + proxy CPU per unit; a DUT with no `RESULT` shows "—").
+4. **Charts**: `make charts [C=<index>]` = `bench/tools/charts.py <index>` writes the SVGs embedded by the README into `docs/benchmarks/` (stdlib only, hand-written SVG, light/dark via CSS, rustle highlighted; the DUT directory name `myproxy` from before the rename is mapped to `rustle`). Default index = the newest `campaign-<digits>*.txt`; pass `C=` for a WebSocket index. A proxy missing from a result is absent from the chart, never drawn as 0. The SVGs are generated **and committed**: regenerate them whenever the numbers change.
+5. **After a new reference campaign**, in the same commit series: update the README table/embeds (README keeps one line about charts, no pipeline description), `bench/RESULTS.md`, and "Known state" (campaign file name, date, harness).
+
+**WebSocket matrix** (`MATRIX=ws`, `make bench-ws P=<proxy>`, `MATRIX=ws bench/run-campaign.sh` → `campaign-ws-<ts>.txt`; plain and TLS, no h2): opt-in, so the default matrix and its seeded order stay comparable with published campaigns. Workloads (`bench-client ws`, origin route `/ws` of `bench-client upstream`): `ws-64b` (64 connections, 64-byte frames ping-pong: msg/s, p99 round trip, CPU µs/msg), `ws-64kb` (8 connections, 64 KB frames, 8 in flight: Gbit/s, CPU ms/GB), `ws-short` (handshake + one frame + close: handshakes/s, bound by TIME_WAIT like `http-1kb-short`). Shortcuts, by design: client frames are masked binary frames but the origin echoes bytes verbatim without parsing them (reply length = request length), and the handshake uses the RFC 6455 example key with its constant `Sec-WebSocket-Accept`; the proxies never look at either. The RESULT `rps` is messages per second (frames, not bursts); with `--window > 1` the latency is per burst. A DUT that does not support Upgrade on the plain-HTTP path (expected: 3proxy, Tinyproxy; Squid needs `http_upgrade_request_protocols`, set in its bench configs) yields errors (`err_kinds` such as `status-502`) or no `RESULT`: report it as unsupported, never as a number. `rustle` with `http.allow_websocket = false` answers 403 (`err_kinds=status-403`).
+
 ## Conventions
 
 - Commits: see [Commits](#commits). Every performance claim is gated by a fixed-seed matrix.
@@ -188,6 +198,7 @@ Format, checked against the current history: `type(scope): description`, **subje
 - `make check` green: fmt, clippy `-D warnings` (workspace, e2e included), `cargo test -p rustle` 75/75 (unit + in-process end-to-end), e2e `--quick` 68 scenarios. `make e2e` on macOS: 523 OK + 26 SKIP (Linux-only paths) out of 549; `robustness/huge-request-line` flaked once under full parallel load (passes alone), to watch.
 - Implemented: HTTP/1.1 + CONNECT, HTTPS proxy (TLS, rustls), HTTP/2, SOCKS5 (TCP + UDP), shared-nothing shards with `SO_REUSEPORT` and optional core pinning, splice relay, chunked uploads, policy (destinations, client allowlist, bans, anti-slowloris), access log, opt-in kTLS, `rustle` CLI (init/check/status/reload/service/update/uninstall), runtime reload (control socket + SIGHUP), WebSocket upgrades (`http.allow_websocket`), `curl | sh` installer, black-box e2e suite.
 - Reference campaign: 2026-10-05 (`bench/results/campaign-20261005-120351.txt`, rewritten generator/origin harness, 1 core + 2-core harness). Its numbers feed the README charts and table (`make charts`); `bench/RESULTS.md` still holds the older 2026-10-03 campaign and must be refreshed. Produced by `bench/run-campaign.sh` (5 proxies × plain/TLS/h2), tables by `bench/tools/campaign-table.py`.
+- WebSocket bench (`MATRIX=ws`): written and smoke-tested on macOS only (generator, origin, tools); never run on the Linux/Docker harness yet, no published numbers, and which competitors accept Upgrade is unknown until it runs.
 - The bench (static origin, Content-Length) exercises neither chunked, SOCKS5 nor uploads: covered by the tests and the e2e suite.
 - e2e suite: one expected behavior = one scenario. Bug found → first a scenario that reproduces it (it must fail), then the fix.
 

@@ -30,6 +30,12 @@ def load(path):
             name = "http-" + kv["url"].rsplit("/", 1)[1] + ("" if kv["keepalive"] == "true" else "-short")
             rps = float(kv["rps"])
             rows[name] = {"rps": rps, "us": cpu / (rps * float(kv["elapsed_s"])) * 1e6}
+        elif kv["mode"] == "ws":
+            size, el = int(kv["size"]), float(kv["elapsed_s"])
+            name = "ws-short" if kv["short"] == "true" else "ws-" + (f"{size}b" if size < 1024 else f"{size // 1024}kb")
+            rps = float(kv["rps"])
+            rows[name] = {"rps": rps, "us": cpu / (rps * el) * 1e6 if rps else float("nan"),
+                          "p99": float(kv["p99_ms"]), "gbps": float(kv["mbps"]) * 8 / 1000}
         elif kv["mode"] == "flood":
             rows["flood"] = {"gbps": float(kv["gbps"])}
         else:
@@ -93,5 +99,15 @@ chart("plain-flood.svg", "CONNECT tunnels, bulk transfer", f"Gbit/s through 8 tu
       col("plain", "flood", "gbps"), lambda v: f"{v:.1f} Gbit/s")
 chart("plain-ram.svg", "Memory with 25,000 open tunnels", f"Peak RSS, lower is better · {one}",
       col("plain", "hold-25000", "mb"), lambda v: f"{v:,.0f} MB", True)
+# WebSocket campaign (MATRIX=ws): proxies without Upgrade support have no row
+# and are simply absent from the charts.
+chart("ws-64b-rps.svg", "WebSocket, 64-byte messages", f"Messages per second (64 connections, ping-pong), higher is better · {one}",
+      col("plain", "ws-64b", "rps"), lambda v: f"{v:,.0f} msg/s")
+chart("ws-64b-latency.svg", "WebSocket round trip, 64-byte messages", f"p99 latency in milliseconds, lower is better · {one}",
+      col("plain", "ws-64b", "p99"), lambda v: f"{v:.2f} ms", True)
+chart("ws-cpu.svg", "CPU cost per WebSocket message", f"Microseconds of proxy CPU per 64-byte message, lower is better · {one}",
+      col("plain", "ws-64b", "us"), lambda v: f"{v:.1f} µs", True)
+chart("ws-64kb-gbps.svg", "WebSocket, 64 KB messages", f"Gbit/s of payload (8 connections, 8 frames in flight), higher is better · {one}",
+      col("plain", "ws-64kb", "gbps"), lambda v: f"{v:.1f} Gbit/s")
 chart("tls-1kb.svg", "HTTPS proxy (TLS), 1 KB responses", f"Requests per second, higher is better · {one}", col("tls", "http-1kb", "rps"), rps)
 chart("h2-1kb.svg", "HTTP/2 proxy, 1 KB responses", f"Requests per second, higher is better · {one}", col("h2", "http-1kb", "rps"), rps)

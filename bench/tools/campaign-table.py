@@ -4,7 +4,8 @@
     tools/campaign-table.py results/campaign-<ts>.txt
 
 One table per transport (plain / tls / h2); rows = tests, columns = DUTs.
-Cell: throughput and proxy CPU per unit (http: µs/req, flood: ms/GB);
+Cell: throughput and proxy CPU per unit (http: µs/req, flood: ms/GB, ws:
+msg/s with p99 and µs/msg, or Gbps and ms/GB for large frames);
 holds: tunnels opened / asked and peak RSS. A missing RESULT (DUT died)
 shows as "—"."""
 import re, sys, os
@@ -35,6 +36,16 @@ def load(p):
             name = "http-" + kv["url"].rsplit("/", 1)[1] + ("" if kv["keepalive"] == "true" else "-short")
             thr = float(kv["rps"]); per = cpu / (thr * float(kv["elapsed_s"])) * 1e6 if thr else float("nan")
             cell = f"{thr:,.0f} rps {per:.0f}µs"
+        elif mode == "ws":
+            size = int(kv["size"])
+            name = "ws-short" if kv["short"] == "true" else "ws-" + (f"{size}b" if size < 1024 else f"{size // 1024}kb")
+            thr = float(kv["rps"]); el = float(kv["elapsed_s"])
+            per = cpu / (thr * el) * 1e6 if thr else float("nan")
+            if size >= 1024:
+                gb = float(kv["mbps"]) * el / 1024
+                cell = f"{float(kv['mbps']) * 8 / 1000:.1f} Gbps {cpu / gb * 1e3 if gb else float('nan'):.0f}ms/GB"
+            else:
+                cell = f"{thr:,.0f} msg/s p99 {float(kv['p99_ms']):.2f}ms {per:.0f}µs"
         elif mode == "flood":
             name = "flood"; thr = float(kv["gbps"])
             per = cpu / (float(kv["mb"]) / 1024) * 1e3 if float(kv["mb"]) else float("nan")
@@ -47,7 +58,7 @@ def load(p):
         rows[name] = cell
     return rows
 
-order = ["http-1kb", "http-10kb", "http-1mb", "http-10mb", "http-1kb-short", "flood",
+order = ["ws-64b", "ws-64kb", "ws-short", "http-1kb", "http-10kb", "http-1mb", "http-10mb", "http-1kb-short", "flood",
          "hold-1000", "hold-5000", "hold-10000", "hold-25000"]
 for mode in ["plain", "tls", "h2"]:
     data = [(c.split()[0], load(p)) for c, p in cols if c.split()[1] == mode and os.path.exists(p)]
@@ -57,4 +68,6 @@ for mode in ["plain", "tls", "h2"]:
     print("| test | " + " | ".join(c for c, _ in data) + " |")
     print("|---" * (len(data) + 1) + "|")
     for t in order:
-        print(f"| {t} | " + " | ".join(d.get(t, "—") for _, d in data) + " |")
+        cells = [d.get(t, "—") for _, d in data]
+        if any(c != "—" for c in cells):
+            print(f"| {t} | " + " | ".join(cells) + " |")

@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-.PHONY: help build test e2e e2e-quick fmt check clippy images up down smoke bench bench-all bench-scaling charts latest latest-3proxy latest-off clean
+.PHONY: help build test e2e e2e-quick fmt check clippy images up down smoke bench bench-ws bench-all bench-scaling charts latest latest-3proxy latest-off clean
 
 P ?= rustle
 A ?= on
@@ -55,8 +55,8 @@ smoke: ## quick test through the stack (http 1kb)
 bench: ## full matrix: make bench [P=rustle|3proxy|squid|gost|tinyproxy] [A=on|off] [R=3]
 	cd bench && REPEAT=$(R) ./run-bench.sh $(P) $(A)
 
-charts: ## regenerate docs/benchmarks/*.svg from a campaign: make charts [C=bench/results/campaign-<ts>.txt]
-	python3 bench/tools/charts.py $${C:-$$(ls -t bench/results/campaign-*.txt | head -1)}
+charts: ## regenerate docs/benchmarks/*.svg from a campaign: make charts [C=bench/results/campaign[-ws]-<ts>.txt]
+	python3 bench/tools/charts.py $${C:-$$(ls -t bench/results/campaign-[0-9]*.txt | head -1)}
 
 latest: ## show the latest result pass of the current proxy
 	cd bench && cat results/$(P)/auth-$(A)/$$(ls -t results/$(P)/auth-$(A) | head -1)/results.txt
@@ -64,9 +64,12 @@ latest: ## show the latest result pass of the current proxy
 latest-3proxy: latest P=3proxy
 latest-off: latest A=off
 
+bench-ws: ## WebSocket matrix: make bench-ws [P=rustle|squid|gost|…] [A=on|off] [R=3]
+	cd bench && MATRIX=ws REPEAT=$(R) ./run-bench.sh $(P) $(A)
+
 bench-all: ## full campaign: 5 proxies × plain/TLS/h2 (~2-3 h), then tables
 	cd bench && AUTH=$(A) ./run-campaign.sh
-	cd bench && ./tools/campaign-table.py $$(ls -t results/campaign-*.txt | head -1)
+	cd bench && ./tools/campaign-table.py $$(ls -t results/campaign-[0-9]*.txt | head -1)
 
 bench-scaling: ## multi-core curve (VPS): PROXIES="..." NCPUS="1 2 4 8" make bench-scaling
 	cd bench && AUTH=$(A) ./run-scaling.sh

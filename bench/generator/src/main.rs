@@ -133,6 +133,27 @@ enum Cmd {
         #[arg(long, default_value_t = 4096)]
         ramp: u32,
     },
+    /// WebSocket through the proxy: upgrade, then masked binary frames
+    /// echoed by the origin (`bench-client upstream`, route /ws).
+    Ws {
+        /// Target URL, e.g. ws://upstream:8000/ws
+        url: String,
+        /// Concurrent connections.
+        #[arg(long)]
+        conns: u32,
+        /// Duration in seconds.
+        #[arg(long, default_value_t = 10)]
+        duration: u64,
+        /// Frame payload size in bytes.
+        #[arg(long, default_value_t = 64)]
+        size: usize,
+        /// Frames sent back to back before reading the echoes (1 = ping-pong).
+        #[arg(long, default_value_t = 1)]
+        window: u32,
+        /// One handshake + one frame per connection, then close.
+        #[arg(long)]
+        short: bool,
+    },
     /// TCP discard server (sink): accepts connections and drops all bytes.
     /// No process fork, no per-connection allocation.
     Sink {

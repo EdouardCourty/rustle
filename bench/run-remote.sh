@@ -21,6 +21,7 @@
 #   WORKERS                       shards of the proxy (default 1; rustle, squid)
 #   GEN_THREADS UP_THREADS SINK_THREADS   harness threads (default: 4 / 4 / 4)
 #   REPEAT BENCH_SEED BENCH_ONLY ACCESS_LOG KTLS PROXY_TLS PROXY_H2   as run-bench.sh
+#   MATRIX=ws                     WebSocket workloads instead of the HTTP/CONNECT matrix
 #   SKIP_BUILD=1                  images already built on every host
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -54,6 +55,10 @@ if [[ "$PROXY_H2" == 1 ]]; then
 elif [[ "$PROXY_TLS" == 1 ]]; then
     proxy_port=$(_port tls); LABEL="$PROXY-tls"; GEN_ARGS+=(--proxy-tls)
     [[ -n "$proxy_port" ]] || { echo "$PROXY has no HTTPS proxy listener" >&2; exit 2; }
+fi
+if [[ "${MATRIX:-}" == ws ]]; then
+    [[ "$PROXY_H2" == 1 ]] && { echo "MATRIX=ws: WebSocket upgrades are HTTP/1.1 only (no PROXY_H2)" >&2; exit 2; }
+    LABEL="$LABEL-ws"
 fi
 GEN_ARGS+=(--proxy "$PROXY_ADDR:$proxy_port")
 
@@ -143,7 +148,7 @@ run_hold() {
 
 # Workloads point at the origin and sink by address (matrix.sh).
 export UP_HTTP="$UP_ADDR:8000" UP_SINK="$UP_ADDR:9000"
-. "$(dirname "$0")/matrix.sh"
+. ./matrix.sh
 
 echo "### warmup-network"
 gen --repeat 1 --no-warmup "${GEN_ARGS[@]}" http "http://$UP_HTTP/1mb" --conns 16 --requests 200 >/dev/null 2>&1 || true

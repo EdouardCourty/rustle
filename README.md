@@ -243,6 +243,7 @@ Full tables, TLS and HTTP/2 matrices, and the measurement history: [`bench/RESUL
 ```sh
 make bench P=rustle A=on      # one proxy (rustle|3proxy|squid|gost|tinyproxy)
 make bench-all                # 5 proxies × plain / TLS / h2
+make bench-ws P=rustle        # WebSocket matrix
 make charts                   # regenerate the SVGs above from the latest campaign
 ```
 

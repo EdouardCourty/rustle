@@ -52,6 +52,11 @@ elif [[ "$PROXY_TLS" == 1 ]]; then
     GEN_ARGS+=(--proxy "proxy:$p" --proxy-tls)
     LABEL="$PROXY-tls"
 fi
+# MATRIX=ws: WebSocket workloads (matrix.sh); results land under <label>-ws.
+if [[ "${MATRIX:-}" == ws ]]; then
+    [[ "$PROXY_H2" == 1 ]] && { echo "MATRIX=ws: WebSocket upgrades are HTTP/1.1 only (no PROXY_H2)" >&2; exit 2; }
+    LABEL="$LABEL-ws"
+fi
 HOLD_MAX_SINGLE=30000   # above this, split across 2 client replicas (ephemeral ports)
 
 export PROXY_IMAGE="${PROXY}:bench"
@@ -195,7 +200,7 @@ docker compose --profile generator run --rm -T generator --repeat 1 --no-warmup 
     flood sink:9000 --conns 8 --duration 3 >/dev/null 2>&1 || true
 
 # --- Workloads: list, seeded shuffle and BENCH_ONLY live in matrix.sh.
-. "$(dirname "$0")/matrix.sh"
+. ./matrix.sh
 matrix_select_and_shuffle
 
 for entry in "${shuffled[@]}"; do
