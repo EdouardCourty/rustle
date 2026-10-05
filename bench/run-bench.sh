@@ -194,65 +194,9 @@ docker compose --profile generator run --rm -T generator --repeat 1 --no-warmup 
 docker compose --profile generator run --rm -T generator --repeat 1 --no-warmup "${GEN_ARGS[@]}" \
     flood sink:9000 --conns 8 --duration 3 >/dev/null 2>&1 || true
 
-# --- Workloads, order randomized with a fixed seed (reproducible from one
-# pass to the next, but removes the order bias: the network is not in the
-# same state after hold-25k as after 1kb). OVERRIDE=$SEED to reproduce.
-if [ -n "${BENCH_SEED:-}" ]; then SEED="$BENCH_SEED"; else SEED=$RANDOM$RANDOM; fi
-echo "seed=$SEED" | tee -a "$out/results.txt"
-
-declare -a TESTS=(
-    # 1 KB keep-alive: conns raised 16->64 (M10.2-C). At 16 conns the
-    # ceiling was the harness' own RTT (conns/latency), not the proxy.
-    "run_test http-1kb http http://upstream:8000/1kb --conns 64 --duration 15"
-    "run_test http-10kb http http://upstream:8000/10kb --conns 16 --duration 15"
-    "run_test http-1mb http http://upstream:8000/1mb --conns 16 --duration 15"
-    "run_test http-10mb http http://upstream:8000/10mb --conns 8 --duration 15"
-    "run_test http-1kb-short http http://upstream:8000/1kb --conns 64 --duration 15 --no-keepalive"
-    "run_test flood-8 flood sink:9000 --conns 8 --duration 10"
-    "run_hold 1000 10"
-    "run_hold 5000 10"
-    "run_hold 10000 10"
-    "run_hold 25000 10"
-)
-# BENCH_ONLY=<test-name>: run a single step (validate/iterate cheaply —
-# a failed step is re-run alone instead of the whole matrix).
-if [[ -n "${BENCH_ONLY:-}" ]]; then
-    TESTS=()
-    declare -a TESTS_ALL=(
-        "run_test http-1kb http http://upstream:8000/1kb --conns 64 --duration 15"
-        "run_test http-10kb http http://upstream:8000/10kb --conns 16 --duration 15"
-        "run_test http-1mb http http://upstream:8000/1mb --conns 16 --duration 15"
-        "run_test http-10mb http http://upstream:8000/10mb --conns 8 --duration 15"
-        "run_test http-1kb-short http http://upstream:8000/1kb --conns 64 --duration 15 --no-keepalive"
-        "run_test flood-8 flood sink:9000 --conns 8 --duration 10"
-        "run_hold 1000 10"
-        "run_hold 5000 10"
-        "run_hold 10000 10"
-        "run_hold 25000 10"
-        # Outside the matrix (BENCH_ONLY only): 128 flood tunnels, beyond
-        # the kernel cap on 1 MB pipes (fs.pipe-user-pages-soft).
-        "run_test flood-128 flood sink:9000 --conns 128 --duration 10"
-    )
-    found=""
-    for t in "${TESTS_ALL[@]}"; do
-        if [[ "$t" == *" ${BENCH_ONLY} "* || "$t" == "run_${BENCH_ONLY} "* || "$t" == *" ${BENCH_ONLY} 10" ]]; then
-            TESTS+=("$t")
-            found=1
-        fi
-    done
-    [[ -n "$found" ]] || { echo "no test matches BENCH_ONLY=${BENCH_ONLY}" >&2; exit 2; }
-fi
-# Seeded Fisher-Yates
-shopt -s extglob
-shuffled=(); tmp=("${TESTS[@]}")
-n=${#tmp[@]}
-for ((i=0; i<n; i++)); do
-    # deterministic pseudo-random from the seed
-    SEED=$(( (SEED * 1103515245 + 12345) & 0x7fffffff ))
-    j=$(( i + (SEED % (n - i)) ))
-    shuffled[i]=${tmp[j]}
-    tmp[j]=${tmp[i]}
-done
+# --- Workloads: list, seeded shuffle and BENCH_ONLY live in matrix.sh.
+. "$(dirname "$0")/matrix.sh"
+matrix_select_and_shuffle
 
 for entry in "${shuffled[@]}"; do
     eval "$entry"
