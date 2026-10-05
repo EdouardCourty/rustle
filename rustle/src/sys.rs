@@ -33,3 +33,15 @@ pub fn raise_nofile_limit() -> Option<(u64, u64)> {
 pub fn raise_nofile_limit() -> Option<(u64, u64)> {
     None
 }
+
+/// True when running as root.
+#[cfg(unix)]
+pub fn is_root() -> bool {
+    // SAFETY: geteuid has no preconditions.
+    unsafe { libc::geteuid() == 0 }
+}
+
+#[cfg(not(unix))]
+pub fn is_root() -> bool {
+    false
+}

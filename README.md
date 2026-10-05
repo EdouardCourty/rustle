@@ -23,6 +23,7 @@ Table of Contents
     *   [`[socks5]`](#socks5)
     *   [`[log]`](#log)
     *   [Certificate for the HTTPS port](#certificate-for-the-https-port)
+*   [Reloading](#reloading)
 *   [Benchmarks](#benchmarks)
 *   [Limitations](#limitations)
 *   [Contributing](#contributing)
@@ -69,6 +70,7 @@ rustle init                # config with a fresh API key (~/.config/rustle/confi
 rustle run                 # run in the foreground …
 rustle service enable      # … or as a service (systemd user unit / launchd agent)
 rustle status              # is it healthy?
+rustle reload              # apply a config change without a restart
 rustle update              # install the latest release
 rustle uninstall           # remove the service and the binary
 ```
@@ -94,7 +96,7 @@ The API key is a long random string (`openssl rand -base64 32`); the user name i
 Configuration
 -------------
 
-A single TOML file: `rustle run [CONFIG]`, or looked up in `./config.toml`, `~/.config/rustle/config.toml`, `/etc/rustle/config.toml`. Commented example: [`rustle/config.toml.example`](rustle/config.toml.example). An unknown or misplaced key fails the startup. Durations look like `"5s"`, `"1m"`. There is no hot reload: restart after a change.
+A single TOML file: `rustle run [CONFIG]`, or looked up in `./config.toml`, `~/.config/rustle/config.toml`, `/etc/rustle/config.toml`. Commented example: [`rustle/config.toml.example`](rustle/config.toml.example). An unknown or misplaced key fails the startup. Durations look like `"5s"`, `"1m"`. Apply a change without a restart with `rustle reload` (or `kill -HUP`, `systemctl reload rustle`): see [Reloading](#reloading).
 
 ### `[server]`
 
@@ -104,6 +106,7 @@ A single TOML file: `rustle run [CONFIG]`, or looked up in `./config.toml`, `~/.
 | `workers` | `1` | Number of shards (one thread each); `0` = one per CPU |
 | `pin_cores` | `false` | Pin shard *i* to CPU *i* and steer each connection to the shard of the CPU that received it (Linux) |
 | `admin_listen` | `"127.0.0.1:8181"` | `GET /health`, no auth; `""` disables it |
+| `control_socket` | `"auto"` | Unix socket (mode 0600) for `rustle reload`: `/run/rustle/rustle.sock` as root, else `$XDG_RUNTIME_DIR/rustle.sock`, else next to the user config; `""` disables it |
 | `socket_buffer_bytes` | `1048576` | `SO_SNDBUF`/`SO_RCVBUF` of relayed sockets; `0` = kernel autotuning (better for distant clients: a fixed 1 MB caps a 100 ms RTT link at ~80 Mbit/s) |
 
 ### `[auth]`
@@ -192,6 +195,19 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
 
 The certificate is read at startup: restart after a renewal.
 
+Reloading
+---------
+
+```sh
+rustle reload      # re-read the config file the proxy was started with
+```
+
+The file is validated first; if anything is wrong (syntax, a CIDR, a missing certificate, a key that does not match) the running config is kept and the error is printed. `SIGHUP` does the same (and reopens the access log), so `systemctl reload rustle` works.
+
+*   **Applied to new connections**: `api_keys`, `allow_clients`, the ban settings, `[filter]`, `[limits]`, `[timeouts]`, `[dns]`, `http.max_*_body_bytes`, `tls.cert` / `key` / `http2` / `handshake_timeout`. A renewed certificate is picked up without dropping anyone.
+*   **Restart required**: `listen` addresses, `workers`, `pin_cores`, `socket_buffer_bytes`, `tls.listen` / `ktls`, `socks5.listen`, `admin_listen`, the upstream pool and `[log]`. `rustle reload` lists the ones you changed and keeps their running value.
+*   Connections already open keep the config they were accepted under until they close, so a revoked key stays valid on an existing keep-alive connection until it ends (at most `timeouts.idle` once idle).
+
 Benchmarks
 ----------
 
@@ -234,7 +250,7 @@ Limitations
 
 *   No `Upgrade` (WebSocket over plain `http://`; WebSocket over `https://` works through `CONNECT`).
 *   Pipelined client requests are answered one at a time, then the connection closes.
-*   No hot reload (config, certificate); `Expect: 100-continue` is not fully supported.
+*   `Expect: 100-continue` is not fully supported.
 *   No HTTP/3 to the proxy itself (QUIC traffic works through SOCKS5 UDP).
 *   Towards origins, plain HTTP/1.1 only.
 

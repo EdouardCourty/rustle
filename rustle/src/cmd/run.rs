@@ -53,14 +53,20 @@ pub fn run(args: Args) -> anyhow::Result<i32> {
     let mut hup = signal(SignalKind::hangup()).context("SIGHUP handler")?;
     let mut term = signal(SignalKind::terminate()).context("SIGTERM handler")?;
     let mut int = signal(SignalKind::interrupt()).context("SIGINT handler")?;
-    let srv = crate::server::start(cfg)?;
+    let srv = crate::server::start_with(cfg, Some(config_path.clone()))?;
     rt.block_on(async {
         loop {
             tokio::select! {
                 _ = term.recv() => break,
                 _ = int.recv() => break,
                 // logrotate: rename the file, then `kill -HUP`.
-                _ = hup.recv() => srv.reopen_logs(),
+                _ = hup.recv() => {
+                    srv.reopen_logs();
+                    match srv.reload() {
+                        Ok(r) => tracing::info!(restart_required = ?r.restart_required, "config reloaded"),
+                        Err(e) => tracing::warn!(error = %format!("{e:#}"), "config reload failed, keeping the running config"),
+                    }
+                }
             }
         }
     });

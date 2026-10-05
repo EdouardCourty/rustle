@@ -57,6 +57,7 @@ pub fn render_systemd_unit(exe: &Path, config: &Path, system: bool) -> String {
                  LogsDirectory=rustle\n\
                  AmbientCapabilities=CAP_NET_BIND_SERVICE\n\
                  CapabilityBoundingSet=CAP_NET_BIND_SERVICE\n\
+                 RuntimeDirectory=rustle\n\
                  NoNewPrivileges=yes\n\
                  PrivateTmp=yes\n\
                  ProtectSystem=strict\n\

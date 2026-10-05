@@ -69,6 +69,7 @@ impl Config {
             .set("server", "listen", "\"127.0.0.1:0\"")
             .set("server", "admin_listen", "\"127.0.0.1:0\"")
             .set("server", "workers", "1")
+            .set("server", "control_socket", &q(dir.join("ctl.sock")))
             .set("auth", "api_keys", &format!("[\"{KEY}\", \"{KEY2}\"]"))
             .set("timeouts", "connect", "\"2s\"")
             .set("timeouts", "idle", "\"10s\"")

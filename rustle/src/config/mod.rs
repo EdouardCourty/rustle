@@ -143,6 +143,28 @@ pub struct ServerConfig {
     /// 0 = kernel autotuning (tcp_rmem/tcp_wmem). A fixed size disables
     /// autotuning and is capped by net.core.rmem_max/wmem_max.
     pub socket_buffer_bytes: usize,
+    /// Unix socket for local control commands (`rustle reload`). `"auto"`:
+    /// `/run/rustle/rustle.sock` as root, else `$XDG_RUNTIME_DIR/rustle.sock`,
+    /// else `rustle.sock` next to the user config. Empty = disabled.
+    pub control_socket: String,
+}
+
+impl ServerConfig {
+    /// Where the control socket lives (None = disabled).
+    pub fn control_socket_path(&self) -> Option<std::path::PathBuf> {
+        use std::path::PathBuf;
+        match self.control_socket.as_str() {
+            "" => None,
+            "auto" if crate::sys::is_root() => Some(PathBuf::from("/run/rustle/rustle.sock")),
+            "auto" => match std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()) {
+                Some(d) => Some(PathBuf::from(d).join("rustle.sock")),
+                None => crate::cmd::user_config_dir()
+                    .ok()
+                    .map(|d| d.join("rustle.sock")),
+            },
+            p => Some(PathBuf::from(p)),
+        }
+    }
 }
 
 impl Default for ServerConfig {
@@ -153,6 +175,7 @@ impl Default for ServerConfig {
             pin_cores: false,
             admin_listen: "127.0.0.1:8181".to_string(),
             socket_buffer_bytes: 1024 * 1024,
+            control_socket: "auto".to_string(),
         }
     }
 }

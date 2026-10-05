@@ -10,8 +10,9 @@
 //! cache, and the global connection counters.
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -101,17 +102,131 @@ pub(crate) fn widen_buffers(sock: &TcpStream) {
     }
 }
 
-/// Process-wide state, shared by every shard.
-struct Shared {
+/// The config-derived state `reload` replaces, as one immutable snapshot.
+/// Connections hold the snapshot they were accepted under until they end.
+struct Live {
     cfg: Arc<Config>,
     auth: Arc<Authenticator>,
     dns: Arc<DnsCache>,
     dest: Arc<DestPolicy>,
-    clients: ClientPolicy,
+    clients: Arc<ClientPolicy>,
     limiter: Arc<AuthLimiter>,
-    log: Arc<AccessLog>,
     /// HTTPS proxy listener's acceptor (None = plain only).
     tls: Option<tokio_rustls::TlsAcceptor>,
+}
+
+impl Live {
+    /// Builds a snapshot, validating everything a config can get wrong
+    /// (policies, TLS material). The DNS cache and the ban list survive a
+    /// reload when their settings did not change.
+    fn build(cfg: Arc<Config>, prev: Option<&Live>, ktls: bool) -> anyhow::Result<Live> {
+        let keep = |same: fn(&Config, &Config) -> bool| prev.filter(|p| same(&p.cfg, &cfg));
+        let dns =
+            match keep(|a, b| a.dns.ttl == b.dns.ttl && a.dns.max_entries == b.dns.max_entries) {
+                Some(p) => p.dns.clone(),
+                None => Arc::new(DnsCache::new(cfg.dns.ttl, cfg.dns.max_entries)),
+            };
+        let limiter = match keep(|a, b| {
+            a.auth.max_failures == b.auth.max_failures
+                && a.auth.failure_window == b.auth.failure_window
+                && a.auth.ban_duration == b.auth.ban_duration
+        }) {
+            Some(p) => p.limiter.clone(),
+            None => Arc::new(AuthLimiter::new(
+                cfg.auth.max_failures,
+                cfg.auth.failure_window,
+                cfg.auth.ban_duration,
+            )),
+        };
+        let tls = if cfg.tls.listen.is_empty() {
+            None
+        } else {
+            Some(crate::tls::acceptor(&cfg.tls, ktls)?)
+        };
+        Ok(Live {
+            auth: Arc::new(Authenticator::new(&cfg.auth.api_keys)),
+            dest: Arc::new(DestPolicy::from_config(&cfg)?),
+            clients: Arc::new(ClientPolicy::from_config(&cfg)?),
+            dns,
+            limiter,
+            tls,
+            cfg,
+        })
+    }
+}
+
+/// Settings only a restart can apply (listeners, threads, pools, the log
+/// writer). `reload` keeps the running value and reports them.
+fn restart_required(old: &Config, new: &Config) -> Vec<&'static str> {
+    let mut v = Vec::new();
+    macro_rules! keys {
+        ($($a:ident.$b:ident),* $(,)?) => {$(
+            if format!("{:?}", old.$a.$b) != format!("{:?}", new.$a.$b) {
+                v.push(concat!(stringify!($a), ".", stringify!($b)));
+            }
+        )*};
+    }
+    keys!(
+        server.listen,
+        server.workers,
+        server.pin_cores,
+        server.admin_listen,
+        server.socket_buffer_bytes,
+        tls.listen,
+        tls.ktls,
+        socks5.listen,
+        http.upstream_keepalive,
+        http.max_idle_per_origin,
+        log.access,
+        log.output,
+        log.file,
+        log.target,
+    );
+    v
+}
+
+/// `new` with the restart-only settings of `old`: what actually runs.
+fn effective(old: &Config, mut new: Config) -> Config {
+    new.server = old.server.clone();
+    new.socks5 = old.socks5.clone();
+    new.log = old.log.clone();
+    new.tls.listen = old.tls.listen.clone();
+    new.tls.ktls = old.tls.ktls;
+    new.http.upstream_keepalive = old.http.upstream_keepalive;
+    new.http.max_idle_per_origin = old.http.max_idle_per_origin;
+    new
+}
+
+/// Outcome of a successful reload.
+#[derive(Debug, Default)]
+pub struct Reloaded {
+    /// Changed settings that need a restart (still running with the old value).
+    pub restart_required: Vec<&'static str>,
+}
+
+impl std::fmt::Display for Reloaded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "reloaded")?;
+        if !self.restart_required.is_empty() {
+            write!(
+                f,
+                "; restart required for: {}",
+                self.restart_required.join(", ")
+            )?;
+        }
+        Ok(())
+    }
+}
+
+/// Process-wide state, shared by every shard.
+struct Shared {
+    /// The current snapshot; shards watch it and rebuild their `Services`.
+    live: watch::Sender<Arc<Live>>,
+    /// Serializes reloads.
+    reload_lock: Mutex<()>,
+    /// Config file `reload` re-reads (None: reload unavailable).
+    config_path: Option<PathBuf>,
+    log: Arc<AccessLog>,
     /// Hand TLS sessions to the kernel after the handshake.
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     ktls: bool,
@@ -126,12 +241,27 @@ struct Shared {
     accepted: Vec<PerShard>,
 }
 
+impl Shared {
+    /// Validates `new`, then publishes it: shards pick it up for the
+    /// connections they accept from then on. On error nothing changes.
+    fn reload(&self, new: Config) -> anyhow::Result<Reloaded> {
+        let _one_at_a_time = self.reload_lock.lock().unwrap();
+        let prev = self.live.borrow().clone();
+        let restart_required = restart_required(&prev.cfg, &new);
+        let cfg = Arc::new(effective(&prev.cfg, new));
+        let live = Live::build(cfg, Some(&prev), self.ktls)?;
+        self.live.send_replace(Arc::new(live));
+        Ok(Reloaded { restart_required })
+    }
+}
+
 /// A running server: one thread per shard.
 pub struct Server {
     addr: SocketAddr,
     tls_addr: Option<SocketAddr>,
     socks_addr: Option<SocketAddr>,
     shared: Arc<Shared>,
+    control_path: Option<PathBuf>,
     shutdown: watch::Sender<bool>,
     shards: Vec<JoinHandle<anyhow::Result<()>>>,
 }
@@ -185,12 +315,19 @@ struct ShardListeners {
     tls: Option<std::net::TcpListener>,
     socks: Option<std::net::TcpListener>,
     admin: Option<std::net::TcpListener>,
+    control: Option<std::os::unix::net::UnixListener>,
 }
 
 /// Binds every shard's listeners, then starts the shards. Binding happens
 /// here, synchronously, so errors surface before any thread starts and an
 /// ephemeral port (`:0`) resolved by the first listener is shared by all.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
+    start_with(cfg, None)
+}
+
+/// `start`, remembering the config file so `reload` can re-read it.
+pub fn start_with(cfg: Arc<Config>, config_path: Option<PathBuf>) -> anyhow::Result<Server> {
     set_socket_buffers(cfg.server.socket_buffer_bytes);
     let n = shard_count(cfg.server.workers);
     let (addr, plain) = bind_group(&cfg.server.listen, n, "listen")?;
@@ -200,12 +337,12 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
         tracing::warn!("kTLS unavailable (Linux only; kernel module `tls` loaded?): userspace TLS");
     }
     // HTTPS proxy and SOCKS5 listeners: same sharding.
-    let (tls, tls_addr, mut tls_listeners) = if cfg.tls.listen.is_empty() {
-        (None, None, Vec::new())
+    let live = Live::build(cfg.clone(), None, ktls)?;
+    let (tls_addr, mut tls_listeners) = if cfg.tls.listen.is_empty() {
+        (None, Vec::new())
     } else {
-        let acceptor = crate::tls::acceptor(&cfg.tls, ktls)?;
         let (a, v) = bind_group(&cfg.tls.listen, n, "tls")?;
-        (Some(acceptor), Some(a), v)
+        (Some(a), v)
     };
     let (socks_addr, mut socks_listeners) = if cfg.socks5.listen.is_empty() {
         (None, Vec::new())
@@ -222,6 +359,16 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
             .parse()
             .with_context(|| format!("invalid admin address: {}", cfg.server.admin_listen))?;
         Some(bind(a, false).with_context(|| format!("binding admin {a}"))?)
+    };
+    let (mut control, control_path) = match cfg.server.control_socket_path() {
+        None => (None, None),
+        Some(path) => match bind_control(&path) {
+            Ok(l) => (Some(l), Some(path)),
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %format!("{e:#}"), "control socket disabled");
+                (None, None)
+            }
+        },
     };
     let admin_addr = admin.as_ref().and_then(|l| l.local_addr().ok());
     let cpus = if cfg.server.pin_cores {
@@ -244,28 +391,20 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
     }
 
     let shared = Arc::new(Shared {
-        auth: Arc::new(Authenticator::new(&cfg.auth.api_keys)),
-        dns: Arc::new(DnsCache::new(cfg.dns.ttl, cfg.dns.max_entries)),
-        dest: Arc::new(DestPolicy::from_config(&cfg)?),
-        clients: ClientPolicy::from_config(&cfg)?,
+        live: watch::channel(Arc::new(live)).0,
+        reload_lock: Mutex::new(()),
+        config_path,
         log: Arc::new(AccessLog::start(
             cfg.log.access,
             cfg.log.output,
             &cfg.log.file,
             cfg.log.target,
         )?),
-        limiter: Arc::new(AuthLimiter::new(
-            cfg.auth.max_failures,
-            cfg.auth.failure_window,
-            cfg.auth.ban_duration,
-        )),
-        tls,
         ktls,
         ktls_sessions: AtomicU64::new(0),
         active: Arc::new(AtomicUsize::new(0)),
         peak: AtomicUsize::new(0),
         accepted: (0..n).map(|_| PerShard(AtomicU64::new(0))).collect(),
-        cfg,
     });
     tracing::info!(
         %addr,
@@ -273,10 +412,11 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
         ktls,
         socks5 = ?socks_addr,
         admin = ?admin_addr,
+        control = ?control_path,
         shards = n,
         pinned = !cpus.is_empty(),
-        max_connections = shared.cfg.limits.max_connections,
-        block_private = shared.cfg.filter.block_private,
+        max_connections = cfg.limits.max_connections,
+        block_private = cfg.filter.block_private,
         "rustle listening",
     );
 
@@ -292,6 +432,7 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
             tls: tls_listeners.pop(),
             socks: socks_listeners.pop(),
             admin: if id == 0 { admin.take() } else { None },
+            control: if id == 0 { control.take() } else { None },
         };
         let cpu = (!cpus.is_empty()).then(|| cpus[id % cpus.len()]);
         let handle = std::thread::Builder::new()
@@ -317,6 +458,7 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
         tls_addr,
         socks_addr,
         shared,
+        control_path,
         shutdown,
         shards,
     })
@@ -347,6 +489,13 @@ impl Server {
         self.tls_addr
     }
 
+    /// Re-reads the config file and applies what can change without a
+    /// restart (keys, policies, limits, timeouts, TLS certificate…) to the
+    /// connections accepted from now on. On error the running config stays.
+    pub fn reload(&self) -> anyhow::Result<Reloaded> {
+        reload_from_file(&self.shared)
+    }
+
     /// Reopens the access log file (SIGHUP, after logrotate).
     pub fn reopen_logs(&self) {
         self.shared.log.reopen();
@@ -356,6 +505,9 @@ impl Server {
     /// (5 s cap), and joins the shard threads.
     pub fn shutdown_and_join(self) -> anyhow::Result<()> {
         let _ = self.shutdown.send(true);
+        if let Some(p) = &self.control_path {
+            let _ = std::fs::remove_file(p);
+        }
         let mut result = Ok(());
         for h in self.shards {
             match h.join() {
@@ -379,6 +531,15 @@ impl Server {
         );
         result
     }
+}
+
+fn reload_from_file(shared: &Shared) -> anyhow::Result<Reloaded> {
+    let path = shared
+        .config_path
+        .as_deref()
+        .context("no config file to reload (started without one)")?;
+    let cfg = Config::load(path).with_context(|| format!("loading config {}", path.display()))?;
+    shared.reload(cfg)
 }
 
 /// Decrements the global connection count when the connection task ends
@@ -419,6 +580,12 @@ async fn run_shard(
     if let Some(admin) = listeners.admin {
         tokio::spawn(admin_loop(TcpListener::from_std(admin)?));
     }
+    if let Some(control) = listeners.control {
+        tokio::spawn(control_loop(
+            tokio::net::UnixListener::from_std(control)?,
+            shared.clone(),
+        ));
+    }
     #[cfg(all(
         target_env = "gnu",
         not(any(feature = "jemalloc", feature = "mimalloc"))
@@ -439,22 +606,29 @@ async fn run_shard(
         });
     }
 
-    let cfg = shared.cfg.clone();
-    let max_connections = cfg.limits.max_connections;
-    let svc = Arc::new(proxy::Services {
-        cfg: cfg.clone(),
-        auth: shared.auth.clone(),
-        dns: shared.dns.clone(),
-        dest: shared.dest.clone(),
-        limiter: shared.limiter.clone(),
-        log: shared.log.clone(),
-        active: shared.active.clone(),
-        pool: UpstreamPool::new(if cfg.http.upstream_keepalive {
-            cfg.http.max_idle_per_origin
-        } else {
-            0
-        }),
-    });
+    let mut live_rx = shared.live.subscribe();
+    let mut live = live_rx.borrow_and_update().clone();
+    let mut max_connections = live.cfg.limits.max_connections;
+    // The pool is the shard's own and outlives reloads (its settings are
+    // restart-only).
+    let pool = Arc::new(UpstreamPool::new(if live.cfg.http.upstream_keepalive {
+        live.cfg.http.max_idle_per_origin
+    } else {
+        0
+    }));
+    let services = |live: &Live| {
+        Arc::new(proxy::Services {
+            cfg: live.cfg.clone(),
+            auth: live.auth.clone(),
+            dns: live.dns.clone(),
+            dest: live.dest.clone(),
+            limiter: live.limiter.clone(),
+            log: shared.log.clone(),
+            active: shared.active.clone(),
+            pool: pool.clone(),
+        })
+    };
+    let mut svc = services(&live);
 
     loop {
         let (accepted, kind) = tokio::select! {
@@ -463,6 +637,13 @@ async fn run_shard(
             a = accept_on(&socks_listener) => (a, Kind::Socks),
             _ = shutdown.changed() => break,
         };
+        // A reload lands here, at the next accept: one atomic load when
+        // nothing changed, no extra wakeup.
+        if live_rx.has_changed().unwrap_or(false) {
+            live = live_rx.borrow_and_update().clone();
+            max_connections = live.cfg.limits.max_connections;
+            svc = services(&live);
+        }
         let (sock, peer) = match accepted {
             Ok(pair) => pair,
             Err(e) => {
@@ -475,14 +656,14 @@ async fn run_shard(
         };
         let ip = peer.ip();
         // Client allowlist: outsiders are closed before any byte is read.
-        if !shared.clients.allows(ip) {
+        if !live.clients.allows(ip) {
             tracing::debug!(%ip, "client not in allow_clients, closed");
             shared.log.refused(ip, Refusal::Allowlist);
             continue;
         }
         // Banned for repeated wrong keys: closed before any byte is read
         // (lock-free while nobody failed).
-        if shared.limiter.banned(ip) {
+        if live.limiter.banned(ip) {
             shared.log.refused(ip, Refusal::Banned);
             continue;
         }
@@ -519,7 +700,7 @@ async fn run_shard(
                 });
             }
             Kind::Tls => {
-                let Some(acceptor) = shared.tls.clone() else {
+                let Some(acceptor) = live.tls.clone() else {
                     continue;
                 };
                 #[cfg(target_os = "linux")]
@@ -764,6 +945,69 @@ async fn admin_loop(listener: TcpListener) {
     }
 }
 
+/// Binds the control socket: refuses a live one (another instance), replaces
+/// a stale one, restricts it to the owner.
+fn bind_control(path: &std::path::Path) -> anyhow::Result<std::os::unix::net::UnixListener> {
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::net::{UnixListener, UnixStream};
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    if path.exists() {
+        anyhow::ensure!(
+            UnixStream::connect(path).is_err(),
+            "{} is in use by a running instance",
+            path.display()
+        );
+        std::fs::remove_file(path).with_context(|| format!("removing stale {}", path.display()))?;
+    }
+    let l = UnixListener::bind(path).with_context(|| format!("binding {}", path.display()))?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    l.set_nonblocking(true)?;
+    Ok(l)
+}
+
+/// Control socket: one command per connection, one line in, one line out
+/// (`ok ...` or `error ...`). Commands: `reload`. Access = file permissions.
+async fn control_loop(listener: tokio::net::UnixListener, shared: Arc<Shared>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    loop {
+        let Ok((mut sock, _)) = listener.accept().await else {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            continue;
+        };
+        let shared = shared.clone();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 256];
+            let mut n = 0;
+            while n < buf.len() && !buf[..n].contains(&b'\n') {
+                match tokio::time::timeout(Duration::from_secs(2), sock.read(&mut buf[n..])).await {
+                    Ok(Ok(k)) if k > 0 => n += k,
+                    _ => return,
+                }
+            }
+            let reply = match std::str::from_utf8(&buf[..n]).unwrap_or("").trim() {
+                // File and certificate reads: off the shard's reactor.
+                "reload" => {
+                    match tokio::task::spawn_blocking(move || reload_from_file(&shared)).await {
+                        Ok(Ok(r)) => {
+                            tracing::info!(restart_required = ?r.restart_required, "config reloaded");
+                            format!("ok {r}\n")
+                        }
+                        Ok(Err(e)) => {
+                            tracing::warn!(error = %format!("{e:#}"), "config reload failed, keeping the running config");
+                            format!("error reload failed, running config kept: {e:#}\n")
+                        }
+                        Err(_) => "error reload panicked\n".to_string(),
+                    }
+                }
+                _ => "error unknown command (known: reload)\n".to_string(),
+            };
+            let _ = sock.write_all(reply.as_bytes()).await;
+        });
+    }
+}
+
 fn reject(mut sock: TcpStream) {
     use tokio::io::AsyncWriteExt;
     tokio::spawn(async move {
@@ -879,6 +1123,7 @@ mod tests {
         let mut cfg = Config::default();
         cfg.server.listen = "127.0.0.1:0".to_string();
         cfg.server.admin_listen = String::new();
+        cfg.server.control_socket = String::new();
         cfg.server.workers = workers;
         cfg.limits.max_connections = max_connections;
         // Tests talk to origins on 127.0.0.1.
@@ -1293,6 +1538,127 @@ mod tests {
         assert_eq!(got, payload);
         writer.await.unwrap();
         drop((rx, send));
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    // ---- reload ----
+
+    fn reload_toml(key: &str, extra: &str) -> String {
+        format!(
+            "[server]\nlisten = \"127.0.0.1:0\"\nadmin_listen = \"\"\ncontrol_socket = \"\"\n\
+             [auth]\napi_keys = [\"{key}\"]\n\
+             [filter]\nblock_private = false\n\
+             [log]\naccess = \"off\"\n{extra}"
+        )
+    }
+
+    async fn get_with_key(addr: SocketAddr, up: SocketAddr, key: &str) -> String {
+        use base64::Engine as _;
+        let cred = base64::engine::general_purpose::STANDARD.encode(format!("u:{key}"));
+        let req = format!(
+            "GET http://{up}/a HTTP/1.1\r\nHost: {up}\r\nProxy-Authorization: Basic {cred}\r\nConnection: close\r\n\r\n"
+        );
+        status(&send_recv(addr, req.as_bytes()).await)
+    }
+
+    #[tokio::test]
+    async fn reload_swaps_keys_and_keeps_the_old_config_on_error() {
+        let dir = std::env::temp_dir().join(format!("rustle-reload-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, reload_toml("old", "")).unwrap();
+        let up = origin().await;
+        let cfg = Config::load(&path).unwrap();
+        let srv = start_with(Arc::new(cfg), Some(path.clone())).unwrap();
+        let addr = srv.local_addr();
+        assert!(get_with_key(addr, up, "old").await.contains("200"));
+
+        // New key, changed limit, and a restart-only setting.
+        std::fs::write(&path, reload_toml("new", "[limits]\nmax_connections = 5\n")).unwrap();
+        let r = srv.reload().unwrap();
+        assert!(r.restart_required.is_empty(), "{r}");
+        assert!(get_with_key(addr, up, "old").await.contains("407"));
+        assert!(get_with_key(addr, up, "new").await.contains("200"));
+
+        std::fs::write(
+            &path,
+            reload_toml("new", "").replace("admin_listen = \"\"", "admin_listen = \"127.0.0.1:0\""),
+        )
+        .unwrap();
+        let r = srv.reload().unwrap();
+        assert_eq!(r.restart_required, ["server.admin_listen"]);
+
+        // A broken file is refused whole: the running config stays.
+        std::fs::write(
+            &path,
+            reload_toml("broken", "[filter]\ndeny = [\"10.0.0.0/99\"]\n"),
+        )
+        .unwrap();
+        assert!(srv.reload().is_err());
+        std::fs::write(&path, "[server]\nlisen = 1\n").unwrap();
+        assert!(srv.reload().is_err());
+        assert!(get_with_key(addr, up, "new").await.contains("200"));
+        assert!(get_with_key(addr, up, "broken").await.contains("407"));
+
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn control_socket_reloads_and_rejects_unknown_commands() {
+        use tokio::net::UnixStream;
+        let dir = std::env::temp_dir().join(format!("rustle-ctl-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (cfg_path, sock) = (dir.join("config.toml"), dir.join("ctl.sock"));
+        let text = reload_toml("k1", "").replace(
+            "control_socket = \"\"",
+            &format!("control_socket = {:?}", sock.to_string_lossy()),
+        );
+        std::fs::write(&cfg_path, &text).unwrap();
+        let srv = start_with(
+            Arc::new(Config::load(&cfg_path).unwrap()),
+            Some(cfg_path.clone()),
+        )
+        .unwrap();
+
+        async fn ask(sock: &std::path::Path, cmd: &str) -> String {
+            let mut c = UnixStream::connect(sock).await.unwrap();
+            c.write_all(cmd.as_bytes()).await.unwrap();
+            let mut out = String::new();
+            c.read_to_string(&mut out).await.unwrap();
+            out
+        }
+        assert_eq!(ask(&sock, "reload\n").await, "ok reloaded\n");
+        assert!(ask(&sock, "bogus\n")
+            .await
+            .starts_with("error unknown command"));
+        std::fs::write(&cfg_path, "[server]\nlisen = 1\n").unwrap();
+        assert!(ask(&sock, "reload\n")
+            .await
+            .starts_with("error reload failed"));
+        // 0600: owner only.
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&sock).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!sock.exists(), "socket file left behind");
+    }
+
+    #[tokio::test]
+    async fn reload_without_a_config_file_is_an_error() {
+        let srv = start(test_config(1, 10)).unwrap();
+        assert!(srv.reload().is_err());
         tokio::task::spawn_blocking(move || srv.shutdown_and_join())
             .await
             .unwrap()

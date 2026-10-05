@@ -10,6 +10,7 @@ pub mod limits;
 pub mod logs;
 pub mod matrix;
 pub mod process;
+pub mod reload;
 pub mod robustness;
 pub mod security;
 pub mod socks5;
@@ -33,6 +34,7 @@ pub fn all() -> Vec<Scenario> {
     v.extend(security::scenarios());
     v.extend(robustness::scenarios());
     v.extend(process::scenarios());
+    v.extend(reload::scenarios());
     v.extend(cli::scenarios());
     v.extend(logs::scenarios());
     v.extend(interop_curl::scenarios());

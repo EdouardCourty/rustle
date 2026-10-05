@@ -43,7 +43,7 @@ pub struct Services {
     pub log: Arc<AccessLog>,
     /// Live connections, all shards (decremented by the server's slot).
     pub active: Arc<std::sync::atomic::AtomicUsize>,
-    pub pool: UpstreamPool,
+    pub pool: Arc<UpstreamPool>,
 }
 
 impl Services {

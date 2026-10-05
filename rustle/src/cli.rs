@@ -33,6 +33,8 @@ pub struct Cli {
 pub enum Command {
     /// Run the proxy in the foreground (default command)
     Run(cmd::run::Args),
+    /// Make the running proxy re-read its config file (no restart)
+    Reload(cmd::reload::Args),
     /// Write a config with a freshly generated API key
     Init(cmd::init::Args),
     /// Validate a config without starting the proxy
@@ -58,6 +60,7 @@ impl Cli {
             Some(Command::Init(a)) => cmd::init::run(a),
             Some(Command::Check(a)) => cmd::check::run(a),
             Some(Command::Status(a)) => cmd::status::run(a),
+            Some(Command::Reload(a)) => cmd::reload::run(a),
             Some(Command::Service(a)) => cmd::service::run(a),
             Some(Command::Update(a)) => cmd::update::run(a),
             Some(Command::Uninstall(a)) => cmd::uninstall::run(a),
