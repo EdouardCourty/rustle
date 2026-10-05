@@ -52,5 +52,9 @@ sed -i.bak 's/^[0-9a-f]\{8\}/00000000/' "$tmp/SHA256SUMS"
 out="$(docker run --rm -v "$HERE/install.sh":/install.sh:ro -v "$tmp":/rel:ro \
     -e RUSTLE_BASE_URL=file:///rel -e RUSTLE_INSTALL_DIR=/tmp/bin debian:12-slim \
     sh -c 'apt-get update -qq && apt-get install -y -qq curl >/dev/null 2>&1; sh /install.sh 2>&1 || true')"
-grep -q "checksum mismatch" <<<"$out" && echo ok || { echo "$out"; echo "FAILED: tampered archive accepted"; fail=1; }
+if grep -q "checksum mismatch" <<<"$out"; then
+    echo ok
+else
+    echo "$out"; echo "FAILED: tampered archive accepted"; fail=1
+fi
 exit $fail
