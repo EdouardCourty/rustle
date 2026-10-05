@@ -120,8 +120,10 @@ run_entry() { # <workload command>
 # above 90 % of their threads.
 saturation_fields() { # <RESULT line> <proxy cpu s> <origin cpu s> <sink cpu s> <proxy cores> <origin threads> <sink threads>
     awk -v line="$1" -v p="$2" -v u="$3" -v k="$4" -v pc="$5" -v ut="$6" -v st="$7" 'BEGIN {
-        if (!match(line, /elapsed_s=[0-9.]+/)) exit
-        el = substr(line, RSTART + 10, RLENGTH - 10) + 0
+        # flood prints its duration, the other modes their elapsed time
+        if (match(line, /elapsed_s=[0-9.]+/)) el = substr(line, RSTART + 10, RLENGTH - 10) + 0
+        else if (match(line, /duration=[0-9.]+/)) el = substr(line, RSTART + 9, RLENGTH - 9) + 0
+        else exit
         mode = ""; if (match(line, /mode=[a-z]+/)) mode = substr(line, RSTART + 5, RLENGTH - 5)
         if (el <= 0) exit
         pu = p / (el * pc); ou = u / (el * ut); su = k / (el * st)
