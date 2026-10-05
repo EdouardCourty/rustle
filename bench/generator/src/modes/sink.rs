@@ -1,67 +1,72 @@
 //! TCP discard server (sink target): accepts connections and drops all
-//! bytes. No process fork, no per-connection allocation (unlike socat).
+//! bytes. One `current_thread` runtime per core, one `SO_REUSEPORT`
+//! listener each; every connection reads into its thread's single 256 KB
+//! scratch buffer (`try_read` between awaits only), so an idle tunnel costs
+//! no buffer at all and a bulk flow is not capped by a small read size.
 
-use tokio::io::AsyncReadExt;
-use tokio::net::TcpListener;
+use std::cell::RefCell;
 
-/// Bind with a large accept backlog (tokio/mio default is only 1024, which
-/// drops SYNs under the hold test's connection bursts).
-async fn bind_sink(listen: &str) -> anyhow::Result<TcpListener> {
-    use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-    let addr: std::net::SocketAddr = listen.parse()?;
-    let socket = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
-    socket.set_reuse_address(true)?;
-    let sa: SockAddr = addr.into();
-    socket.bind(&sa)?;
-    socket.listen(65535)?;
-    socket.set_nonblocking(true)?;
-    let std_listener: std::net::TcpListener = socket.into();
-    Ok(TcpListener::from_std(std_listener)?)
+use tokio::net::{TcpListener, TcpStream};
+
+use crate::rt::{bind_listener, run_threads};
+
+const SCRATCH: usize = 256 * 1024;
+
+thread_local! {
+    static SCRATCH_BUF: RefCell<Vec<u8>> = RefCell::new(vec![0u8; SCRATCH]);
 }
 
-pub(crate) async fn run_sink(listen: &str) -> ! {
-    let listener = match bind_sink(listen).await {
+async fn discard(s: TcpStream) {
+    loop {
+        if s.readable().await.is_err() {
+            return;
+        }
+        // No await while the scratch is borrowed: tasks of the thread take
+        // turns on it.
+        let r = SCRATCH_BUF.with(|b| s.try_read(&mut b.borrow_mut()));
+        match r {
+            Ok(0) => return,
+            Ok(_) => {}
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(_) => return,
+        }
+    }
+}
+
+pub(crate) fn run_sink(listen: &str, threads: usize) -> ! {
+    let listen = listen.to_string();
+    // Bind before spawning: a bind error must stop the process.
+    let first = match bind_listener(&listen, threads > 1) {
         Ok(l) => l,
         Err(e) => {
             eprintln!("sink: bind {listen} failed: {e}");
             std::process::exit(1);
         }
     };
-    eprintln!("sink: listening on {listen}");
-    // Reusable 8 KB read buffers: without the pool, each connection
-    // allocates from the heap and glibc retains the pages after close —
-    // at 25k tunnels the sink's heap grew past 1.5 GB (OOM-pressure on
-    // the 4 GB box). With the pool the heap never grows: fixed 512 bufs
-    // circulate, freed on task end.
-    static POOL_SIZE: usize = 512;
-    let pool = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::VecDeque::new()));
-    loop {
-        let (mut s, _) = match listener.accept().await {
-            Ok(pair) => pair,
-            Err(e) => {
-                eprintln!("sink: accept error: {e}");
-                continue;
-            }
+    eprintln!("sink: listening on {listen} ({threads} threads)");
+    let first = std::sync::Mutex::new(Some(first));
+    run_threads(threads, move |i| {
+        let l = if i == 0 {
+            first.lock().unwrap().take()
+        } else {
+            None
         };
-        let pool = pool.clone();
-        tokio::spawn(async move {
-            let _ = s.set_nodelay(true);
-            // Take a buffer from the pool (or allocate a fresh one).
-            let mut buf = {
-                let mut p = pool.lock().await;
-                p.pop_front().unwrap_or_else(|| Vec::with_capacity(8192))
+        let listen = listen.clone();
+        async move {
+            let std_l = match l {
+                Some(l) => l,
+                None => bind_listener(&listen, true).expect("sink: bind"),
             };
-            while let Ok(n) = s.read_buf(&mut buf).await {
-                if n == 0 {
-                    break; // EOF: connection closed
+            let listener = TcpListener::from_std(std_l).expect("sink: listener");
+            loop {
+                match listener.accept().await {
+                    Ok((s, _)) => {
+                        tokio::spawn(discard(s));
+                    }
+                    Err(e) => eprintln!("sink: accept error: {e}"),
                 }
-                buf.clear(); // discard: keep the capacity
             }
-            // Return the buffer to the pool (bounded).
-            let mut p = pool.lock().await;
-            if p.len() < POOL_SIZE {
-                p.push_back(buf);
-            }
-        });
-    }
+        }
+    });
+    unreachable!()
 }

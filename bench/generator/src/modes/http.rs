@@ -1,9 +1,15 @@
 //! Plain HTTP GET workload through the proxy (absolute-form), keep-alive
 //! or fresh-connection, with per-request latency capture.
+//!
+//! Harness cost is the ceiling of every measurement, so the hot path is
+//! built like a proxy's: shared-nothing threads (one `current_thread`
+//! runtime each, connections split between them), request bytes built once,
+//! one reusable buffer per connection, allocation-free response parsing,
+//! per-thread counters and latency histograms merged at the end (no shared
+//! atomic or lock is touched per request).
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
@@ -11,6 +17,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::task::JoinSet;
 
 use crate::connect::{connect_proxy, h2_connect, h2_enabled, parse_url, resolve_once, ProxyStream};
+use crate::metrics::{Hist, Metrics};
+use crate::rt::{run_threads, share};
 
 /// One client connection: HTTP/1.1 byte stream, or an HTTP/2 connection
 /// (requests sent one at a time, like the HTTP/1.1 keep-alive client).
@@ -18,7 +26,26 @@ enum Conn {
     H1(ProxyStream),
     H2(h2::client::SendRequest<bytes::Bytes>),
 }
-use crate::metrics::{pcts_ms, Metrics};
+
+/// Everything a request needs, built once per run.
+struct Plan {
+    proxy: String,
+    /// GET head, `Connection: keep-alive` / `Connection: close`.
+    req_ka: Vec<u8>,
+    req_close: Vec<u8>,
+    /// h2: absolute URI + Proxy-Authorization value.
+    uri: String,
+    auth: String,
+}
+
+/// One thread's share of the results.
+struct Partial {
+    hist: Hist,
+    bytes: u64,
+    errors: u64,
+    reconnects: u64,
+    kinds: HashMap<String, u64>,
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_http(
@@ -29,143 +56,97 @@ pub(crate) async fn run_http(
     duration: Option<u64>,
     requests: Option<u64>,
     no_keepalive: bool,
+    threads: usize,
 ) -> Metrics {
-    let kinds: Arc<Mutex<std::collections::HashMap<String, u64>>> =
-        Arc::new(Mutex::new(std::collections::HashMap::new()));
     let (host, port, path) = parse_url(url);
     let target = resolve_once(&format!("{host}:{port}"))
         .await
         .unwrap_or_else(|e| panic!("resolve {host}:{port}: {e}"));
     let (host, port, _) = parse_url(&format!("http://{target}/"));
-    let counter = Arc::new(AtomicU64::new(0));
-    let errors = Arc::new(AtomicU64::new(0));
-    let reconnects = Arc::new(AtomicU64::new(0));
-    let bytes = Arc::new(AtomicU64::new(0));
-    let lats: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
+    let auth = B64.encode(format!("bench:{api_key}"));
+    let head = |ka: &str| {
+        format!(
+            "GET http://{host}:{port}{path} HTTP/1.1\r\nHost: {host}:{port}\r\nProxy-Authorization: Basic {auth}\r\nConnection: {ka}\r\n\r\n"
+        )
+        .into_bytes()
+    };
+    let plan = std::sync::Arc::new(Plan {
+        proxy: proxy.to_string(),
+        req_ka: head("keep-alive"),
+        req_close: head("close"),
+        uri: format!("http://{host}:{port}{path}"),
+        auth: format!("Basic {auth}"),
+    });
 
     let start = Instant::now();
-    let mut set = JoinSet::new();
-    for _ in 0..conns {
-        let proxy = proxy.to_string();
-        let api_key = api_key.to_string();
-        let host = host.clone();
-        let path = path.clone();
-        let counter = counter.clone();
-        let errors = errors.clone();
-        let reconnects = reconnects.clone();
-        let bytes = bytes.clone();
-        let lats = lats.clone();
-        let kinds = kinds.clone();
-        set.spawn(async move {
-            let mut conn: Option<Conn> = None;
-            loop {
-                let i = counter.fetch_add(1, Ordering::Relaxed);
-                // Stop on the count budget or the time budget (whichever
-                // is configured). Time-budget keeps both proxies under the
-                // same wall-clock protocol (3proxy needs it: its delayed-
-                // ACK turned 100k 1 KB requests into ~17 min).
-                if let Some(secs) = duration {
-                    if start.elapsed().as_secs_f64() >= secs as f64 {
-                        break;
-                    }
-                } else if i >= requests.unwrap_or(0) {
-                    break;
+    let deadline = duration.map(|d| start + Duration::from_secs(d));
+    // Count budget: split evenly over the connections.
+    let per_conn = requests.map(|r| r / conns.max(1) as u64);
+    let h2 = h2_enabled();
+    let parts = tokio::task::spawn_blocking(move || {
+        run_threads(threads, move |ti| {
+            let plan = plan.clone();
+            let mine = share(conns, threads, ti);
+            async move {
+                let mut set = JoinSet::new();
+                for _ in 0..mine {
+                    let plan = plan.clone();
+                    set.spawn(conn_task(plan, deadline, per_conn, no_keepalive, h2));
                 }
-                if no_keepalive {
-                    conn = None;
-                }
-                // A reused connection closed before any response byte is
-                // the idle-close race every HTTP client handles by replaying
-                // an idempotent request once on a fresh connection (RFC 9112
-                // §9.3.1) — proxies that close silently after each response
-                // (Tinyproxy) are served the same way. Counted in
-                // `reconnects`; the latency includes the replay.
-                let mut replayed = false;
-                let mut t0: Option<Instant> = None;
-                loop {
-                    let reused = conn.is_some();
-                    if conn.is_none() {
-                        let dialed = if h2_enabled() {
-                            h2_connect(&proxy).await.map(Conn::H2)
-                        } else {
-                            connect_proxy(&proxy).await.map(Conn::H1)
-                        };
-                        match dialed {
-                            Ok(s) => {
-                                conn = Some(s);
-                            }
-                            Err(_) => {
-                                errors.fetch_add(1, Ordering::Relaxed);
-                                *kinds.lock().unwrap().entry("connect".into()).or_insert(0) += 1;
-                                break;
-                            }
-                        }
-                    }
-                    let t0 = *t0.get_or_insert_with(Instant::now);
-                    let res = match conn.as_mut().unwrap() {
-                        Conn::H1(stream) => {
-                            http_get(stream, &host, port, &path, &api_key, !no_keepalive).await
-                        }
-                        Conn::H2(send) => h2_get(send, &host, port, &path, &api_key).await,
-                    };
+                let mut tot = Partial {
+                    hist: Hist::new(),
+                    bytes: 0,
+                    errors: 0,
+                    reconnects: 0,
+                    kinds: HashMap::new(),
+                };
+                while let Some(res) = set.join_next().await {
                     match res {
-                        Ok((body_bytes, reusable)) => {
-                            lats.lock().unwrap().push(t0.elapsed().as_secs_f64());
-                            bytes.fetch_add(body_bytes, Ordering::Relaxed);
-                            if !reusable {
-                                // The proxy announced the close (Connection:
-                                // close / HTTP/1.0): reconnect, like any client.
-                                conn = None;
+                        Ok(p) => {
+                            tot.hist.merge(&p.hist);
+                            tot.bytes += p.bytes;
+                            tot.errors += p.errors;
+                            tot.reconnects += p.reconnects;
+                            for (k, v) in p.kinds {
+                                *tot.kinds.entry(k).or_insert(0) += v;
                             }
                         }
-                        Err(e) => {
-                            conn = None;
-                            let msg = format!("{e:#}");
-                            if reused && !replayed && msg.contains("EOF before response head") {
-                                replayed = true;
-                                reconnects.fetch_add(1, Ordering::Relaxed);
-                                continue;
-                            }
-                            errors.fetch_add(1, Ordering::Relaxed);
-                            let cls: String = if msg.contains("EOF before response head") {
-                                "eof-head".into()
-                            } else if msg.contains("HTTP status") {
-                                // Keep the code: "bad-status-502" etc.
-                                let code: String =
-                                    msg.chars().filter(|c| c.is_ascii_digit()).collect();
-                                format!("bad-status-{code}")
-                            } else if msg.contains("EOF before body end") {
-                                "eof-body".into()
-                            } else if msg.contains("bad response") {
-                                "bad-head".into()
-                            } else {
-                                "io".into()
-                            };
-                            *kinds.lock().unwrap().entry(cls).or_insert(0) += 1;
-                        }
+                        Err(e) => eprintln!("task error: {e}"),
                     }
-                    break;
                 }
+                tot
             }
-        });
-    }
-    while let Some(res) = set.join_next().await {
-        if let Err(e) = res {
-            eprintln!("task error: {e}");
+        })
+    })
+    .await
+    .expect("worker threads");
+    let elapsed = start.elapsed().as_secs_f64();
+
+    let mut all = Partial {
+        hist: Hist::new(),
+        bytes: 0,
+        errors: 0,
+        reconnects: 0,
+        kinds: HashMap::new(),
+    };
+    for p in parts {
+        all.hist.merge(&p.hist);
+        all.bytes += p.bytes;
+        all.errors += p.errors;
+        all.reconnects += p.reconnects;
+        for (k, v) in p.kinds {
+            *all.kinds.entry(k).or_insert(0) += v;
         }
     }
-    // Bound the guard's lifetime before the tail-expression Metrics.
+    let mut kinds: Vec<_> = all.kinds.iter().collect();
+    kinds.sort();
     let kinds_line = kinds
-        .lock()
-        .unwrap()
         .iter()
         .map(|(k, v)| format!("{k}={v}"))
         .collect::<Vec<_>>()
         .join(";");
-    let elapsed = start.elapsed().as_secs_f64();
-    let lat = lats.lock().unwrap().clone();
-    let done = lat.len() as u64;
-    let (p50, p95, p99) = pcts_ms(&lat);
+    let done = all.hist.len();
+    let (p50, p95, p99) = all.hist.pcts_ms();
     Metrics {
         statics: vec![
             ("mode", "http".to_string()),
@@ -184,93 +165,196 @@ pub(crate) async fn run_http(
         ],
         nums: vec![
             ("rps", done as f64 / elapsed),
-            ("mbps", bytes.load(Ordering::Relaxed) as f64 / elapsed / 1e6),
+            ("mbps", all.bytes as f64 / elapsed / 1e6),
             ("elapsed_s", elapsed),
             ("p50_ms", p50),
             ("p95_ms", p95),
             ("p99_ms", p99),
-            ("errors", errors.load(Ordering::Relaxed) as f64),
-            ("reconnects", reconnects.load(Ordering::Relaxed) as f64),
+            ("errors", all.errors as f64),
+            ("reconnects", all.reconnects as f64),
         ],
     }
+}
+
+/// One connection's request loop (until the deadline or its request quota).
+async fn conn_task(
+    plan: std::sync::Arc<Plan>,
+    deadline: Option<Instant>,
+    quota: Option<u64>,
+    no_keepalive: bool,
+    h2: bool,
+) -> Partial {
+    let mut p = Partial {
+        hist: Hist::new(),
+        bytes: 0,
+        errors: 0,
+        reconnects: 0,
+        kinds: HashMap::new(),
+    };
+    // Reused for every response of this connection (head + body drain).
+    let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
+    let mut conn: Option<Conn> = None;
+    let mut issued: u64 = 0;
+    loop {
+        match (deadline, quota) {
+            (Some(d), _) => {
+                if Instant::now() >= d {
+                    break;
+                }
+            }
+            (None, Some(q)) => {
+                if issued >= q {
+                    break;
+                }
+                issued += 1;
+            }
+            (None, None) => break,
+        }
+        if no_keepalive {
+            conn = None;
+        }
+        // A reused connection closed before any response byte is the
+        // idle-close race every HTTP client handles by replaying an
+        // idempotent request once on a fresh connection (RFC 9112 §9.3.1) —
+        // proxies that close silently after each response (Tinyproxy) are
+        // served the same way. Counted in `reconnects`; the latency
+        // includes the replay.
+        let mut replayed = false;
+        let t0 = Instant::now();
+        loop {
+            let reused = conn.is_some();
+            if conn.is_none() {
+                let dialed = if h2 {
+                    h2_connect(&plan.proxy).await.map(Conn::H2)
+                } else {
+                    connect_proxy(&plan.proxy).await.map(Conn::H1)
+                };
+                match dialed {
+                    Ok(s) => conn = Some(s),
+                    Err(_) => {
+                        p.errors += 1;
+                        *p.kinds.entry("connect".into()).or_insert(0) += 1;
+                        break;
+                    }
+                }
+            }
+            let res = match conn.as_mut().unwrap() {
+                Conn::H1(stream) => {
+                    let req = if no_keepalive {
+                        &plan.req_close
+                    } else {
+                        &plan.req_ka
+                    };
+                    http_get(stream, req, !no_keepalive, &mut buf).await
+                }
+                Conn::H2(send) => h2_get(send, &plan.uri, &plan.auth).await,
+            };
+            match res {
+                Ok((body_bytes, reusable)) => {
+                    p.hist.record(t0.elapsed());
+                    p.bytes += body_bytes;
+                    if !reusable {
+                        // The proxy announced the close (Connection: close /
+                        // HTTP/1.0): reconnect, like any client.
+                        conn = None;
+                    }
+                }
+                Err(e) => {
+                    conn = None;
+                    let msg = format!("{e:#}");
+                    if reused && !replayed && msg.contains("EOF before response head") {
+                        replayed = true;
+                        p.reconnects += 1;
+                        continue;
+                    }
+                    p.errors += 1;
+                    let cls: String = if msg.contains("EOF before response head") {
+                        "eof-head".into()
+                    } else if msg.contains("HTTP status") {
+                        // Keep the code: "bad-status-502" etc.
+                        let code: String = msg.chars().filter(|c| c.is_ascii_digit()).collect();
+                        format!("bad-status-{code}")
+                    } else if msg.contains("EOF before body end") {
+                        "eof-body".into()
+                    } else if msg.contains("bad response") {
+                        "bad-head".into()
+                    } else {
+                        "io".into()
+                    };
+                    *p.kinds.entry(cls).or_insert(0) += 1;
+                }
+            }
+            break;
+        }
+    }
+    p
+}
+
+/// Case-insensitive substring test on header bytes (no allocation).
+fn contains_ci(hay: &[u8], needle: &[u8]) -> bool {
+    hay.windows(needle.len())
+        .any(|w| w.eq_ignore_ascii_case(needle))
 }
 
 /// One GET through the proxy. Returns the response body size on success.
 async fn http_get(
     stream: &mut ProxyStream,
-    host: &str,
-    port: u16,
-    path: &str,
-    api_key: &str,
+    req: &[u8],
     keepalive: bool,
+    buf: &mut Vec<u8>,
 ) -> anyhow::Result<(u64, bool)> {
-    let auth = B64.encode(format!("bench:{api_key}"));
-    let ka = if keepalive { "keep-alive" } else { "close" };
-    let req = format!(
-        "GET http://{host}:{port}{path} HTTP/1.1\r\nHost: {host}:{port}\r\nProxy-Authorization: Basic {auth}\r\nConnection: {ka}\r\n\r\n"
-    );
-    stream.write_all(req.as_bytes()).await?;
+    stream.write_all(req).await?;
     stream.flush().await?;
 
-    let mut buf = Vec::with_capacity(2048);
+    buf.clear();
     let (head_len, content_length, reusable) = loop {
         buf.reserve(2048);
-        let n = stream.read_buf(&mut buf).await?;
+        let n = stream.read_buf(buf).await?;
         if n == 0 {
             anyhow::bail!("EOF before response head");
         }
-        let parsed = {
-            let mut headers = [httparse::EMPTY_HEADER; 64];
-            let mut resp = httparse::Response::new(&mut headers);
-            match resp.parse(&buf) {
-                Ok(httparse::Status::Complete(len)) => {
-                    let mut cl = None;
-                    // HTTP/1.1 persists unless `close`; HTTP/1.0 only with
-                    // an explicit `keep-alive`.
-                    let mut reusable = resp.version == Some(1);
-                    for h in resp.headers.iter() {
-                        if h.name.eq_ignore_ascii_case("content-length") {
-                            cl = std::str::from_utf8(h.value)
-                                .ok()
-                                .and_then(|s| s.trim().parse::<u64>().ok());
-                        } else if h.name.eq_ignore_ascii_case("connection")
-                            || h.name.eq_ignore_ascii_case("proxy-connection")
-                        {
-                            let v = String::from_utf8_lossy(h.value).to_ascii_lowercase();
-                            if v.contains("close") {
-                                reusable = false;
-                            } else if v.contains("keep-alive") {
-                                reusable = true;
-                            }
+        let mut headers = [httparse::EMPTY_HEADER; 32];
+        let mut resp = httparse::Response::new(&mut headers);
+        match resp.parse(buf) {
+            Ok(httparse::Status::Complete(len)) => {
+                let code = resp.code.unwrap_or(0);
+                if code != 200 {
+                    anyhow::bail!("HTTP status {code}");
+                }
+                let mut cl = None;
+                // HTTP/1.1 persists unless `close`; HTTP/1.0 only with an
+                // explicit `keep-alive`.
+                let mut reusable = resp.version == Some(1);
+                for h in resp.headers.iter() {
+                    if h.name.eq_ignore_ascii_case("content-length") {
+                        cl = std::str::from_utf8(h.value)
+                            .ok()
+                            .and_then(|s| s.trim().parse::<u64>().ok());
+                    } else if h.name.eq_ignore_ascii_case("connection")
+                        || h.name.eq_ignore_ascii_case("proxy-connection")
+                    {
+                        if contains_ci(h.value, b"close") {
+                            reusable = false;
+                        } else if contains_ci(h.value, b"keep-alive") {
+                            reusable = true;
                         }
                     }
-                    Some((len, cl.unwrap_or(0), reusable && keepalive))
                 }
-                Ok(httparse::Status::Partial) => None,
-                Err(_) => anyhow::bail!("bad response"),
+                break (len, cl.unwrap_or(0), reusable && keepalive);
             }
-        };
-        if let Some(v) = parsed {
-            break v;
+            Ok(httparse::Status::Partial) => {}
+            Err(_) => anyhow::bail!("bad response"),
         }
         if buf.len() > 65536 {
             anyhow::bail!("response head too large");
         }
     };
-    let code = std::str::from_utf8(&buf)
-        .ok()
-        .and_then(|s| s.lines().next())
-        .and_then(|l| l.split_whitespace().nth(1))
-        .and_then(|c| c.parse::<u32>().ok())
-        .unwrap_or(0);
-    if code != 200 {
-        anyhow::bail!("HTTP status {code}");
-    }
-    let have = (buf.len() - head_len) as u64;
-    let mut scratch = [0u8; 65536];
-    let mut got = have;
+    let mut got = (buf.len() - head_len) as u64;
     while got < content_length {
-        let n = stream.read(&mut scratch).await?;
+        // The reused buffer doubles as the drain buffer: nothing in it is
+        // needed any more, and no 64 KB scratch is zeroed per request.
+        buf.clear();
+        let n = stream.read_buf(buf).await?;
         if n == 0 {
             anyhow::bail!("EOF before body end");
         }
@@ -282,14 +366,11 @@ async fn http_get(
 /// One GET as an HTTP/2 stream. Same result contract as [`http_get`].
 async fn h2_get(
     send: &mut h2::client::SendRequest<bytes::Bytes>,
-    host: &str,
-    port: u16,
-    path: &str,
-    api_key: &str,
+    uri: &str,
+    auth: &str,
 ) -> anyhow::Result<(u64, bool)> {
-    let auth = B64.encode(format!("bench:{api_key}"));
-    let req = http::Request::get(format!("http://{host}:{port}{path}"))
-        .header("proxy-authorization", format!("Basic {auth}"))
+    let req = http::Request::get(uri)
+        .header("proxy-authorization", auth)
         .body(())?;
     let mut ready = send.clone().ready().await?;
     let (resp, _) = ready.send_request(req, true)?;
