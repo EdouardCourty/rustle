@@ -184,7 +184,7 @@ A request without credentials (a browser's first 407) does not count as a failur
 | Key | Default | Description |
 |---|---|---|
 | `upstream_keepalive` | `true` | Reuse connections to origins |
-| `max_idle_per_origin` | `256` | Idle connections kept per origin and per shard |
+| `max_idle_per_origin` | `1024` | Idle connections kept per origin and per shard (16× that across all origins); a connection idle for over 15 s is closed instead of reused |
 | `max_request_body_bytes` | `0` | Max request body (413); `0` = unlimited |
 | `max_response_body_bytes` | `0` | Max response body (502 when declared, cut otherwise); `0` = unlimited |
 | `allow_websocket` | `true` | Let `Upgrade: websocket` requests on the plain-HTTP path through (the connection becomes a tunnel once the origin answers 101); `false` refuses them with 403. `CONNECT` tunnels (`wss://`) are opaque and not affected: limit them with `[filter] allowed_ports` |

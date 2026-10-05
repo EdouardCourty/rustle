@@ -102,7 +102,7 @@ CLI (clap derive: `rustle/src/cli.rs` = `Cli` + `Command`; one file per command 
 | `limits.max_connections` / `max_header_bytes` | 10000 / 65536 |
 | `timeouts.connect` / `idle` | 5s / 60s |
 | `dns.ttl` / `max_entries` | 60s (0 = off) / 4096 |
-| `http.upstream_keepalive` / `max_idle_per_origin` | true / 256 (hard global cap 1024 per shard) |
+| `http.upstream_keepalive` / `max_idle_per_origin` | true / 1024 (global cap = 16× per shard; a socket idle > 15 s is dropped, a full origin evicts its oldest socket) |
 | `http.max_request_body_bytes` / `max_response_body_bytes` | 0 = unlimited |
 | `http.allow_websocket` | true (`Upgrade: websocket` on the plain-HTTP path; false → 403; CONNECT/wss untouched) |
 | `tls.listen` / `cert` / `key` | `""` (off) / PEM |
@@ -183,7 +183,7 @@ Format, checked against the current history: `type(scope): description`, **subje
 2. **`RequestHead` = Spans into `buf`**: `buf.clear()`, `take`, a realloc between parse and use invalidate them. `span_of` assumes httparse returns sub-slices of the same buffer.
 3. **splice `dir()`**: always drain the pipe when it holds data before parking on `src.readable()` (deadlock otherwise). On the HTTP path, `dup`ed fds share the file description: EOF must not half-close the client.
 4. **Retry**: idempotent + replayable body only. Do not widen it. Covered by e2e `http/retry/*`.
-5. Pool: accept only a complete, keep-alive, framed response with no over-read.
+5. Pool: accept only a complete, keep-alive, framed response with no over-read. The per-origin cap must stay above the expected concurrency per origin: at 1024 concurrent connections a 256 cap collapsed throughput 25× (connection churn, 502s).
 6. An epoll state-machine rewrite was tried and abandoned (same CPU/req as Tokio, worse rps). Do not return to it without new data.
 7. Gains < 5 % = noise. Every performance claim goes through the fixed-seed matrix.
 8. io_uring (monoio prototype, removed from the repo — recoverable at commit `a2b11e3`): ±8 % depending on size, no net gain on 1 core; kTLS: opt-in, wins on tunnels/RAM, loses on HTTP bulk. Do not change these decisions without a new measurement (multi-core).
@@ -207,7 +207,7 @@ Format, checked against the current history: `type(scope): description`, **subje
 - **Multi-core: measure it** (`REMOTE=1 run-scaling.sh` on three machines, `bench/REMOTE.md`; the setup is written, never run yet) — nothing is measured beyond one core. Retest io_uring and kTLS in that setting.
 - h2 path: slower than TLS+HTTP/1.1 on bulk (a `Bytes` copy per chunk, framing). h2 flood ahead of gost (4/16 MB windows), bound by the harness core.
 - kTLS: understand the HTTP bulk loss (−37 % at 1 MB) — `perf` unavailable on the current box.
-- Pool: no idle reaper, hard cap 1024/shard. DNS: full wipe when full, no negative cache, no coalescing.
+- Pool: no background reaper (a socket idle > 15 s is dropped when reached, a full origin evicts its oldest). DNS: full wipe when full, no negative cache, no coalescing.
 - PGO/BOLT, `panic=abort` (rejected: a panic would kill the whole shard), `target-cpu=native` outside Docker.
 
 **Functional (not supported)**

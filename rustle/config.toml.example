@@ -63,7 +63,7 @@ max_entries = 4096
 # a connection that died while idle). Disable to open/close an upstream
 # connection per request.
 upstream_keepalive = true
-max_idle_per_origin = 256
+max_idle_per_origin = 1024
 # Body size limits in bytes (0 = unlimited). Requests over the limit are
 # answered 413 before the body is sent; responses over the limit get 502
 # (declared) or a truncated stream + close (unknown length).
