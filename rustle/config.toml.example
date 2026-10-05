@@ -69,6 +69,10 @@ max_idle_per_origin = 256
 # (declared) or a truncated stream + close (unknown length).
 max_request_body_bytes = 0
 max_response_body_bytes = 0
+# `Upgrade: websocket` requests on the plain-HTTP path: forwarded, then tunnelled
+# once the origin answers 101. false = refused with 403. CONNECT tunnels (wss://)
+# are opaque and not affected: restrict them with [filter] allowed_ports.
+allow_websocket = true
 
 [tls]
 # HTTPS proxy listener (TLS between client and proxy), next to the plain

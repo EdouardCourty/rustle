@@ -15,6 +15,7 @@ pub mod robustness;
 pub mod security;
 pub mod socks5;
 pub mod uploads;
+pub mod websocket;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -38,6 +39,7 @@ pub fn all() -> Vec<Scenario> {
     v.extend(cli::scenarios());
     v.extend(logs::scenarios());
     v.extend(interop_curl::scenarios());
+    v.extend(websocket::scenarios());
     v
 }
 

@@ -250,7 +250,7 @@ async fn connect(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
     tracing::trace!(c2u, u2c, "h2 tunnel closed");
     if ctx.log.all() {
         ctx.svc
-            .log_tunnel(ctx.peer, "h2", "connect", &key, (c2u, u2c), t0);
+            .log_tunnel(ctx.peer, "h2", "connect", &key, 200, (c2u, u2c), t0);
     }
 }
 

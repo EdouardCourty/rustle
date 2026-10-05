@@ -14,6 +14,7 @@
 //! | `/slow/<n>?ms=<t>` | `n` bytes in 10 pieces, `t` ms apart |
 //! | `/drop` | reads the request, closes without answering |
 //! | `/hits?of=<k>` | body = number of requests received with `key=<k>` |
+//! | `/ws?mode=echo\|head\|early\|refuse` | WebSocket handshake: `101` then echo (`head`: also the request head as received; `early`: also a frame sent with the 101); no upgrade headers or `refuse`: `426` + `nope` |
 //!
 //! Any request with `key=<k>` in its query is counted (retries visible).
 //!
@@ -475,6 +476,49 @@ async fn respond(
                 tokio::time::sleep(Duration::from_millis(ms)).await;
             }
             Ok(true)
+        }
+        "ws" => {
+            let upgrade = req
+                .header("upgrade")
+                .is_some_and(|v| v.eq_ignore_ascii_case("websocket"))
+                && req
+                    .header("connection")
+                    .is_some_and(|v| v.to_ascii_lowercase().contains("upgrade"));
+            let mode = query(q, "mode").unwrap_or("echo");
+            if !upgrade || mode == "refuse" {
+                s.write_all(
+                    format!("HTTP/1.1 426 Upgrade Required\r\n{tag}Content-Length: 4\r\n\r\nnope")
+                        .as_bytes(),
+                )
+                .await?;
+                return Ok(true);
+            }
+            let mut first = format!(
+                "HTTP/1.1 101 Switching Protocols\r\n{tag}Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: x\r\n\r\n"
+            )
+            .into_bytes();
+            match mode {
+                "head" => {
+                    first.extend_from_slice(&req.head);
+                    first.extend_from_slice(b"\r\n\r\n");
+                }
+                "early" => first.extend_from_slice(b"early-frame"),
+                _ => {}
+            }
+            s.write_all(&first).await?;
+            // Echo; bytes the client sent behind its handshake come back first.
+            let pending = std::mem::take(&mut w.buf);
+            if !pending.is_empty() {
+                s.write_all(&pending).await?;
+            }
+            let mut b = [0u8; 4096];
+            while let Ok(n) = s.read(&mut b).await {
+                if n == 0 {
+                    break;
+                }
+                s.write_all(&b[..n]).await?;
+            }
+            Ok(false)
         }
         _ => {
             s.write_all(

@@ -7,6 +7,7 @@ mod h2;
 mod pipeline;
 mod socks5;
 mod socks5_udp;
+mod upgrade;
 
 pub use h2::handle_h2;
 pub use socks5::handle_socks5;
@@ -104,12 +105,14 @@ impl Services {
     }
 
     /// Tunnel closed (all level).
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn log_tunnel(
         &self,
         peer: IpAddr,
         via: &str,
         kind: &str,
         target: &str,
+        status: u16,
         (up, down): (u64, u64),
         t0: std::time::Instant,
     ) {
@@ -120,7 +123,7 @@ impl Services {
                 .kv("via", via)
                 .kv("kind", kind)
                 .kv("target", target)
-                .kv("status", 200)
+                .kv("status", status)
                 .kv("up", up)
                 .kv("down", down)
                 .kv("ms", t0.elapsed().as_millis()),
@@ -131,6 +134,9 @@ impl Services {
 /// A connection that became a CONNECT tunnel.
 struct Tunnel {
     up: TcpStream,
+    /// Access-log kind and status: `connect` / 200, `websocket` / 101.
+    kind: &'static str,
+    status: u16,
     /// `host:port`, kept only when every tunnel is logged.
     target: Option<String>,
     t0: std::time::Instant,
@@ -164,7 +170,7 @@ pub async fn handle_conn<C: ClientStream>(mut client: C, peer: IpAddr, svc: Arc<
             Ok((c2u, u2c)) => {
                 tracing::trace!(c2u, u2c, "tunnel closed");
                 if let Some(target) = t.target {
-                    svc.log_tunnel(peer, C::VIA, "connect", &target, (c2u, u2c), t.t0);
+                    svc.log_tunnel(peer, C::VIA, t.kind, &target, t.status, (c2u, u2c), t.t0);
                 }
             }
             Err(e) => tracing::trace!(error = %e, "tunnel error"),
@@ -176,6 +182,10 @@ pub async fn handle_conn<C: ClientStream>(mut client: C, peer: IpAddr, svc: Arc<
             }
         }
     }
+}
+
+fn is_get(head: &crate::http::RequestHead, buf: &[u8]) -> bool {
+    head.method.slice(buf).eq_ignore_ascii_case(b"GET")
 }
 
 /// The keep-alive loop. Returns the upstream socket when the connection
@@ -281,6 +291,8 @@ async fn serve<C: ClientStream>(client: &mut C, peer: IpAddr, svc: &Services) ->
                         }
                         Some(Tunnel {
                             up,
+                            kind: "connect",
+                            status: 200,
                             target: svc.log.all().then(|| origin_key.clone()),
                             t0: std::time::Instant::now(),
                         })
@@ -302,6 +314,19 @@ async fn serve<C: ClientStream>(client: &mut C, peer: IpAddr, svc: &Services) ->
                         None
                     }
                 };
+            }
+            Target::Http { .. } if head.upgrade && is_get(&head, &buf) => {
+                return upgrade::websocket(
+                    client,
+                    peer,
+                    svc,
+                    &mut buf,
+                    &head,
+                    &target,
+                    &mut resp_buf,
+                    &mut rewrite_buf,
+                )
+                .await;
             }
             Target::Http { .. } => {
                 let keep_going = pipeline::http(

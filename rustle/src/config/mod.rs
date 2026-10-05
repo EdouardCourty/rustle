@@ -262,6 +262,11 @@ pub struct HttpConfig {
     /// On exceed: relay aborted (the upstream has already been consumed
     /// when known — pool dropped), connection closed.
     pub max_response_body_bytes: u64,
+    /// Let `Upgrade: websocket` requests on the proxy's plain-HTTP path
+    /// through (the connection becomes a tunnel once the origin answers
+    /// 101). `false`: such requests are refused with 403. CONNECT tunnels
+    /// (`wss://`, and `ws://` through CONNECT) are opaque and not affected.
+    pub allow_websocket: bool,
 }
 
 impl Default for HttpConfig {
@@ -271,6 +276,7 @@ impl Default for HttpConfig {
             max_idle_per_origin: 256,
             max_request_body_bytes: 0,
             max_response_body_bytes: 0,
+            allow_websocket: true,
         }
     }
 }

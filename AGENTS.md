@@ -30,6 +30,7 @@ rustle/              the proxy
     proxy/socks5.rs   SOCKS5 (RFC 1928/1929): CONNECT (splice relay) + UDP ASSOCIATE, password = API key, BIND refused
     proxy/socks5_udp.rs UDP ASSOCIATE (QUIC/HTTP3, DNS): client-side socket + dual-stack outbound socket; datagrams accepted only from the TCP control connection's IP, replies only from contacted destinations, same policy as TCP; lives as long as the TCP control connection
     proxy/h2.rs       HTTP/2 (ALPN h2): 1 task/stream; CONNECT = h2 ↔ TCP tunnel (flow control); other methods → HTTP/1.1 through the pool, chunked decoded
+    proxy/upgrade.rs  WebSocket handshake on the plain-HTTP path → tunnel (see Architecture)
     proxy/pipeline.rs http(): forward_request, retry, 1xx, body framing, upstream pooling
     http/request.rs   RequestHead = Spans into the buffer (zero-alloc parse), classify, parse_authority
     http/response.rs  response head parse, keep_alive, framing
@@ -76,6 +77,7 @@ bench/
 - **CONNECT**: `host:port` key → DNS → connect → `200` → early bytes → `relay::bidirectional` (splice::tunnel: per direction, 8→64 KB copy then a pooled PipePair when sustained; half-close via `shutdown(SHUT_WR)`, preceded by close_notify on a kTLS client). `serve`'s keep-alive state is boxed: a held tunnel's future keeps only the relay state (test `connection_future_stays_small`).
 - **HTTP**: origin key → `pool.take` or connect → `forward_request` (head rewritten into `rewrite_buf`, one `write_all` syscall without body, `write_vectored` head+prefix otherwise) → `read_response_head` (httparse, 64 headers) → body by framing (bounded CL / chunked / EOF) → back to the pool when complete + keep-alive. An EOF-delimited body closes the client connection after the response.
 - **Reload** (`rustle reload` → control socket, or SIGHUP; both = `server::reload_from_file`): re-reads the file, builds a new immutable `Live` snapshot (config, auth, DNS cache, policies, limiter, TLS acceptor; all validated first, error = nothing changes) and publishes it on a `watch` channel. Each shard checks `has_changed()` after `accept` (one atomic load) and rebuilds its `Arc<Services>`; its pool survives. Open connections keep the snapshot they were accepted under. Restart-only keys (`restart_required()`: listeners, workers, pin_cores, socket buffers, pool, `[log]`, `tls.listen/ktls`, `socks5.listen`, `admin_listen`) keep their running value (`effective()`) and are reported. The DNS cache and the ban list are kept when their settings did not change. Any new config key must be classified: reloadable (read through `svc.cfg` / `Live`) or added to `restart_required` + `effective`. Tests: `server/tests/reload.rs`, e2e `reload/*`.
+- **WebSocket** (`proxy/upgrade.rs`): `GET` + `Connection: Upgrade` + `Upgrade: websocket` (`RequestHead::upgrade`) skips the keep-alive pipeline: fresh upstream connection (never pooled), head rewritten with `Connection: Upgrade`, `101` → head + bytes already read forwarded, then the same `Tunnel` as CONNECT (splice; access log kind `websocket`, status 101). Not 101 → the origin's answer is relayed and the connection closes. `http.allow_websocket = false` → 403 before any upstream connect. Policy, auth and limits apply as for any request. h2 clients: no RFC 8441 extended CONNECT.
 - **Errors before any response byte**: no response / connection closed by the origin → 502; idle timeout on the response head → 504 (h2: same statuses on the stream). Upstream write failure → retry when replayable, 502 otherwise.
 - **Retry** on a stale pooled socket: GET/HEAD with a fully buffered body only (HTTP/1 and h2).
 - **Uploads**: `Transfer-Encoding: chunked` accepted (alone, without Content-Length, not in HTTP/1.0 → 400 otherwise) and relayed verbatim (staging = `rewrite_buf`), budget enforced while relaying (→ 413), bad framing → 400, bytes after the final chunk → close after the response; not replayable. A Content-Length body cut by the client aborts both sides at once. In h2, a body without Content-Length goes upstream as chunked.
@@ -101,6 +103,7 @@ CLI (clap derive: `rustle/src/cli.rs` = `Cli` + `Command`; one file per command 
 | `dns.ttl` / `max_entries` | 60s (0 = off) / 4096 |
 | `http.upstream_keepalive` / `max_idle_per_origin` | true / 256 (hard global cap 1024 per shard) |
 | `http.max_request_body_bytes` / `max_response_body_bytes` | 0 = unlimited |
+| `http.allow_websocket` | true (`Upgrade: websocket` on the plain-HTTP path; false → 403; CONNECT/wss untouched) |
 | `tls.listen` / `cert` / `key` | `""` (off) / PEM |
 | `tls.handshake_timeout` / `http2` / `ktls` | 10s / true (ALPN h2) / **false** (opt-in: +13 % tunnels, −30 % RAM, but −37 % HTTP bulk) |
 | `auth.allow_clients` | [] (empty = everyone; CIDR, closed at accept on every listener) |
@@ -181,8 +184,8 @@ Format, checked against the current history: `type(scope): description`, **subje
 **Keep this section up to date: update it in the same commit whenever the project evolves (feature added, test counts, reference campaign, backlog change).**
 
 - Last updated 2026-10-05, branch `main`. Linux + macOS, CI in `.github/workflows/` (lint, tests + e2e on Linux/macOS, installer; tag `vX.Y.Z` → release).
-- `make check` green: fmt, clippy `-D warnings` (workspace, e2e included), `cargo test -p rustle` 73/73 (unit + in-process end-to-end), e2e `--quick` 66 scenarios. `make e2e` on macOS: 515 OK + 26 SKIP (Linux-only paths) out of 541; `robustness/huge-request-line` flaked once under full parallel load (passes alone), to watch.
-- Implemented: HTTP/1.1 + CONNECT, HTTPS proxy (TLS, rustls), HTTP/2, SOCKS5 (TCP + UDP), shared-nothing shards with `SO_REUSEPORT` and optional core pinning, splice relay, chunked uploads, policy (destinations, client allowlist, bans, anti-slowloris), access log, opt-in kTLS, `rustle` CLI (init/check/status/reload/service/update/uninstall), runtime reload (control socket + SIGHUP), `curl | sh` installer, black-box e2e suite.
+- `make check` green: fmt, clippy `-D warnings` (workspace, e2e included), `cargo test -p rustle` 75/75 (unit + in-process end-to-end), e2e `--quick` 68 scenarios. `make e2e` on macOS: 523 OK + 26 SKIP (Linux-only paths) out of 549; `robustness/huge-request-line` flaked once under full parallel load (passes alone), to watch.
+- Implemented: HTTP/1.1 + CONNECT, HTTPS proxy (TLS, rustls), HTTP/2, SOCKS5 (TCP + UDP), shared-nothing shards with `SO_REUSEPORT` and optional core pinning, splice relay, chunked uploads, policy (destinations, client allowlist, bans, anti-slowloris), access log, opt-in kTLS, `rustle` CLI (init/check/status/reload/service/update/uninstall), runtime reload (control socket + SIGHUP), WebSocket upgrades (`http.allow_websocket`), `curl | sh` installer, black-box e2e suite.
 - Reference campaign: 2026-10-05 (`bench/results/campaign-20261005-120351.txt`, rewritten generator/origin harness, 1 core + 2-core harness). Its numbers feed the README charts and table (`make charts`); `bench/RESULTS.md` still holds the older 2026-10-03 campaign and must be refreshed. Produced by `bench/run-campaign.sh` (5 proxies × plain/TLS/h2), tables by `bench/tools/campaign-table.py`.
 - The bench (static origin, Content-Length) exercises neither chunked, SOCKS5 nor uploads: covered by the tests and the e2e suite.
 - e2e suite: one expected behavior = one scenario. Bug found → first a scenario that reproduces it (it must fail), then the fix.
@@ -197,7 +200,7 @@ Format, checked against the current history: `type(scope): description`, **subje
 - PGO/BOLT, `panic=abort` (rejected: a panic would kill the whole shard), `target-cpu=native` outside Docker.
 
 **Functional (not supported)**
-- Pipelined client requests (answered one at a time: close after the first response), `Upgrade` (WebSocket over plain `http://`), full `Expect: 100-continue`, HTTP/3 to the proxy (MASQUE).
+- Pipelined client requests (answered one at a time: close after the first response), `Upgrade` other than WebSocket and WebSocket over h2 (RFC 8441), full `Expect: 100-continue`, HTTP/3 to the proxy (MASQUE).
 - Reload: restart-only keys (listeners, workers, pool, `[log]`, kTLS) still need a restart; open connections keep their old config.
 - Upstream responses: duplicate `Content-Length` not checked (origin assumed trusted).
 

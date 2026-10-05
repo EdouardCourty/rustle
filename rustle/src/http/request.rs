@@ -52,6 +52,8 @@ pub struct RequestHead {
     /// `Transfer-Encoding: chunked` body (relayed verbatim upstream).
     pub chunked: bool,
     pub close: bool,
+    /// `Connection: Upgrade` with `Upgrade: websocket` (a WebSocket handshake).
+    pub upgrade: bool,
 }
 
 /// The proxy target derived from a head: CONNECT `host:port` -> raw tunnel,
@@ -127,6 +129,8 @@ impl RequestHead {
         let mut content_length = None;
         let mut chunked = false;
         let mut close = false;
+        let mut conn_upgrade = false;
+        let mut upgrade_ws = false;
         for h in req.headers.iter() {
             if h.name.eq_ignore_ascii_case("proxy-authorization") {
                 if auth.is_none() {
@@ -148,7 +152,10 @@ impl RequestHead {
                 }
                 chunked = true;
             } else if h.name.eq_ignore_ascii_case("connection") {
-                close = contains_token(h.value, "close");
+                close |= contains_token(h.value, "close");
+                conn_upgrade |= contains_token(h.value, "upgrade");
+            } else if h.name.eq_ignore_ascii_case("upgrade") {
+                upgrade_ws |= contains_token(h.value, "websocket");
             }
         }
         if chunked && (content_length.is_some() || req.version == Some(0)) {
@@ -164,6 +171,7 @@ impl RequestHead {
             content_length,
             chunked,
             close,
+            upgrade: conn_upgrade && upgrade_ws,
         })
     }
 }
@@ -308,8 +316,21 @@ fn parse_authority(buf: &[u8], a: Span) -> Result<(Span, Option<u16>), &'static 
 /// up reused or dropped). Zero-alloc: writes into a connection-owned
 /// scratch buffer cleared then reused across keep-alive requests. `method`
 /// and `origin` are raw spans/slices from the head's buffer; an empty
-/// origin (absolute form without a path) is emitted as "/".
-pub fn rewrite_head_into(out: &mut Vec<u8>, head_raw: &[u8], method: &[u8], origin: &[u8]) {
+/// origin (absolute form without a path) is emitted as "/". `upgrade`: a
+/// WebSocket handshake, forwarded with `Connection: Upgrade` (and its
+/// `Upgrade` / `Sec-WebSocket-*` headers) instead of `keep-alive`.
+pub fn rewrite_head_into(
+    out: &mut Vec<u8>,
+    head_raw: &[u8],
+    method: &[u8],
+    origin: &[u8],
+    upgrade: bool,
+) {
+    let conn: &[u8] = if upgrade {
+        b"Connection: Upgrade\r\n\r\n"
+    } else {
+        b"Connection: keep-alive\r\n\r\n"
+    };
     out.clear();
     out.reserve(head_raw.len() + 64);
     out.extend_from_slice(method);
@@ -324,7 +345,7 @@ pub fn rewrite_head_into(out: &mut Vec<u8>, head_raw: &[u8], method: &[u8], orig
     let rest = match head_raw.iter().position(|&b| b == b'\n') {
         Some(i) => &head_raw[i + 1..],
         None => {
-            out.extend_from_slice(b"Connection: keep-alive\r\n\r\n");
+            out.extend_from_slice(conn);
             return;
         }
     };
@@ -345,7 +366,7 @@ pub fn rewrite_head_into(out: &mut Vec<u8>, head_raw: &[u8], method: &[u8], orig
         }
         out.extend_from_slice(line);
     }
-    out.extend_from_slice(b"Connection: keep-alive\r\n\r\n");
+    out.extend_from_slice(conn);
 }
 
 #[cfg(test)]
@@ -375,6 +396,7 @@ mod tests {
             content_length: None,
             chunked: false,
             close: false,
+            upgrade: false,
         }
     }
 
@@ -492,7 +514,7 @@ mod tests {
     fn rewrite_drops_proxy_headers() {
         let raw = b"GET http://upstream:8000/1kb HTTP/1.1\r\nHost: upstream:8000\r\nProxy-Authorization: Basic abc\r\nProxy-Connection: keep-alive\r\nAccept: */*\r\n\r\n";
         let mut out = Vec::new();
-        rewrite_head_into(&mut out, raw, b"GET", b"/1kb");
+        rewrite_head_into(&mut out, raw, b"GET", b"/1kb", false);
         let out = String::from_utf8_lossy(&out);
         assert!(out.starts_with("GET /1kb HTTP/1.1\r\n"));
         assert!(out.contains("Host: upstream:8000"));
@@ -506,7 +528,7 @@ mod tests {
     fn rewrite_empty_origin_is_root() {
         let raw = b"GET http://upstream:8000 HTTP/1.1\r\n\r\n";
         let mut out = Vec::new();
-        rewrite_head_into(&mut out, raw, b"GET", b"");
+        rewrite_head_into(&mut out, raw, b"GET", b"", false);
         let out = String::from_utf8_lossy(&out);
         assert!(out.starts_with("GET / HTTP/1.1\r\n"));
     }
@@ -541,5 +563,44 @@ mod tests {
         ] {
             assert!(parse(bad).is_none(), "{}", String::from_utf8_lossy(bad));
         }
+    }
+
+    fn head_of(raw: &[u8]) -> RequestHead {
+        let mut headers = [httparse::EMPTY_HEADER; MAX_HEADERS];
+        let mut req = httparse::Request::new(&mut headers);
+        let len = match req.parse(raw).unwrap() {
+            httparse::Status::Complete(l) => l,
+            httparse::Status::Partial => panic!("partial head"),
+        };
+        RequestHead::from(&req, len, raw).unwrap()
+    }
+
+    #[test]
+    fn websocket_handshake_is_detected() {
+        let ws = b"GET http://h/ws HTTP/1.1\r\nHost: h\r\nConnection: keep-alive, Upgrade\r\nUpgrade: WebSocket\r\n\r\n";
+        assert!(head_of(ws).upgrade);
+        // Each header alone is not a handshake, nor is another protocol.
+        for raw in [
+            &b"GET http://h/ HTTP/1.1\r\nHost: h\r\nUpgrade: websocket\r\n\r\n"[..],
+            b"GET http://h/ HTTP/1.1\r\nHost: h\r\nConnection: Upgrade\r\n\r\n",
+            b"GET http://h/ HTTP/1.1\r\nHost: h\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\n",
+        ] {
+            assert!(!head_of(raw).upgrade, "{}", String::from_utf8_lossy(raw));
+        }
+        // `close` survives a second Connection header.
+        let two = b"GET http://h/ HTTP/1.1\r\nHost: h\r\nConnection: close\r\nConnection: Upgrade\r\n\r\n";
+        assert!(head_of(two).close);
+    }
+
+    #[test]
+    fn rewrite_keeps_websocket_headers_and_upgrades_the_connection() {
+        let raw = b"GET http://h/ws HTTP/1.1\r\nHost: h\r\nProxy-Authorization: Basic x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Key: k\r\n\r\n";
+        let mut out = Vec::new();
+        rewrite_head_into(&mut out, raw, b"GET", b"/ws", true);
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(
+            text,
+            "GET /ws HTTP/1.1\r\nHost: h\r\nUpgrade: websocket\r\nSec-WebSocket-Key: k\r\nConnection: Upgrade\r\n\r\n"
+        );
     }
 }

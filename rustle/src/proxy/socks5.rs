@@ -100,7 +100,7 @@ pub async fn handle_socks5(mut client: TcpStream, peer: IpAddr, svc: Arc<Service
         Ok((c2u, u2c)) => {
             tracing::trace!(c2u, u2c, "socks5 tunnel closed");
             if svc.log.all() {
-                svc.log_tunnel(peer, "socks5", "connect", &key, (c2u, u2c), t0);
+                svc.log_tunnel(peer, "socks5", "connect", &key, 200, (c2u, u2c), t0);
             }
         }
         Err(e) => tracing::trace!(error = %e, "socks5 tunnel error"),

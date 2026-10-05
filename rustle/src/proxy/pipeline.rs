@@ -421,6 +421,7 @@ async fn forward_request<C: ClientStream>(
         &buf[..head.raw_len],
         head.method.slice(buf),
         origin.slice(buf),
+        false,
     );
     if head.chunked {
         return forward_chunked(client, up, buf, head, ctx).await;

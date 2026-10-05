@@ -34,7 +34,7 @@ Table of Contents
 Features
 --------
 
-*   **Protocols**: plain HTTP/1.1 and `CONNECT`, HTTP/1.1 over TLS, HTTP/2 over TLS (ALPN `h2`), SOCKS5 (`CONNECT` + `UDP ASSOCIATE` for QUIC/HTTP3 and DNS).
+*   **Protocols**: plain HTTP/1.1 (WebSocket upgrades included) and `CONNECT`, HTTP/1.1 over TLS, HTTP/2 over TLS (ALPN `h2`), SOCKS5 (`CONNECT` + `UDP ASSOCIATE` for QUIC/HTTP3 and DNS).
 *   **Fast**: one shard per core, allocation-free hot path, zero-copy `splice()` relay on Linux. See [Benchmarks](#benchmarks).
 *   **Light**: ~80 MB for 25,000 open tunnels.
 *   **Safe by default**: API key auth, client IP allowlist, bans after repeated wrong keys, private and internal destinations refused (DNS rebinding included), allowed ports, anti-slowloris, anti request smuggling.
@@ -139,6 +139,7 @@ A request without credentials (a browser's first 407) does not count as a failur
 | `max_idle_per_origin` | `256` | Idle connections kept per origin and per shard |
 | `max_request_body_bytes` | `0` | Max request body (413); `0` = unlimited |
 | `max_response_body_bytes` | `0` | Max response body (502 when declared, cut otherwise); `0` = unlimited |
+| `allow_websocket` | `true` | Let `Upgrade: websocket` requests on the plain-HTTP path through (the connection becomes a tunnel once the origin answers 101); `false` refuses them with 403. `CONNECT` tunnels (`wss://`) are opaque and not affected: limit them with `[filter] allowed_ports` |
 
 ### `[dns]`
 
@@ -204,7 +205,7 @@ rustle reload      # re-read the config file the proxy was started with
 
 The file is validated first; if anything is wrong (syntax, a CIDR, a missing certificate, a key that does not match) the running config is kept and the error is printed. `SIGHUP` does the same (and reopens the access log), so `systemctl reload rustle` works.
 
-*   **Applied to new connections**: `api_keys`, `allow_clients`, the ban settings, `[filter]`, `[limits]`, `[timeouts]`, `[dns]`, `http.max_*_body_bytes`, `tls.cert` / `key` / `http2` / `handshake_timeout`. A renewed certificate is picked up without dropping anyone.
+*   **Applied to new connections**: `api_keys`, `allow_clients`, the ban settings, `[filter]`, `[limits]`, `[timeouts]`, `[dns]`, `http.max_*_body_bytes`, `http.allow_websocket`, `tls.cert` / `key` / `http2` / `handshake_timeout`. A renewed certificate is picked up without dropping anyone.
 *   **Restart required**: `listen` addresses, `workers`, `pin_cores`, `socket_buffer_bytes`, `tls.listen` / `ktls`, `socks5.listen`, `admin_listen`, the upstream pool and `[log]`. `rustle reload` lists the ones you changed and keeps their running value.
 *   Connections already open keep the config they were accepted under until they close, so a revoked key stays valid on an existing keep-alive connection until it ends (at most `timeouts.idle` once idle).
 
@@ -248,7 +249,7 @@ make charts                   # regenerate the SVGs above from the latest campai
 Limitations
 -----------
 
-*   No `Upgrade` (WebSocket over plain `http://`; WebSocket over `https://` works through `CONNECT`).
+*   `Upgrade` is supported for WebSocket only (not `h2c` or other protocols), over HTTP/1.1 clients; WebSocket over HTTP/2 (RFC 8441) is not. `wss://` and browsers' `ws://` go through `CONNECT`.
 *   Pipelined client requests are answered one at a time, then the connection closes.
 *   `Expect: 100-continue` is not fully supported.
 *   No HTTP/3 to the proxy itself (QUIC traffic works through SOCKS5 UDP).
