@@ -24,7 +24,7 @@ pub fn set_binary(p: PathBuf, keep_dirs: bool) {
     let _ = KEEP.set(keep_dirs);
 }
 
-fn binary() -> &'static Path {
+pub fn binary() -> &'static Path {
     BINARY.get().expect("binary set by main")
 }
 

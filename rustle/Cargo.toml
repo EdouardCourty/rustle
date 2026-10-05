@@ -3,6 +3,9 @@ name = "rustle"
 version = "0.1.0"
 edition = "2021"
 description = "Ultra-minimal, high-performance HTTP forward proxy"
+license = "MIT"
+repository = "https://github.com/EdouardCourty/rustle"
+build = "build.rs"
 
 [dependencies]
 anyhow = "1"
@@ -13,6 +16,7 @@ http = "1"
 httparse = "1.9"
 humantime = "2"
 libc = "0.2"
+ring = { version = "0.17", default-features = false }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1", features = ["derive"] }
 socket2 = { version = "0.5", features = ["all"] }
