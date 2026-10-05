@@ -3,7 +3,7 @@ name = "e2e"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Black-box functional suite: runs the real myproxy binary against local origins and clients"
+description = "Black-box functional suite: runs the real rustle binary against local origins and clients"
 
 [dependencies]
 anyhow = "1"

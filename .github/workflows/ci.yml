@@ -52,9 +52,9 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo modprobe tls || echo "kTLS module unavailable, kTLS scenarios skip"
       - name: Unit + in-process end-to-end tests
-        run: cargo test -p myproxy
+        run: cargo test -p rustle
       - name: Build the proxy (release)
-        run: cargo build --release -p myproxy
+        run: cargo build --release -p rustle
       - name: e2e (${{ matrix.e2e }})
         shell: bash
         run: |

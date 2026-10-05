@@ -236,7 +236,7 @@ pub(crate) fn parse_url(url: &str) -> (String, u16, String) {
 
 /// Resolve a host:port target ONCE to a numeric ip:port string, so the
 /// benchmark measures the proxy itself and not per-connection DNS
-/// (myproxy would do getaddrinfo per request; 3proxy caches via nscache).
+/// (rustle would do getaddrinfo per request; 3proxy caches via nscache).
 pub(crate) async fn resolve_once(target: &str) -> anyhow::Result<String> {
     let (host, port) = match target.rfind(':') {
         Some(i) => (&target[..i], target[i + 1..].parse::<u16>()?),

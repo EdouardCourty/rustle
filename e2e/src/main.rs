@@ -1,6 +1,6 @@
-//! myproxy black-box functional suite.
+//! rustle black-box functional suite.
 //!
-//! Starts the real release binary (`target/release/myproxy`) once per
+//! Starts the real release binary (`target/release/rustle`) once per
 //! scenario with a generated config, against local origins and targets,
 //! and drives it with real clients (HTTP/1.1, HTTPS, HTTP/2, SOCKS5, curl).
 //!
@@ -24,7 +24,7 @@ fn main() -> anyhow::Result<()> {
     let mut list = false;
     let mut keep = false;
     let mut jobs = std::thread::available_parallelism().map_or(2, |n| n.get());
-    let mut bin = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/release/myproxy");
+    let mut bin = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/release/rustle");
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -60,7 +60,7 @@ fn main() -> anyhow::Result<()> {
 
     let bin = bin.canonicalize().with_context(|| {
         format!(
-            "proxy binary {} (cargo build --release -p myproxy)",
+            "proxy binary {} (cargo build --release -p rustle)",
             bin.display()
         )
     })?;

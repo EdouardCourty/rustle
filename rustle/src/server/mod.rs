@@ -277,7 +277,7 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
         pinned = !cpus.is_empty(),
         max_connections = shared.cfg.limits.max_connections,
         block_private = shared.cfg.filter.block_private,
-        "myproxy listening",
+        "rustle listening",
     );
 
     let (shutdown, rx) = watch::channel(false);
@@ -295,7 +295,7 @@ pub fn start(cfg: Arc<Config>) -> anyhow::Result<Server> {
         };
         let cpu = (!cpus.is_empty()).then(|| cpus[id % cpus.len()]);
         let handle = std::thread::Builder::new()
-            .name(format!("myproxy-shard-{id}"))
+            .name(format!("rustle-shard-{id}"))
             .spawn(move || {
                 if let Some(cpu) = cpu {
                     pin_to_cpu(cpu);
@@ -949,7 +949,7 @@ mod tests {
     fn tls_files() -> (String, String, rustls::pki_types::CertificateDer<'static>) {
         let ck = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
         let dir = std::env::temp_dir().join(format!(
-            "myproxy-tls-{}-{:?}",
+            "rustle-tls-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
@@ -1767,7 +1767,7 @@ mod tests {
     // ---- access log ----
 
     fn log_path(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("myproxy-access-{}-{tag}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("rustle-access-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("access.log")

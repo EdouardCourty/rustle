@@ -11,10 +11,7 @@ use crate::harness::{payload, Config, Proxy};
 use crate::runner::{scenario, Scenario};
 
 fn example_config() -> anyhow::Result<String> {
-    let p = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../myproxy/config.toml.example"
-    );
+    let p = concat!(env!("CARGO_MANIFEST_DIR"), "/../rustle/config.toml.example");
     std::fs::read_to_string(p).context("reading config.toml.example")
 }
 

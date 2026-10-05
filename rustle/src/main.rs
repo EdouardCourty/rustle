@@ -14,7 +14,7 @@ mod tls;
 mod upstream;
 
 // Global allocator selection (compile-time feature; glibc by default).
-// See myproxy/Cargo.toml [features]: jemalloc | mimalloc. The benchmark
+// See rustle/Cargo.toml [features]: jemalloc | mimalloc. The benchmark
 // measures RSS with each — per-connection alloc/free churn keeps pages
 // in RSS under glibc, the alternatives return them sooner.
 #[cfg(feature = "jemalloc")]

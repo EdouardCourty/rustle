@@ -38,7 +38,7 @@ tokio::task_local! {
 fn temp_dir() -> PathBuf {
     static N: AtomicU64 = AtomicU64::new(0);
     let d = std::env::temp_dir().join(format!(
-        "myproxy-e2e-{}-{}",
+        "rustle-e2e-{}-{}",
         std::process::id(),
         N.fetch_add(1, Ordering::Relaxed)
     ));
@@ -164,7 +164,7 @@ fn collect(
         while let Ok(Some(l)) = lines.next_line().await {
             let l = strip_ansi(&l);
             if let Some(tx) = &ready {
-                if l.contains("myproxy listening") {
+                if l.contains("rustle listening") {
                     let _ = tx.send(l.clone());
                 }
             }

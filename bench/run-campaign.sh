@@ -5,14 +5,14 @@
 #
 # Usage:
 #   ./run-campaign.sh                      # auth on, all DUTs
-#   AUTH=off PROXIES="myproxy squid" ./run-campaign.sh
+#   AUTH=off PROXIES="rustle squid" ./run-campaign.sh
 #
 # Index of the runs: results/campaign-<ts>.txt ("<proxy> <mode> <results.txt>").
 # Tables: tools/campaign-table.py results/campaign-<ts>.txt
 set -uo pipefail
 cd "$(dirname "$0")"
 
-PROXIES="${PROXIES:-myproxy 3proxy squid gost tinyproxy}"
+PROXIES="${PROXIES:-rustle 3proxy squid gost tinyproxy}"
 AUTH="${AUTH:-on}"
 export BENCH_SEED="${BENCH_SEED:-2004113323}"
 mkdir -p results

@@ -1,4 +1,4 @@
-# myproxy
+# rustle
 
 A high-performance forward proxy in Rust (Tokio), built for personal use: HTTP/1.1,
 HTTPS (CONNECT), HTTPS proxy with HTTP/2, SOCKS5 (TCP + UDP), shared-nothing
@@ -41,9 +41,9 @@ port, graceful shutdown (SIGTERM), log reopen on SIGHUP.
 ## Quick start
 
 ```sh
-cargo build --release -p myproxy
-cp myproxy/config.toml.example config.toml     # then edit: API key, listen…
-./target/release/myproxy config.toml
+cargo build --release -p rustle
+cp rustle/config.toml.example config.toml     # then edit: API key, listen…
+./target/release/rustle config.toml
 ```
 
 ```sh
@@ -79,7 +79,7 @@ The certificate is read at startup: restart after a renewal (graceful shutdown).
 ## Configuration
 
 A single TOML file (path as argument, default `config.toml`). Commented example:
-[`myproxy/config.toml.example`](myproxy/config.toml.example). Any unknown or misplaced
+[`rustle/config.toml.example`](rustle/config.toml.example). Any unknown or misplaced
 key fails the startup. Durations look like `"5s"`, `"1m"`, `"15m"`.
 
 ### `[server]`
@@ -190,7 +190,7 @@ Every scenario checks that no connection leaks and that SIGTERM shuts down clean
 `make e2e F="socks5"` filters by name.
 
 ```text
-myproxy/src/
+rustle/src/
 ├── main.rs            startup, signals (SIGTERM/SIGINT stop, SIGHUP log)
 ├── config/            config types + TOML parsing
 ├── server/            shards, listeners (plain / TLS / SOCKS5), admin, graceful shutdown
@@ -221,7 +221,7 @@ fixed seed (`2004113323`), median of 3 runs. Compared proxies: 3proxy, Squid, go
 Tinyproxy (same key, access logs off, same certificate type).
 
 ```sh
-make bench P=myproxy A=on                 # one matrix (P = myproxy|3proxy|squid|gost|tinyproxy)
+make bench P=rustle A=on                 # one matrix (P = rustle|3proxy|squid|gost|tinyproxy)
 make bench-all                            # full campaign: 5 proxies × plain / TLS / h2, then tables
 PROXY_TLS=1 ./bench/run-bench.sh squid on # one transport (PROXY_H2=1 for HTTP/2)
 NCPUS="1 2 4 8" make bench-scaling        # multi-core curve (machine with ≥ 2 × N cores)
@@ -234,7 +234,7 @@ protocol M21.5 (warmup outside the sample): do not compare with earlier campaign
 
 **Plain (HTTP/1.1)**
 
-| Test | **myproxy** | 3proxy | Squid | gost | Tinyproxy |
+| Test | **rustle** | 3proxy | Squid | gost | Tinyproxy |
 |---|---|---|---|---|---|
 | 1 KB keep-alive | **14,594 rps · 44 µs** | 1,557¹ · 67 µs | 8,964 · 110 µs | 1,935 · 510 µs | 2,962 · 313 µs |
 | 10 KB | **14,211 · 54 µs** | 12,343 · 74 µs | 7,292 · 136 µs | 1,850 · 521 µs | 2,601 · 353 µs |
@@ -246,7 +246,7 @@ protocol M21.5 (warmup outside the sample): do not compare with earlier campaign
 
 **HTTPS proxy (TLS)**
 
-| Test | **myproxy** | Squid | gost |
+| Test | **rustle** | Squid | gost |
 |---|---|---|---|
 | 1 KB | **14,128 · 50 µs** | 7,826 · 126 µs | 1,611 · 601 µs |
 | 1 MB | **1,444 · 654 µs** | 178 | 468 |
@@ -256,7 +256,7 @@ protocol M21.5 (warmup outside the sample): do not compare with earlier campaign
 
 **HTTP/2**
 
-| Test | **myproxy** | gost |
+| Test | **rustle** | gost |
 |---|---|---|
 | 1 KB | **14,896 · 57 µs** | 3,904 · 254 µs |
 | 1 MB | **792 · 1,190 µs** | 317 · 3,093 µs |
@@ -266,10 +266,10 @@ protocol M21.5 (warmup outside the sample): do not compare with earlier campaign
 ¹ 3proxy at 1 KB: held back by its 40 ms delayed ACK (known artifact, see RESULTS.md).
 ² gost exceeds the machine's RAM (4 GB): container killed or tunnels refused during the test.
 ³ Throughput bound by the harness core (generator + sink): the throughput gap (−3 %) is
-within flood noise (±15 %); at equal throughput myproxy spends 13 % less CPU per GB.
+within flood noise (±15 %); at equal throughput rustle spends 13 % less CPU per GB.
 ⁴ Harness ceiling (the generator's TLS handshakes on the shared core, p50 1.3 s), stable
 since the first campaign.
-myproxy is first on every row except HTTP/2 flood throughput (a tie within noise, better
+rustle is first on every row except HTTP/2 flood throughput (a tie within noise, better
 CPU per GB).
 Full tables: [`bench/RESULTS.md`](bench/RESULTS.md) (M21 section, final campaign).
 
