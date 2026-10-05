@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-.PHONY: help build test e2e e2e-quick fmt check clippy images up down smoke bench bench-all bench-scaling latest latest-3proxy latest-off clean
+.PHONY: help build test e2e e2e-quick fmt check clippy images up down smoke bench bench-all bench-scaling charts latest latest-3proxy latest-off clean
 
 P ?= rustle
 A ?= on
@@ -54,6 +54,9 @@ smoke: ## quick test through the stack (http 1kb)
 
 bench: ## full matrix: make bench [P=rustle|3proxy|squid|gost|tinyproxy] [A=on|off] [R=3]
 	cd bench && REPEAT=$(R) ./run-bench.sh $(P) $(A)
+
+charts: ## regenerate docs/benchmarks/*.svg from a campaign: make charts [C=bench/results/campaign-<ts>.txt]
+	python3 bench/tools/charts.py $${C:-$$(ls -t bench/results/campaign-*.txt | head -1)}
 
 latest: ## show the latest result pass of the current proxy
 	cd bench && cat results/$(P)/auth-$(A)/$$(ls -t results/$(P)/auth-$(A) | head -1)/results.txt
