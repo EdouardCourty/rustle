@@ -5,7 +5,7 @@ Forward HTTP/HTTPS (CONNECT) proxy in Rust, Tokio architecture.
 
 Platforms: **Linux (reference, all fast paths) and macOS (dev/test)**. Off Linux: no splice (`relay/splice_stub.rs`: adaptive copy only), no kTLS, no `TCP_QUICKACK`/`DEFER_ACCEPT`, `pin_cores` ignored, shards share one cloned listener (macOS `SO_REUSEPORT` does not balance). Bench = Docker/Linux only. e2e on macOS uses `lsof`/`ps` instead of `/proc`; UDP matrix capped at 8 KB.
 
-Language: **everything in English** — code, comments, commit messages, README, RESULTS.md, all docs. (Commits before 2026-10-04 are in French; history is not rewritten.)
+Language: **everything in English** — code, comments, commit messages, README, RESULTS.md, all docs.
 
 ## Layout
 
@@ -137,7 +137,7 @@ Optional features: `jemalloc`, `mimalloc` (mutually exclusive; default = glibc m
 
 ## Conventions
 
-- Commits: `M<major>.<minor>[-<n>]: <summary> — <figures>`, in English, gated by a fixed-seed matrix. Claude attribution as a trailer.
+- Commits: Conventional Commits, subject only, in English: `type(domain): short description` with type ∈ feat|fix|perf|refactor|docs|test|chore|ci|build (e.g. `perf(relay): per-shard pipe pool for splice`). Performance figures go in `bench/RESULTS.md`, not in the subject; every performance claim is gated by a fixed-seed matrix. No `Co-Authored-By` trailers.
 - Tests: `make check` (quick e2e included) before every commit, full `make e2e` before every milestone and after any proxy change (relay, pipeline, policy, TLS). New feature = new scenario in `e2e/src/suites/<feature>.rs` (and in the matrix when it depends on a config).
 - Baseline tags: `m10.3-tokio`, `m11.1-fsm`. Review labels in code/commits: B1–B8, R3, O1, O2.
 - No milestone tags (`M10.x`) in code comments: they belong in commits and RESULTS.md.
