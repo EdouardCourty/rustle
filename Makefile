@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-.PHONY: help build test e2e e2e-quick fmt check clippy images up down smoke bench bench-ws bench-all bench-scaling charts latest latest-3proxy latest-off clean
+.PHONY: help build test e2e e2e-quick fmt check clippy images up down smoke bench bench-ws bench-all bench-publish bench-scaling charts latest latest-3proxy latest-off clean
 
 P ?= rustle
 A ?= on
@@ -63,6 +63,9 @@ latest: ## show the latest result pass of the current proxy
 
 latest-3proxy: latest P=3proxy
 latest-off: latest A=off
+
+bench-publish: ## everything: campaigns, report, validity check, SVG charts, README table (see bench/run-all.sh)
+	cd bench && ./run-all.sh
 
 bench-ws: ## WebSocket matrix: make bench-ws [P=rustle|squid|gost|…] [A=on|off] [R=3]
 	cd bench && MATRIX=ws REPEAT=$(R) ./run-bench.sh $(P) $(A)

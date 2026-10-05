@@ -44,15 +44,18 @@ rustle against 3proxy, Squid, gost and Tinyproxy, each pinned to **one core** wi
 ![HTTPS proxy](docs/benchmarks/tls-1kb.svg)
 ![HTTP/2 proxy](docs/benchmarks/h2-1kb.svg)
 
-<!-- TODO(release): replace this table and the charts above with the new campaign (bench/FAIRNESS.md) -->
+<!-- bench:table:start -->
 
 | 1 core | rustle | 3proxy | Squid | gost | Tinyproxy |
 |---|---|---|---|---|---|
 | 1 KB, req/s | **77,959** | 1,504 | 27,558 | 4,610 | 15,509 |
 | 1 MB, req/s | **6,731** | 2,292 | 910 | 2,147 | 537 |
 | 10 MB, req/s | **370** | 342 | 81 | 285 | 49 |
+| Short connections, req/s | **19,173** | 15,735 | 15,002 | 5,503 | 15,073 |
 | Tunnels, Gbit/s | **48.4** | 42.9 | 35.4 | 43.4 | 4.6 |
-| 25,000 tunnels, RAM | **80 MB** | 785 MB | 1.5 GB | 3.7 GB | 468 MB |
+| 25,000 tunnels, RAM | **80 MB** | 785 MB | 1.5 GB | 3.6 GB | 468 MB |
+
+<!-- bench:table:end -->
 
 Reading the numbers:
 
@@ -67,7 +70,7 @@ Full tables, TLS and HTTP/2 matrices, and the measurement history: [`bench/RESUL
 make bench P=rustle A=on      # one proxy (rustle|3proxy|squid|gost|tinyproxy)
 make bench-all                # 5 proxies × plain / TLS / h2
 make bench-ws P=rustle        # WebSocket matrix
-make charts                   # regenerate the SVGs above from the latest campaign
+make bench-publish           # campaigns → validity check → the SVGs and the table above
 ```
 
 Under the Hood

@@ -6,7 +6,7 @@
 One horizontal bar chart per metric, rustle highlighted, stdlib only. Colors
 adapt to the viewer's light/dark theme. Same result parsing as
 campaign-table.py."""
-import os, re, sys
+import os, sys
 from xml.sax.saxutils import escape
 
 idx = sys.argv[1]
@@ -15,52 +15,10 @@ out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
 base = os.path.dirname(os.path.dirname(os.path.abspath(idx)))  # bench/
 os.makedirs(out, exist_ok=True)
 
-NAMES = {"myproxy": "rustle", "rustle": "rustle"}
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from benchlib import load_index  # noqa: E402
 
-
-def load(path):
-    """Best valid sweep level of each test (see campaign-table.py)."""
-    best = {}  # name -> (valid, metric, row)
-    for line in open(path, errors="replace"):
-        if not line.startswith("RESULT median"):
-            continue
-        kv = dict(re.findall(r"(\w+)=(\S*)", line))
-        m = re.search(r" (?<!gen_)(?<!up_)cpu_s_per_run=([0-9.]+)", line)
-        cpu = float(m.group(1)) if m else float("nan")
-        valid = not kv.get("err_kinds")
-        if kv["mode"] == "http":
-            name = "http-" + kv["url"].rsplit("/", 1)[1] + ("" if kv["keepalive"] == "true" else "-short")
-            rps = float(kv["rps"])
-            row, metric = {"rps": rps, "us": cpu / (rps * float(kv["elapsed_s"])) * 1e6}, rps
-        elif kv["mode"] == "ws":
-            size, el = int(kv["size"]), float(kv["elapsed_s"])
-            name = "ws-short" if kv["short"] == "true" else "ws-" + (f"{size}b" if size < 1024 else f"{size // 1024}kb")
-            rps = float(kv["rps"])
-            row = {"rps": rps, "us": cpu / (rps * el) * 1e6 if rps else float("nan"),
-                   "p99": float(kv["p99_ms"]), "gbps": float(kv["mbps"]) * 8 / 1000}
-            metric = row["gbps"] if size >= 1024 else rps
-        elif kv["mode"] == "flood":
-            name = "flood"
-            row = {"gbps": float(kv["gbps"])}; metric = row["gbps"]
-        else:
-            name = "hold-" + kv["conns"]
-            row = {"opened": float(kv["opened"]), "conns": float(kv["conns"]),
-                   "mb": float(kv.get("peak_rss_mb", "nan"))}
-            metric = 0.0
-            valid = valid and row["opened"] >= row["conns"]
-        key = (valid, metric)
-        if name not in best or key > best[name][:2]:
-            best[name] = (valid, metric, row)
-    return {n: v[2] for n, v in best.items()}
-
-
-data = {}  # transport -> proxy -> rows
-for line in open(idx):
-    if line.startswith("#") or line.startswith("==>"):
-        continue
-    p = line.split()
-    if len(p) >= 3 and os.path.exists(os.path.join(base, p[2])):
-        data.setdefault(p[1], {})[NAMES.get(p[0], p[0])] = load(os.path.join(base, p[2]))
+data = load_index(idx)
 
 CSS = """
 .bg{fill:#fff}.t{fill:#1f2328;font:600 15px -apple-system,Segoe UI,Helvetica,Arial,sans-serif}
@@ -96,10 +54,16 @@ def chart(fname, title, sub, items, fmt, lower_better=False):
 
 
 def col(tr, test, key):
-    return [(p, r.get(test, {}).get(key, float("nan"))) for p, r in data.get(tr, {}).items()]
+    """(proxy, value) for the proxies that have a clean result for `test`
+    (a run with client errors or missing tunnels is not charted)."""
+    out = []
+    for p, rows in data.get(tr, {}).items():
+        r = rows.get(test)
+        out.append((p, r[key] if r and r.get("valid") and key in r else float("nan")))
+    return out
 
 
-one = "1 core · auth on · median of 3 · seed 2004113323"
+one = "1 core · auth on · best of the concurrency sweep · median of 3"
 rps = lambda v: f"{v:,.0f} req/s"
 chart("plain-1kb.svg", "HTTP, 1 KB responses", f"Requests per second, higher is better · {one}", col("plain", "http-1kb", "rps"), rps)
 chart("plain-1mb.svg", "HTTP, 1 MB responses", f"Requests per second, higher is better · {one}", col("plain", "http-1mb", "rps"), rps)

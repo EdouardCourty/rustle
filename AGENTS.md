@@ -156,7 +156,7 @@ Optional features: `jemalloc`, `mimalloc` (mutually exclusive; default = glibc m
 
 ### Benchmark tooling
 
-Pipeline: `run-bench.sh` / `run-remote.sh` → `run-campaign.sh` (index `bench/results/campaign-<ts>.txt`) → `tools/campaign-table.py <index>` (Markdown tables) → `make charts [C=<index>]` (`tools/charts.py` writes the committed SVGs in `docs/benchmarks/`, `myproxy` mapped to `rustle`; regenerate them with every new campaign, then update README, `bench/RESULTS.md` and Known state).
+Pipeline, one command: `make bench-publish` (`bench/run-all.sh`) = `run-campaign.sh` (index `bench/results/campaign-<ts>.txt`; `REMOTE=1` for the three-machine setup) + `MATRIX=ws` campaign → `results/report-<ts>.md` (`tools/campaign-table.py`) → `tools/validity.py` (invalid, unsaturated, missing or pre-sweep points; exit 1) → `tools/charts.py` (committed SVGs in `docs/benchmarks/`, parsing in `tools/benchlib.py`, `myproxy` mapped to `rustle`) → `tools/readme-table.py --write` (the README table between its `bench:table` markers). `REPORT_ONLY=1` rebuilds artifacts from the newest indexes without running anything. After a campaign: review the validity output, commit the SVGs and README, then update `bench/RESULTS.md` and Known state.
 
 WebSocket matrix (`MATRIX=ws`, `make bench-ws P=<proxy>`, opt-in so the default seeded order stays comparable): origin echoes frames verbatim with a constant handshake accept (`bench-client ws`, route `/ws`); a DUT without Upgrade support is reported as unsupported, never as 0.
 
