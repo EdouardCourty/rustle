@@ -1,4 +1,4 @@
-FROM rust:1-slim AS build
+FROM rust:1-slim-bookworm AS build
 WORKDIR /build
 COPY . /build
 # Standalone build (this directory is its own cargo root): the profile is

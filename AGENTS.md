@@ -63,6 +63,7 @@ bench/
   docker-compose.seccomp.yml               `SECCOMP=unconfined` overlay (io_uring; apply it to every compared DUT)
   matrix.sh                                workload list + seeded shuffle, sourced by run-bench.sh and run-remote.sh; `MATRIX=ws` = WebSocket workloads
   run-remote.sh <proxy> <on|off>           same matrix on three machines (generator / proxy / origin+sink over SSH, host network); see REMOTE.md. run-scaling.sh REMOTE=1 = scaling curve on it
+  FAIRNESS.md                              competitor versions, settings and the A/B behind each one (read before touching dut/*)
   REMOTE.md                                three-machine setup: sizing, sysctls, validity checks (`gen_saturated`)
   tools/charts.py                          SVG charts for the README from a campaign index → docs/benchmarks/ (`make charts`)
   RESULTS.md                               published summary and measurement history
@@ -118,7 +119,7 @@ CLI (clap derive: `rustle/src/cli.rs` = `Cli` + `Command`; one file per command 
 ## Commands
 
 ```bash
-cargo build --release -p rustle         # no target-cpu=native locally (only in the bench Dockerfile)
+cargo build --release -p rustle         # release profile, no target-cpu (the bench image builds the same binary)
 cargo test -p rustle                    # inline tests (#[cfg(test)]), including in-process end-to-end ones in server/tests/
 make check                               # fmt + clippy -D warnings + tests + e2e --quick (~20 s) — before every commit
 make e2e [F="filter"]                    # full e2e suite (~2 min, ~530 scenarios) — before every release or large change
@@ -145,7 +146,7 @@ Optional features: `jemalloc`, `mimalloc` (mutually exclusive; default = glibc m
 - Measured split (1kb): user ≈ 9 µs/req, sys ≈ 35 µs/req. Syscalls at the floor. Profiling: `dut/rustle/Dockerfile.debug` image (strace). No perf on the box (paranoid=4).
 - `ALLOCATOR="--features mimalloc" ./run-bench.sh …` for an allocator A/B (retested: neutral). **`err_kinds` must be empty.**
 - Do not build images in parallel (OOM on 4 GB). The harness shares 2 cores: ceiling ~23 µs/req on the generator+nginx side.
-- The ×9.5 vs 3proxy at 1 KB comes from 3proxy's 40 ms delayed ACK: **never publish it without that caveat**.
+- **Fairness (non-negotiable)**: every competitor on its latest stable release with the tuning its own docs recommend, each choice A/B-tested and recorded in `bench/FAIRNESS.md` (3proxy needs `-osTCP_NODELAY -ocTCP_NODELAY`: without it the old "×9.5 at 1 KB" was a Nagle + delayed-ACK artifact, not 3proxy's speed). Never publish a number against a default-config competitor; when a version or setting changes, update FAIRNESS.md and re-run the whole campaign. rustle's bench binary is the shipped release build (no `target-cpu=native`); `SOCK_BUF=0` runs it on kernel autotuning like the competitors that have no buffer option.
 - 1 KB is limited by harness latency (~15k rps); the proxy alone is estimated at 21–24k rps (~42–47 µs/req).
 - Do not compare numbers across bench protocol changes.
 - Multi-core: not measured with the single-host harness (2 cores). Use the three-machine setup (`bench/REMOTE.md`, `run-remote.sh`): a result is valid only if the generator is not saturated.
@@ -193,6 +194,7 @@ Format, checked against the current history: `type(scope): description`, **subje
 - Last updated 2026-10-05, branch `main`. Linux + macOS, CI in `.github/workflows/` (lint, tests + e2e on Linux/macOS, installer; tag `vX.Y.Z` → release).
 - `make check` green: fmt, clippy `-D warnings` (workspace, e2e included), `cargo test -p rustle` 75/75 (unit + in-process end-to-end), e2e `--quick` 68 scenarios. `make e2e` on macOS: 523 OK + 26 SKIP (Linux-only paths) out of 549; `robustness/huge-request-line` flaked once under full parallel load (passes alone), to watch.
 - Implemented: HTTP/1.1 + CONNECT, HTTPS proxy (TLS, rustls), HTTP/2, SOCKS5 (TCP + UDP), shared-nothing shards with `SO_REUSEPORT` and optional core pinning, splice relay, chunked uploads, policy (destinations, client allowlist, bans, anti-slowloris), access log, opt-in kTLS, `rustle` CLI (init/check/status/reload/service/update/uninstall), runtime reload (control socket + SIGHUP), WebSocket upgrades (`http.allow_websocket`), `curl | sh` installer, black-box e2e suite.
+- **The reference campaign below predates the fairness pass (3proxy NODELAY, Squid 7.7 + buffers, gost 3.3.0 + GOGC, Tinyproxy 1.11.3, rustle without native codegen): re-run `make bench-all` on the Linux harness, then `make charts` and refresh the README table, before quoting any competitor figure.
 - Reference campaign: 2026-10-05 (`bench/results/campaign-20261005-120351.txt`, rewritten generator/origin harness, 1 core + 2-core harness). Its numbers feed the README charts and table (`make charts`); `bench/RESULTS.md` still holds the older 2026-10-03 campaign and must be refreshed. Produced by `bench/run-campaign.sh` (5 proxies × plain/TLS/h2), tables by `bench/tools/campaign-table.py`.
 - WebSocket bench (`MATRIX=ws`): written and smoke-tested on macOS only (generator, origin, tools); never run on the Linux/Docker harness yet, no published numbers, and which competitors accept Upgrade is unknown until it runs.
 - The bench (static origin, Content-Length) exercises neither chunked, SOCKS5 nor uploads: covered by the tests and the e2e suite.

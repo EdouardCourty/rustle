@@ -41,6 +41,7 @@ services:
       WORKERS: ${WORKERS:-1}
       ACCESS_LOG: ${ACCESS_LOG:-off}
       KTLS: ${KTLS:-false}
+      SOCK_BUF: ${SOCK_BUF:-1048576}
     cpuset: "${PROXY_CPU:-0}"
     sysctls:
       - net.core.somaxconn=65535

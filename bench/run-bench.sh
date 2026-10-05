@@ -25,6 +25,7 @@ REPEAT="${REPEAT:-3}"
 export WORKERS="${WORKERS:-1}"
 export ACCESS_LOG="${ACCESS_LOG:-off}"   # rustle: off | errors | all
 export KTLS="${KTLS:-false}"               # rustle TLS listener: kernel TLS on/off
+export SOCK_BUF="${SOCK_BUF:-1048576}"      # rustle socket buffers (0 = kernel autotuning, like the other DUTs)
 # SECCOMP=unconfined: proxy container without Docker's seccomp profile
 # (needed by io_uring DUTs; use it for every DUT of such a comparison).
 if [[ "${SECCOMP:-default}" == unconfined ]]; then

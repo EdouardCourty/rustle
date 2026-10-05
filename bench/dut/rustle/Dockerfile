@@ -5,14 +5,12 @@ RUN apk add --no-cache openssl && openssl req -x509 -newkey ec \
     -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 -subj /CN=proxy \
     -keyout /key.pem -out /cert.pem && chmod 644 /key.pem
 
-FROM rust:1-slim AS build
+FROM rust:1-slim-bookworm AS build
 WORKDIR /build
 # ALLOCATOR build arg: "" (glibc default) | --features jemalloc | --features mimalloc
 ARG ALLOCATOR
-# M10.3: native codegen — the image is built on the deployment box (bench
-# rule: build where you run). Enables the ISA extensions of that CPU
-# (AVX2/BMI on this class); rebuild on older hardware.
-ENV RUSTFLAGS="-C target-cpu=native"
+# Built with the release profile and no target-cpu: the benchmarked binary is
+# the one users download (release.yml), not a CPU-specific build.
 COPY Cargo.toml ./
 COPY rustle ./rustle
 COPY bench/generator ./bench/generator
@@ -39,9 +37,9 @@ COPY --from=build /build/target/release/rustle /usr/local/bin/rustle
 COPY --from=cert /cert.pem /key.pem /etc/rustle/
 COPY bench/dut/rustle/rustle-on.toml /etc/rustle/on.toml
 COPY bench/dut/rustle/rustle-off.toml /etc/rustle/off.toml
-ENV AUTH=on WORKERS=1 ACCESS_LOG=off KTLS=false
+ENV AUTH=on WORKERS=1 ACCESS_LOG=off KTLS=false SOCK_BUF=1048576
 # bench-ports: tls=8443 h2=8443 (HTTP/2 via ALPN on the HTTPS listener)
 EXPOSE 8080 8443
-# WORKERS (multi-core runs), ACCESS_LOG (access log cost) and KTLS
-# (kernel TLS A/B) are patched into the config by the harness.
-ENTRYPOINT ["sh", "-c", "sed -e \"s/^workers = .*/workers = ${WORKERS:-1}/\" -e \"s/^access = .*/access = \\\"${ACCESS_LOG:-off}\\\"/\" -e \"s/^ktls = .*/ktls = ${KTLS:-false}/\" /etc/rustle/${AUTH:-on}.toml > /tmp/rustle.toml && exec rustle /tmp/rustle.toml"]
+# WORKERS (multi-core runs), ACCESS_LOG (access log cost), KTLS
+# (kernel TLS A/B) and SOCK_BUF (0 = kernel autotuning) are patched into the config by the harness.
+ENTRYPOINT ["sh", "-c", "sed -e \"s/^workers = .*/workers = ${WORKERS:-1}/\" -e \"s/^access = .*/access = \\\"${ACCESS_LOG:-off}\\\"/\" -e \"s/^ktls = .*/ktls = ${KTLS:-false}/\" -e \"s/^socket_buffer_bytes = .*/socket_buffer_bytes = ${SOCK_BUF:-1048576}/\" /etc/rustle/${AUTH:-on}.toml > /tmp/rustle.toml && exec rustle /tmp/rustle.toml"]

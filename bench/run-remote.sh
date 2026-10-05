@@ -79,7 +79,7 @@ trap cleanup EXIT
 start_proxy() {
     on "$PROXY_HOST" "docker rm -f proxy" >/dev/null 2>&1 || true
     on "$PROXY_HOST" "docker run -d --name proxy --network host ${PROXY_CPUS:+--cpuset-cpus $PROXY_CPUS} ${ULIMIT[*]} \
-        -e AUTH=$AUTH -e WORKERS=$WORKERS -e ACCESS_LOG=$ACCESS_LOG -e KTLS=$KTLS $PROXY:bench" >/dev/null
+        -e AUTH=$AUTH -e WORKERS=$WORKERS -e ACCESS_LOG=$ACCESS_LOG -e KTLS=$KTLS -e SOCK_BUF=${SOCK_BUF:-1048576} $PROXY:bench" >/dev/null
 }
 echo "==> starting origin and sink on $UP_HOST, proxy ($PROXY) on $PROXY_HOST"
 on "$UP_HOST" "docker rm -f upstream sink" >/dev/null 2>&1 || true

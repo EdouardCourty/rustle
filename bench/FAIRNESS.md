@@ -1,0 +1,75 @@
+# Fairness of the comparison
+
+Every competitor runs on its **latest stable release** with the tuning **its own documentation recommends**, and each choice below was checked with an A/B on the same box before being kept. If you know a better setting for one of them, open an issue or a pull request with the config and the numbers: it goes in, and the campaign is re-run.
+
+Common to all proxies (identical harness for everyone, `bench/docker-compose.yml`): one dedicated core each, the generator/origin/sink on another core, same kernel and sysctls, authentication on with one key, access log off, upstream keep-alive wherever the proxy supports it, same TLS certificate type (ECDSA P-256), fixed seed and shuffled test order, proxy restarted before every test, median of 3 runs, `err_kinds` must be empty.
+
+## What each proxy runs
+
+| Proxy | Version | How it is built | Settings that go beyond the defaults |
+|---|---|---|---|
+| **rustle** | this repository | `cargo build --release` (LTO, no `target-cpu`: the binary users download) | `socket_buffer_bytes = 1048576` (also the shipped default); `SOCK_BUF=0` runs it with kernel autotuning like the others |
+| **3proxy** | 1.0.0 (latest; code identical to 0.9.9 LTS) | from source, `Makefile.Linux` | `proxy -osTCP_NODELAY -ocTCP_NODELAY` (documented for small exchanges), `maxconn`, `nscache`, timeouts |
+| **Squid** | 7.7 (latest) | from source, upstream's default flags, OpenSSL | `cache deny all`, `cache_mem 0`, `tcp_recv_bufsize 1 MB`, `read_ahead_gap 1 MB`, `forwarded_for delete`, `via off`, auth helper results cached 2 h, `workers N` for N cores |
+| **gost** | 3.3.0 (latest) | official image | `GOGC=400`, logger level `error`; Go sizes `GOMAXPROCS` from the cpuset |
+| **Tinyproxy** | 1.11.3 (latest) | from source (19.3k req/s at 1 KB on the A/B box) | `MaxClients 200000`, `LogLevel Critical`, no `Via`, no filters; it has no upstream keep-alive (documented limitation of the project) |
+
+## The A/B behind the settings
+
+Measured on the same machine, one core for the proxy and one for the generator, 64 keep-alive connections, 1 KB responses, 6 s per point, several passes. These runs only **choose** the settings (a laptop's Docker VM is not the publication harness); the published numbers come from the Linux harness.
+
+**3proxy** (the old bench ran 0.9.4 without any socket option and reported ~1.5k req/s, which looked like a 40 ms delayed ACK):
+
+| Variant | req/s | p50 |
+|---|---|---|
+| default config | 1,510 | 42 ms |
+| **`-osTCP_NODELAY -ocTCP_NODELAY`** (kept) | **5,490** | 11 ms |
+| + `authcache user,pass` | 5,530 | 11 ms |
+| + grace delay `-g8000,3,10` | 3,430 | 11 ms |
+| + `stacksize 65536` | 3,700 | 11 ms |
+
+So the earlier "×9.5 against 3proxy at 1 KB" was the cost of a missing documented option, not of 3proxy. Short connections (`--no-keepalive`) are unaffected by the option (about 4.1k req/s either way).
+
+**gost** (`GOGC` sweep, and the HTTP handler options):
+
+| Variant | req/s | RAM |
+|---|---|---|
+| default (`GOGC=100`) | 7,650 | not measured |
+| `GOGC=200` | 8,530 | 40 MB |
+| **`GOGC=400`** (kept) | **8,760** | 62 MB |
+| `GOGC=800` | 8,840 | 110 MB |
+| `GOGC=1600` | 9,160 | 210 MB |
+| `GOGC=off` | 7,130 | unbounded |
+| `GOMAXPROCS=1` | 7,500 | (same as default: already sized from the cpuset) |
+| handler option `keepalive=true` | 4,960 | (slower than the default, so not used) |
+
+`GOGC=400` keeps most of the gain for a moderate memory cost; the 25,000-tunnel RAM test would punish a larger value.
+
+**Squid** (5.7 from the Debian package for the directive A/B below; 7.7 built from source with the kept directives then measured 38,400 req/s at 1 KB and 1,000 at 1 MB, i.e. +19 % over 5.7 with the same directives):
+
+| Variant | 1 KB req/s | 1 MB req/s |
+|---|---|---|
+| baseline | 31,400 | 890 |
+| `memory_pools off`, `dns_v4_first on`, `half_closed_clients off` | 28,500 | 905 |
+| **`tcp_recv_bufsize 1 MB` + `read_ahead_gap 1 MB`** (kept) | 32,300 | 1,020 |
+| `pipeline_prefetch 0`, persistent connections on, `cache_log /dev/null`, … | 32,400 | 887 |
+
+## Settings looked at and not applied
+
+* Anything that disables or changes what the proxy does for every request (auth caching tricks that skip password checks, `fakeresolve`, `ip` auth caches).
+* Larger `GOGC`/`stacksize` values that trade memory for a few percent.
+* Kernel-level tuning (`sysctl`) beyond what is common to all proxies in the compose file.
+* Splice for 3proxy: it is not built by default, and its authors dropped it as slower than read/write.
+
+## Known asymmetries (read before comparing)
+
+* **rustle's socket buffers.** rustle ships with fixed 1 MB buffers, which win on a LAN. Squid gets the same 1 MB through its documented directives; 3proxy, gost and Tinyproxy have no such option and use kernel autotuning. Run rustle with `SOCK_BUF=0` to see it without that setting: on the A/B box it changes nothing measurable (194k vs 197k req/s at 1 KB, 5.8k vs 5.95k at 1 MB), so the lead does not come from that knob.
+* **Tinyproxy** closes the upstream connection after every request; the generator replays an idempotent GET once on a reused connection closed without notice (counted in `reconnects`).
+* **Features differ**: only rustle, Squid and gost speak TLS to the client, and only rustle and gost HTTP/2; 3proxy and Tinyproxy appear in the plain tables only. WebSocket upgrades on the plain-HTTP path are tested separately (`make bench-ws`); a proxy that does not support them is listed as unsupported, never as zero.
+* **Single core.** The multi-core curve needs the three-machine setup (`bench/REMOTE.md`).
+
+## Checklist when a version or a config changes
+
+1. Update the version in the table above and in the Dockerfile; keep the "latest stable" promise.
+2. A/B the change here before keeping it; put the numbers in this file.
+3. Re-run the full campaign (`make bench-all`) on the Linux harness, regenerate the charts (`make charts`), and replace the README figures. Never mix numbers from two campaigns.
