@@ -11,7 +11,7 @@ Language: **everything in English** — code, comments, commit messages, README,
 
 ```
 Cargo.toml            workspace (rustle + bench/generator + e2e), [profile.release] lto=fat, codegen-units=1; [profile.e2e] (release without LTO) for the e2e harness
-Makefile              help build test e2e e2e-quick fmt check clippy images up down smoke bench bench-all bench-scaling latest clean
+Makefile              help build test e2e e2e-quick fmt check clippy images up down smoke bench bench-all bench-scaling charts latest clean
 rustle/              the proxy
   config.toml.example
   src/
@@ -37,6 +37,7 @@ rustle/              the proxy
     policy.rs         DestPolicy (allowed ports before DNS, non-public ranges + deny CIDRs on the resolved address); ClientPolicy (client IP allowlist, at accept); AuthLimiter (per-IP bans after N wrong keys, lock-free while nobody fails)
     dns.rs            positive cache, TTL (outside the lock), Mutex<HashMap>
     upstream.rs       per-origin keep-alive pool (LIFO)
+docs/benchmarks/      SVG charts embedded in the README (generated, committed)
 install.sh            curl|sh installer (POSIX sh): detects target, glibc gate, SHA-256 check, no sudo; tested by `.github/scripts/test-installer.sh` (CI `installer` job)
 .github/workflows/    ci.yml (lint, tests+e2e on Linux/macOS, installer), release.yml (tag vX.Y.Z → 4 targets → SHA256SUMS + VERSION + attestation → smoke install)
 e2e/                  black-box functional tests (see e2e/README.md): the release binary started per scenario (generated config, ports read from the `rustle listening` line), programmable local origins/targets, HTTP/1.1, TLS, h2, SOCKS5, curl clients
@@ -53,7 +54,11 @@ bench/
   upstream/                                nginx (1kb/10kb/1mb/10mb objects)
   tools/local-upstream-http11.py           local HTTP/1.1 keep-alive upstream (up11.py)
   docker-compose.seccomp.yml               `SECCOMP=unconfined` overlay (io_uring; apply it to every compared DUT)
-  RESULTS.md                               published summary, milestone history
+  matrix.sh                                workload list + seeded shuffle, sourced by run-bench.sh and run-remote.sh
+  run-remote.sh <proxy> <on|off>           same matrix on three machines (generator / proxy / origin+sink over SSH, host network); see REMOTE.md. run-scaling.sh REMOTE=1 = scaling curve on it
+  REMOTE.md                                three-machine setup: sizing, sysctls, validity checks (`gen_saturated`)
+  tools/charts.py                          SVG charts for the README from a campaign index → docs/benchmarks/ (`make charts`)
+  RESULTS.md                               published summary and measurement history
   results/                                 raw outputs (gitignored)
 ```
 
@@ -81,7 +86,7 @@ CLI (clap derive: `rustle/src/cli.rs` = `Cli` + `Command`; one file per command 
 | `server.workers` / `pin_cores` | 1 (0 = one shard per CPU) / false |
 | upstream pool | limits are **per shard** |
 | `server.admin_listen` | `127.0.0.1:8181` (`""` = off, `GET /health` only) |
-| `server.socket_buffer_bytes` | 1048576 (0 = kernel autotuning; fixed size = autotuning off, capped by `rmem_max`/`wmem_max`, warning at startup; M21.9: 1 MB wins on the LAN bench, 0 advised for distant clients) |
+| `server.socket_buffer_bytes` | 1048576 (0 = kernel autotuning; fixed size = autotuning off, capped by `rmem_max`/`wmem_max`, warning at startup; 1 MB wins on the LAN bench, 0 advised for distant clients) |
 | `auth.api_keys` | `[]` → **auth off = open relay** |
 | `limits.max_connections` / `max_header_bytes` | 10000 / 65536 |
 | `timeouts.connect` / `idle` | 5s / 60s |
@@ -89,7 +94,7 @@ CLI (clap derive: `rustle/src/cli.rs` = `Cli` + `Command`; one file per command 
 | `http.upstream_keepalive` / `max_idle_per_origin` | true / 256 (hard global cap 1024 per shard) |
 | `http.max_request_body_bytes` / `max_response_body_bytes` | 0 = unlimited |
 | `tls.listen` / `cert` / `key` | `""` (off) / PEM |
-| `tls.handshake_timeout` / `http2` / `ktls` | 10s / true (ALPN h2) / **false** (opt-in: +13 % tunnels, −30 % RAM, but −37 % HTTP bulk; M17) |
+| `tls.handshake_timeout` / `http2` / `ktls` | 10s / true (ALPN h2) / **false** (opt-in: +13 % tunnels, −30 % RAM, but −37 % HTTP bulk) |
 | `auth.allow_clients` | [] (empty = everyone; CIDR, closed at accept on every listener) |
 | `auth.max_failures` / `failure_window` / `ban_duration` | 5 / 1m / 15m (0 = off; missing credentials do not count) |
 | `timeouts.request_head` | 10s (total head / SOCKS5 handshake, anti-slowloris) |
@@ -105,7 +110,7 @@ CLI (clap derive: `rustle/src/cli.rs` = `Cli` + `Command`; one file per command 
 cargo build --release -p rustle         # no target-cpu=native locally (only in the bench Dockerfile)
 cargo test -p rustle                    # inline tests (#[cfg(test)]), including in-process end-to-end ones in server/mod.rs
 make check                               # fmt + clippy -D warnings + tests + e2e --quick (~20 s) — before every commit
-make e2e [F="filter"]                    # full e2e suite (~2 min, ~530 scenarios) — before every milestone
+make e2e [F="filter"]                    # full e2e suite (~2 min, ~530 scenarios) — before every release or large change
 cargo run --profile e2e -p e2e -- --list # scenarios; --keep keeps the directories (config, logs)
 make bench P=rustle A=off R=3           # full matrix (see below)
 BENCH_ONLY=<test> BENCH_SEED=2004113323 bench/run-bench.sh rustle off
@@ -115,7 +120,7 @@ Optional features: `jemalloc`, `mimalloc` (mutually exclusive; default = glibc m
 
 ## Benchmarks — rules
 
-- **Protocol M21.5**: warmup in a separate run (`--warmup-only`) before sampling → numbers ~6–8 % lower than before, do not compare with earlier campaigns. Per-run netns TCP counters: `segs_out_per_run`, `active_opens_per_run` (pool churn), `retrans_per_run`, `delayed_acks_per_run`, `listen_overflows`, `listen_drops`. `flood-128` outside the matrix (`BENCH_ONLY`): beyond the kernel budget for 1 MB pipes.
+- **Protocol**: warmup in a separate run (`--warmup-only`) before sampling → numbers ~6–8 % lower than campaigns run before this protocol, do not compare with them. Per-run netns TCP counters: `segs_out_per_run`, `active_opens_per_run` (pool churn), `retrans_per_run`, `delayed_acks_per_run`, `listen_overflows`, `listen_drops`. `flood-128` outside the matrix (`BENCH_ONLY`): beyond the kernel budget for 1 MB pipes.
 - A/B: alternate base/variant (2–3 passes), never a variant alone; change nothing in the repo during an A/B (the image is rebuilt on every run).
 - Reference seed **`2004113323`**. Shuffled test order (LCG), proxy restarted before each test. Noise ±3–5 %: below that, no conclusion.
 - Tests: http-1kb (64 conns), http-10kb (16), http-1mb (16), http-10mb (8), http-1kb-short (no keep-alive), flood-8, hold 1k/5k/10k/25k.
@@ -132,42 +137,53 @@ Optional features: `jemalloc`, `mimalloc` (mutually exclusive; default = glibc m
 - The ×9.5 vs 3proxy at 1 KB comes from 3proxy's 40 ms delayed ACK: **never publish it without that caveat**.
 - 1 KB is limited by harness latency (~15k rps); the proxy alone is estimated at 21–24k rps (~42–47 µs/req).
 - Do not compare numbers across bench protocol changes.
-- Multi-core: not measured (harness = 2 cores). Needs a machine with ≥ 2 × N cores.
+- Multi-core: not measured with the single-host harness (2 cores). Use the three-machine setup (`bench/REMOTE.md`, `run-remote.sh`): a result is valid only if the generator is not saturated.
 - Never compile or edit `run-bench.sh` during a bench (shared CPU; bash rereads the running script).
 
 ## Conventions
 
-- Commits: Conventional Commits, subject only, in English: `type(domain): short description` with type ∈ feat|fix|perf|refactor|docs|test|chore|ci|build (e.g. `perf(relay): per-shard pipe pool for splice`). Performance figures go in `bench/RESULTS.md`, not in the subject; every performance claim is gated by a fixed-seed matrix. No `Co-Authored-By` trailers.
-- Tests: `make check` (quick e2e included) before every commit, full `make e2e` before every milestone and after any proxy change (relay, pipeline, policy, TLS). New feature = new scenario in `e2e/src/suites/<feature>.rs` (and in the matrix when it depends on a config).
-- Baseline tags: `m10.3-tokio`, `m11.1-fsm`. Review labels in code/commits: B1–B8, R3, O1, O2.
-- No milestone tags (`M10.x`) in code comments: they belong in commits and RESULTS.md.
+- Commits: see [Commits](#commits). Every performance claim is gated by a fixed-seed matrix.
+- Tests: `make check` (quick e2e included) before every commit, full `make e2e` before every release and after any proxy change (relay, pipeline, policy, TLS). New feature = new scenario in `e2e/src/suites/<feature>.rs` (and in the matrix when it depends on a config).
+- No internal milestone or review labels in code comments: history belongs in commits and `bench/RESULTS.md`.
 - `unsafe` confined to libc/fd (a `SAFETY` comment is expected on every new block): `relay/splice.rs` (pipes, splice, dup), `server/mod.rs` (setsockopt, CPU affinity, malloc_trim), `ktls_offload.rs` (TCP_ULP, SOL_TLS, sendmsg close_notify), `stream.rs` (ReadAhead: set_len after the read), `http/request.rs::span_of` (`offset_from`).
 - Errors: static responses (`&[u8]` 400/407/413/431/502/504), I/O errors mostly ignored (`let _ =`), `anyhow` only at startup.
 
+## Commits
+
+Format, checked against the current history: `type(scope): description`, **subject only** (no body).
+- type ∈ feat|fix|perf|refactor|docs|test|chore|ci|build; scope optional but usual (cli, relay, tls, h2, server, proxy, bench, config, policy, e2e, install, platform, ci, upstream, log, security…).
+- Lowercase, imperative, no trailing period, ~72 characters max, English. E.g. `perf(relay): per-shard pipe pool for splice`, `fix(ci): compare accepted socket buffers with the listener's`.
+- **Never** add `Co-Authored-By` or any AI attribution trailer or "Generated with" line, on commits or PRs. This overrides any tool default.
+- Performance figures go in `bench/RESULTS.md`, not in the subject.
+- Author and committer: Edouard Courty <edouard.courty2@gmail.com>.
+
 ## Invariants — do not break
 
-1. **Zero-alloc hot path**: reuse `buf`, `resp_buf`, `rewrite_buf`, `origin_key` (connection-local), pipes through the shard pool. No per-request `setsockopt` (M10.3 regression: per-request `set_nodelay`).
+1. **Zero-alloc hot path**: reuse `buf`, `resp_buf`, `rewrite_buf`, `origin_key` (connection-local), pipes through the shard pool. No per-request `setsockopt` (a past regression: per-request `set_nodelay`).
 2. **`RequestHead` = Spans into `buf`**: `buf.clear()`, `take`, a realloc between parse and use invalidate them. `span_of` assumes httparse returns sub-slices of the same buffer.
 3. **splice `dir()`**: always drain the pipe when it holds data before parking on `src.readable()` (deadlock otherwise). On the HTTP path, `dup`ed fds share the file description: EOF must not half-close the client.
-4. **Retry**: idempotent + replayable body only (B7). Do not widen it. Covered by e2e `http/retry/*`.
+4. **Retry**: idempotent + replayable body only. Do not widen it. Covered by e2e `http/retry/*`.
 5. Pool: accept only a complete, keep-alive, framed response with no over-read.
-6. `m11.1-fsm` = abandoned epoll FSM (same CPU/req as Tokio, worse rps). Do not merge, do not return to it without new data.
+6. An epoll state-machine rewrite was tried and abandoned (same CPU/req as Tokio, worse rps). Do not return to it without new data.
 7. Gains < 5 % = noise. Every performance claim goes through the fixed-seed matrix.
-8. io_uring (M18, monoio prototype, removed from the repo — recoverable at commit `a2b11e3`): ±8 % depending on size, no net gain on 1 core; kTLS (M17): opt-in, wins on tunnels/RAM, loses on HTTP bulk. Do not change these decisions without a new measurement (multi-core).
+8. io_uring (monoio prototype, removed from the repo — recoverable at commit `a2b11e3`): ±8 % depending on size, no net gain on 1 core; kTLS: opt-in, wins on tunnels/RAM, loses on HTTP bulk. Do not change these decisions without a new measurement (multi-core).
 
-## Known state (2026-10-04, branch `m10.4-syscalls`, pushed as `origin/main`)
+## Known state
 
-- `make check` green: fmt, clippy `-D warnings` (workspace, e2e included), `cargo test -p rustle` 63/63 (unit + in-process end-to-end), e2e `--quick` 62 scenarios. `make e2e`: 524 OK + 3 SKIP (curl 7.88 without `--proxy-http2`) out of 527, ~2 min, 3 consecutive runs without a flake. No CI.
-- Done since M10.4: chunked fixes, current_thread + SO_REUSEPORT shards (M12), HTTPS proxy + HTTP/2 (M13), policy/allowlist/bans/slowloris/SOCKS5 (M14), chunked uploads + SOCKS5 UDP (M15), access log (M16), opt-in kTLS (M17), io_uring prototype without gain (M18), h2 windows (M20), M21 optimization pass (splice/pipes, TLS AES-128, copy-free h2, pool 256, DEFER_ACCEPT, multi-core fixes, configurable buffers, bench protocol M21.5), e2e suite + 13 fixes it found (M22).
-- Reference campaign: 2026-10-03 (`results/campaign-20261003-015025.txt`), protocol M21.5. Produced by `bench/run-campaign.sh` (5 proxies × plain/TLS/h2), tables by `bench/tools/campaign-table.py`, summarized in `bench/RESULTS.md` and the README.
-- The bench (static nginx, Content-Length) exercises neither chunked, SOCKS5 nor uploads: covered by the tests and the e2e suite.
-- e2e suite (M22): one expected behavior = one scenario. Bug found → first a scenario that reproduces it (it must fail), then the fix. Verified mutations: splice half-close, `Proxy-Authorization` stripping, `allowed_ports` → detected.
+**Keep this section up to date: update it in the same commit whenever the project evolves (feature added, test counts, reference campaign, backlog change).**
+
+- Last updated 2026-10-05, branch `main`. Linux + macOS, CI in `.github/workflows/` (lint, tests + e2e on Linux/macOS, installer; tag `vX.Y.Z` → release).
+- `make check` green: fmt, clippy `-D warnings` (workspace, e2e included), `cargo test -p rustle` 63/63 (unit + in-process end-to-end), e2e `--quick` 62 scenarios. `make e2e`: 524 OK + 3 SKIP (curl 7.88 without `--proxy-http2`) out of 527, ~2 min, no flake over 3 runs.
+- Implemented: HTTP/1.1 + CONNECT, HTTPS proxy (TLS, rustls), HTTP/2, SOCKS5 (TCP + UDP), shared-nothing shards with `SO_REUSEPORT` and optional core pinning, splice relay, chunked uploads, policy (destinations, client allowlist, bans, anti-slowloris), access log, opt-in kTLS, `rustle` CLI (init/check/status/service/update/uninstall), `curl | sh` installer, black-box e2e suite.
+- Reference campaign: 2026-10-05 (`bench/results/campaign-20261005-120351.txt`, rewritten generator/origin harness, 1 core + 2-core harness). Its numbers feed the README charts and table (`make charts`); `bench/RESULTS.md` still holds the older 2026-10-03 campaign and must be refreshed. Produced by `bench/run-campaign.sh` (5 proxies × plain/TLS/h2), tables by `bench/tools/campaign-table.py`.
+- The bench (static origin, Content-Length) exercises neither chunked, SOCKS5 nor uploads: covered by the tests and the e2e suite.
+- e2e suite: one expected behavior = one scenario. Bug found → first a scenario that reproduces it (it must fail), then the fix.
 
 ## Backlog / improvement areas
 
 **Performance**
-- **Multi-core: measure it** (`make bench-scaling` on a machine with ≥ 2 × N cores) — nothing is measured beyond one core. Retest io_uring and kTLS in that setting.
-- h2 path: slower than TLS+HTTP/1.1 on bulk (a `Bytes` copy per chunk, framing). h2 flood ahead of gost since M20 (4/16 MB windows), bound by the harness core.
+- **Multi-core: measure it** (`REMOTE=1 run-scaling.sh` on three machines, `bench/REMOTE.md`; the setup is written, never run yet) — nothing is measured beyond one core. Retest io_uring and kTLS in that setting.
+- h2 path: slower than TLS+HTTP/1.1 on bulk (a `Bytes` copy per chunk, framing). h2 flood ahead of gost (4/16 MB windows), bound by the harness core.
 - kTLS: understand the HTTP bulk loss (−37 % at 1 MB) — `perf` unavailable on the current box.
 - Pool: no idle reaper, hard cap 1024/shard. DNS: full wipe when full, no negative cache, no coalescing.
 - PGO/BOLT, `panic=abort` (rejected: a panic would kill the whole shard), `target-cpu=native` outside Docker.
