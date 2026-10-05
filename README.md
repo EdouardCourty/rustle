@@ -38,13 +38,54 @@ tunnels and large response bodies, ~2 recv + 2 send per request.
 **Operations** — access log (file or stdout, never blocking), `GET /health` on an admin
 port, graceful shutdown (SIGTERM), log reopen on SIGHUP.
 
-## Quick start
+## Install
+
+Linux (x86_64, aarch64; glibc ≥ 2.35: Debian 12, Ubuntu 22.04, RHEL 9 or newer) and macOS
+(Apple Silicon, Intel):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/EdouardCourty/rustle/main/install.sh | sh
+```
+
+The script detects your system, downloads the release archive, **verifies its SHA-256**
+against the `SHA256SUMS` of the same release, and installs `rustle` into `~/.local/bin`
+(`/usr/local/bin` as root, or `RUSTLE_INSTALL_DIR`). It never uses `sudo`, and refuses
+cleanly on a system whose glibc is too old (or musl/Alpine) instead of installing a
+binary that cannot start. Prefer to read it first:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/EdouardCourty/rustle/main/install.sh -o install.sh
+less install.sh && sh install.sh
+```
+
+Pin a version with `RUSTLE_VERSION=v0.1.0`. Release archives also carry a GitHub build
+provenance attestation: `gh attestation verify rustle-<target>.tar.gz --repo EdouardCourty/rustle`.
+(macOS: a binary fetched with `curl` is not quarantined, so Gatekeeper does not prompt.)
+
+Then:
+
+```sh
+rustle init                # config with a fresh API key (~/.config/rustle/config.toml)
+rustle run                 # foreground …
+rustle service enable      # … or as a service (systemd user unit / launchd agent)
+rustle status              # is it healthy?
+rustle update              # latest release (checksum verified)
+rustle uninstall           # remove the service and the binary
+```
+
+`rustle --help` lists everything; `rustle service enable --system` installs a system-wide
+systemd unit (as root: dedicated `rustle` user, `/etc/rustle/config.toml`, `LimitNOFILE=1048576`).
+`rustle check [CONFIG]` validates a config without starting the proxy.
+
+## Build from source
 
 ```sh
 cargo build --release -p rustle
 cp rustle/config.toml.example config.toml     # then edit: API key, listen…
-./target/release/rustle config.toml
+./target/release/rustle config.toml           # or: rustle init
 ```
+
+Quick start, once running:
 
 ```sh
 # HTTP / HTTPS through the plain port
