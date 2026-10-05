@@ -80,7 +80,14 @@ impl Env {
     }
 }
 
+/// kTLS is Linux-only.
+#[cfg(not(target_os = "linux"))]
+fn ktls_available() -> bool {
+    false
+}
+
 /// Same probe as the proxy: can a TCP socket take the `tls` ULP?
+#[cfg(target_os = "linux")]
 fn ktls_available() -> bool {
     let probe = || -> std::io::Result<()> {
         use std::os::fd::AsRawFd;

@@ -9,7 +9,6 @@ anyhow = "1"
 base64 = "0.22"
 bytes = "1"
 h2 = "0.4"
-ktls = { version = "6", default-features = false, features = ["ring", "tls12"] }
 http = "1"
 httparse = "1.9"
 humantime = "2"
@@ -30,6 +29,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # after close. jemalloc/mimalloc return them sooner.
 jemallocator = { version = "0.5", optional = true }
 mimalloc = { version = "0.1", optional = true }
+
+# Kernel TLS offload: Linux only.
+[target.'cfg(target_os = "linux")'.dependencies]
+ktls = { version = "6", default-features = false, features = ["ring", "tls12"] }
 
 [dev-dependencies]
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }

@@ -12,6 +12,10 @@
 
 mod adaptive;
 mod chunked;
+#[cfg(target_os = "linux")]
+mod splice;
+#[cfg(not(target_os = "linux"))]
+#[path = "splice_stub.rs"]
 mod splice;
 
 pub(crate) use adaptive::{copy_limited, write_flush};
