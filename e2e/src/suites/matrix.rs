@@ -346,9 +346,13 @@ async fn get_h1(cx: &Ctx, p: &Proxy, h: H1, framing: &str, n: usize) -> anyhow::
         let r = c.roundtrip(&req, false).await?;
         // An EOF-delimited body ends when the proxy closes: promptly, not
         // at the idle timeout.
+        // 5 s plus 1 s per MB: the point is to catch a proxy sitting on the
+        // idle timeout, not to time a 10 MB transfer on a runner that is
+        // running hundreds of scenarios in parallel.
+        let limit = Duration::from_secs(5) + Duration::from_secs((n / 1_000_000) as u64);
         anyhow::ensure!(
-            t0.elapsed() < Duration::from_secs(5),
-            "response took {:?}",
+            t0.elapsed() < limit,
+            "response took {:?} (limit {limit:?})",
             t0.elapsed()
         );
         r.expect(200)?;
