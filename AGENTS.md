@@ -54,7 +54,7 @@ e2e/                  black-box functional tests (see e2e/README.md): the releas
 bench/
   run-bench.sh <proxy> <on|off>            matrix (proxy = rustle|3proxy|squid|gost|tinyproxy)
   run-campaign.sh                          full campaign (5 proxies × plain/TLS/h2) → results/campaign-<ts>.txt; tables: tools/campaign-table.py; `MATRIX=ws` → campaign-ws-<ts>.txt
-  run-scaling.sh                           multi-core curve (PROXIES, NCPUS, AUTH, PROXY_TLS, PROXY_H2) — VPS
+  run-scaling.sh                           multi-core curve (PROXIES, NCPUS, AUTH, PROXY_TLS, PROXY_H2), `REMOTE=1` = three machines
   env.sh, docker-compose.yml               cpuset: proxy on PROXY_CPU, everything else on BENCH_CPU
   generator/                               bench-client crate (http | flood | hold | ws | sink | upstream): shared-nothing threads (one current_thread runtime each), prebuilt requests, per-thread histograms; `upstream` = static Rust origin (replaces nginx, ~3 µs/req vs ~9.5), `sink` = per-core SO_REUSEPORT discard
   dut/<proxy>/                             Dockerfiles + on/off configs (user bench / key secret1, port 8080); `# bench-ports: tls=<p> h2=<p>` line = supported modes (self-signed ECDSA P-256 cert generated at build); WORKERS read by the entrypoint (rustle, squid); rustle/Dockerfile.debug = strace; the rustle Dockerfile stubs the e2e workspace member

@@ -3,7 +3,7 @@
 # proxy n CPUs (and n workers when it takes a count), the harness the rest,
 # and run the matrix (or one step with BENCH_ONLY) at the fixed seed.
 #
-# Usage (VPS, >= 2*max(n) CPUs recommended):
+# Usage (>= 2*max(n) CPUs recommended):
 #   ./run-scaling.sh                                  # defaults below
 #   PROXIES="rustle squid" NCPUS="1 2 4 8" AUTH=on ./run-scaling.sh
 #   BENCH_ONLY=http-1kb ./run-scaling.sh              # one step per point

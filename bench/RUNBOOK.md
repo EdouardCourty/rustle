@@ -1,11 +1,11 @@
 # Final benchmark: runbook
 
-Two phases, because a cloud NIC caps tunnel throughput and a Mac does not:
+Two phases, because a NIC caps tunnel throughput and a single host over loopback does not:
 
 | Phase | Where | What it measures | Result goes to |
 |---|---|---|---|
 | **A** | three machines (generator → proxy → origin), private network | requests/s, latency, TLS (resumed and full handshake), WebSocket, idle tunnels (RAM), CPU per request, and the multi-core curve | the README table and charts |
-| **B** | this Mac (Docker, one host, loopback) | tunnel throughput (`flood`): no NIC in the way, the proxy and the kernel are the limit | the "Tunnels" row and chart (`FLOOD_FROM`) |
+| **B** | one Linux host (Docker, loopback) | tunnel throughput (`flood`): no NIC in the way, the proxy and the kernel are the limit | the "Tunnels" row and chart (`FLOOD_FROM`) |
 
 The README says which environment each number comes from.
 
@@ -13,21 +13,28 @@ The README says which environment each number comes from.
 
 * `git status` clean and pushed, `make check` green. Every machine runs the same commit (preflight checks it).
 * Read `FAIRNESS.md`: versions and settings of the competitors, and what is deliberately not tuned.
-* Commit nothing and start no other workload on the machines during a run. On the Mac, quit every other container and heavy app (the numbers are only as quiet as the box).
+* Commit nothing and start no other workload on the machines during a run. For phase B, stop every other container and heavy process on the host (the numbers are only as quiet as the machine).
 
 ## Phase A: three machines
 
 ### 1. Machines
 
-Scaleway Elastic Metal (hourly billing, never monthly), same zone, private network option on all three. See `REMOTE.md` "Renting the machines". Suggested: proxy EM-I120E (8C/16T, 25 Gbit/s) or EM-B230E (10 Gbit/s); generator EM-B330E (12C/24T); origin EM-B130E. Ubuntu 24.04 on each, your SSH key.
+Scaleway Elastic Metal (hourly billing, never monthly), same zone, the same Private Network attached to all three. See `REMOTE.md` "Renting the machines". The link between two machines is as fast as the slower end, so use the I series (25 Gbit/s private) everywhere. Used: generator and proxy EM-I320E (24C/48T), origin + sink EM-I220E. Ubuntu 24.04 on each, your SSH key. Run the campaigns over the private addresses (the public interface is 1 Gbit/s).
 
 ### 2. Bootstrap (once per machine)
 
 ```sh
 for h in $GEN_HOST $PROXY_HOST $UP_HOST; do
-  ssh root@$h 'bash -s' < bench/remote/bootstrap.sh
-  ssh root@$h 'git clone https://github.com/EdouardCourty/rustle ~/rustle'   # or git pull
+  ssh $h 'sudo bash -s' < bench/remote/bootstrap.sh
+  ssh $h 'git clone https://github.com/EdouardCourty/rustle ~/rustle'   # or git pull
 done
+```
+
+Private network (Elastic Metal: a VLAN on the NIC that carries the public address). Attach the three servers to one Private Network in the console, note each server's VLAN id (it can differ between servers) and private IP, then:
+
+```sh
+ssh $GEN_HOST 'sudo bash -s -- <vlan> <ip>/<prefix>' < bench/remote/private-net.sh   # same for the other two
+ssh $GEN_HOST 'iperf3 -c <proxy private ip> -P 4 -t 5'                               # expect ~23 Gbit/s on 25 Gbit/s
 ```
 
 ### 3. Settings used for every command below
@@ -36,6 +43,7 @@ done
 export GEN_HOST=...   PROXY_HOST=...   UP_HOST=...        # ssh targets
 export GEN_ADDR=10.x  PROXY_ADDR=10.y  UP_ADDR=10.z        # private addresses
 export PROXY_CPUS=0 WORKERS=1                              # one core for every proxy
+export MIN_GBIT=20                                         # 25 Gbit/s private network
 ```
 
 ### 4. Preflight (always, before a campaign)
@@ -44,7 +52,7 @@ export PROXY_CPUS=0 WORKERS=1                              # one core for every 
 APPLY=1 ./bench/preflight.sh          # moves NIC interrupts off the proxy core, offlines its hyperthread sibling
 ```
 
-It compares the three machines (sysctls, governor, MTU, offloads, kernel, Docker, git commit), measures both links with `iperf3`, and writes `bench/results/preflight-<ts>.txt`. It refuses (exit 1) on any difference or a link under `MIN_GBIT` (default 8). Keep the file: it documents the environment of the numbers.
+It compares the three machines (sysctls, governor, MTU, offloads, kernel, Docker, git commit), measures both links with `iperf3`, and writes `bench/results/preflight-<ts>.txt`. It refuses (exit 1) on any difference or a link under `MIN_GBIT` (default 8; use 20 on a 25 Gbit/s setup). Keep the file: it documents the environment of the numbers.
 
 ### 5. Smoke test (about 15 minutes)
 
@@ -66,10 +74,10 @@ REMOTE=1 ./bench/run-all.sh                  # HTTP/CONNECT (plain, TLS, TLS ful
 
 About 4 to 5 hours (the sweep multiplies the load tests). The script keeps going if a proxy fails and says so at the end.
 
-Multi-core curve (the proxy host needs 2x the cores plus the harness's; with a 10 Gbit/s link, stay at 4 cores or below at 1 KB):
+Multi-core curve (generator and origin hosts need at least as many cores as the proxy, preferably twice; re-run `APPLY=1 ./bench/preflight.sh` with the new `PROXY_CPUS` before each size, since the offlined siblings change):
 
 ```sh
-for n in 1 2 4; do
+for n in 1 2 4 8; do
   PROXY_CPUS=0-$((n-1)) WORKERS=$n REMOTE=1 BENCH_ONLY=http-1kb ./bench/run-campaign.sh
 done
 ```
@@ -84,9 +92,9 @@ done
 
 Delete the servers in the console and check they disappear from the billing page.
 
-## Phase B: tunnel throughput on the Mac
+## Phase B: tunnel throughput on a single host
 
-Quiet Mac, Docker running (the containers run in a Linux VM: OrbStack or Docker Desktop, give it all the CPUs and 8 GB or more).
+One quiet Linux host with Docker (or a Docker VM given all its CPUs and 8 GB or more), everything over loopback: no NIC in the way. Required only when the three-machine link is the limit (flood above the link speed).
 
 ```sh
 cd bench
@@ -94,12 +102,12 @@ PROXIES="rustle 3proxy squid gost tinyproxy" MODES=plain BENCH_ONLY=flood-8 \
   GEN_THREADS=4 SINK_THREADS=4 UP_THREADS=2 ./run-campaign.sh
 ```
 
-One CPU for the proxy, the rest for the generator and the sink (`env.sh` reads the VM's CPUs). Note the VM's name and CPU count in the commit message or RESULTS.md.
+One CPU for the proxy, the rest for the generator and the sink (`env.sh` reads the VM's CPUs). Note the host's model and CPU count in RESULTS.md.
 
 ## Publish
 
 ```sh
-FLOOD_FROM=bench/results/campaign-<mac-index>.txt REMOTE=1 REPORT_ONLY=1 ./bench/run-all.sh
+FLOOD_FROM=bench/results/campaign-<single-host-index>.txt REMOTE=1 REPORT_ONLY=1 ./bench/run-all.sh
 git diff                     # README table + docs/benchmarks/*.svg
 ```
 

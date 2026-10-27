@@ -74,7 +74,7 @@ bench-all: ## full campaign: 5 proxies × plain/TLS/h2 (~2-3 h), then tables
 	cd bench && AUTH=$(A) ./run-campaign.sh
 	cd bench && ./tools/campaign-table.py $$(ls -t results/campaign-[0-9]*.txt | head -1)
 
-bench-scaling: ## multi-core curve (VPS): PROXIES="..." NCPUS="1 2 4 8" make bench-scaling
+bench-scaling: ## multi-core curve (needs a many-core proxy host): PROXIES="..." NCPUS="1 2 4 8" make bench-scaling
 	cd bench && AUTH=$(A) ./run-scaling.sh
 
 clean: ## clean Rust artifacts (long rebuild afterwards)

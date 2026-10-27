@@ -18,11 +18,11 @@ Same matrix, seed, shuffle and `RESULT` lines as `run-bench.sh` (shared `matrix.
 
 ## Renting the machines
 
-Three on-demand VMs in the same region and private network, **dedicated vCPUs** (shared or burstable vCPUs make a proxy benchmark meaningless), billed by the hour: a full campaign is a few hours, i.e. a few euros.
+Three on-demand machines in the same region and private network, **dedicated cores** (shared or burstable vCPUs make a proxy benchmark meaningless), billed by the hour: a full campaign takes a working day, so a few tens of euros.
 
-*   **Hetzner Cloud, CCX line (recommended: cheapest dedicated vCPUs, private network, hourly billing).** Proxy host CCX33 (8 vCPU), generator host CCX43 (16 vCPU, it must out-run the proxy), origin host CCX33. About €0.9 per hour for the three at 2026 list prices. Same location, one private network, Debian 12 or Ubuntu 24.04.
-*   **Scaleway Elastic Metal** (bare metal, 8C/16T, 10 Gbit/s private network option): the most deterministic and the best for the flood tests, about €1.2 per hour for three with the network option.
-*   **Avoid** AWS "up to 12.5 Gbit/s" instances (baseline 3 Gbit/s, burst credits: flood results would measure the credits) and any shared-vCPU or burstable class.
+*   **Scaleway Elastic Metal, I series (recommended).** Bare metal: dedicated cores, no noisy neighbour, hyperthread siblings and NIC interrupts really controllable (`remote/apply-proxy-host.sh`), hourly billing without commitment, 25 Gbit/s private network. The link between two machines is as fast as the slower end, so use the same series on all three: e.g. EM-I320E (24C/48T) for the proxy and the generator, EM-I220E or EM-I120E for the origin. Attach the same Private Network to every server and use the private addresses (the public interface is 1 Gbit/s).
+*   **Other providers**: any bare-metal or dedicated-vCPU offer with a private network of at least 10 Gbit/s in one region (Hetzner Cloud CCX, DigitalOcean Premium CPU-Optimized). Check the per-instance network speed, not the monthly transfer allowance: it is a billing quota, not a speed.
+*   **Avoid** shared-vCPU or burstable classes, instances whose bandwidth scales with the vCPU count (Scaleway Instances: 200 Mbit/s per vCPU), and AWS "up to 12.5 Gbit/s" instances (baseline 3 Gbit/s, burst credits: flood results would measure the credits).
 
 Before the first run, measure what you actually have: `iperf3 -P 4 -c <origin>` from the generator and the proxy host. The tunnel (`flood`) numbers are capped by that link; the request-rate, latency and CPU-per-request numbers are not. If the link is under ~10 Gbit/s, read the flood results as CPU per GB, not as Gbit/s.
 

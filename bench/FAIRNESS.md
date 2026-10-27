@@ -16,7 +16,7 @@ Common to all proxies (identical harness for everyone, `bench/docker-compose.yml
 
 ## The A/B behind the settings
 
-Measured on the same machine, one core for the proxy and one for the generator, 64 keep-alive connections, 1 KB responses, 6 s per point, several passes. These runs only **choose** the settings (a laptop's Docker VM is not the publication harness); the published numbers come from the Linux harness.
+Measured on the same machine, one core for the proxy and one for the generator, 64 keep-alive connections, 1 KB responses, 6 s per point, several passes. These runs only **choose** the settings (a single-host Docker VM is not the publication harness); the published numbers come from the Linux harness.
 
 **3proxy** (the old bench ran 0.9.4 without any socket option and reported ~1.5k req/s, which looked like a 40 ms delayed ACK):
 
