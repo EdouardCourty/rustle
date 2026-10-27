@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Prepares ONE benchmark machine (Ubuntu 24.04 / Debian 12, run as root). Idempotent.
+# Prepares ONE benchmark machine (Ubuntu 24.04+ / Debian 12, run as root or through sudo). Idempotent.
 # Same on the generator, proxy and origin hosts: the three must run identical settings.
 #
-#   ssh root@HOST 'bash -s' < bench/remote/bootstrap.sh
+#   ssh HOST 'sudo bash -s' < bench/remote/bootstrap.sh
 #
 # Installs Docker and the measuring tools, writes the sysctls (REMOTE.md) to
 # /etc/sysctl.d, switches the CPU governor to performance and stops irqbalance.
@@ -14,6 +14,8 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq docker.io iperf3 ethtool git util-linux procps >/dev/null
 systemctl enable --now docker >/dev/null 2>&1 || true
+# Run through sudo by a non-root login (Scaleway images: `ubuntu`): let that user drive Docker.
+[[ -n "${SUDO_USER:-}" && "$SUDO_USER" != root ]] && usermod -aG docker "$SUDO_USER"
 
 cat > /etc/sysctl.d/99-rustle-bench.conf <<'CONF'
 net.core.somaxconn = 65535
