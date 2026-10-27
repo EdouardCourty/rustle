@@ -5,7 +5,7 @@
 #
 #   GEN_HOST=a PROXY_HOST=b UP_HOST=c PROXY_CPUS=0 ./preflight.sh
 #   APPLY=1 ...     also keep the proxy cores to the proxy: hyperthread siblings
-#                   offline, NIC interrupts moved elsewhere (proxy host, via sudo)
+#                   offline, NIC interrupts moved elsewhere (proxy host, through sudo)
 #   DRY_RUN=1 ...   print the ssh commands only
 #   GEN_ADDR PROXY_ADDR UP_ADDR   private addresses (default: the host names)
 #   REMOTE_DIR      repository checkout on every host (default ~/rustle)
@@ -23,8 +23,8 @@ on() { local host="$1"; shift
     ssh -o BatchMode=yes "$host" "$@"
 }
 feed() { local host="$1" file="$2"; shift 2    # run a local script on a host
-    if [[ "$DRY_RUN" == 1 ]]; then echo "[$host] bash -s -- $* < $file" >&2; return 0; fi
-    ssh -o BatchMode=yes "$host" "bash -s -- $*" < "$file"
+    if [[ "$DRY_RUN" == 1 ]]; then echo "[$host] ${FEED_SUDO:+sudo }bash -s -- $* < $file" >&2; return 0; fi
+    ssh -o BatchMode=yes "$host" "${FEED_SUDO:+sudo }bash -s -- $*" < "$file"
 }
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
@@ -93,7 +93,7 @@ done
 fi
 
 if [[ "${APPLY:-0}" == 1 ]]; then
-    feed "$PROXY_HOST" remote/apply-proxy-host.sh "$PROXY_CPUS" | { [[ "$DRY_RUN" == 1 ]] && cat || tee -a "$out"; } || status=1
+    FEED_SUDO=1 feed "$PROXY_HOST" remote/apply-proxy-host.sh "$PROXY_CPUS" | { [[ "$DRY_RUN" == 1 ]] && cat || tee -a "$out"; } || status=1
 fi
 
 [[ "$DRY_RUN" == 1 ]] && { echo "dry run: nothing executed"; exit 0; }
