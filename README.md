@@ -104,7 +104,7 @@ Installation
 curl -fsSL https://raw.githubusercontent.com/EdouardCourty/rustle/main/install.sh | sh
 ```
 
-The installer detects your system, verifies the release SHA-256, installs `rustle` into `~/.local/bin` (`/usr/local/bin` as root, or `RUSTLE_INSTALL_DIR`) and never uses `sudo`. Pin a version with `RUSTLE_VERSION=v0.1.0`. Release archives carry a GitHub build provenance attestation (`gh attestation verify rustle-<target>.tar.gz --repo EdouardCourty/rustle`).
+The installer detects your system, verifies the release SHA-256, installs `rustle` into `~/.local/bin` (`/usr/local/bin` as root, or `RUSTLE_INSTALL_DIR`) and never uses `sudo`. Pin a version with `RUSTLE_VERSION=v1.0.0`. Release archives carry a GitHub build provenance attestation (`gh attestation verify rustle-<target>.tar.gz --repo EdouardCourty/rustle`).
 
 From source:
 
