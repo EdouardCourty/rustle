@@ -263,8 +263,9 @@ async fn tunnel(
     idle: Duration,
 ) -> (u64, u64) {
     let (mut ur, mut uw) = up.into_split();
+    let (mut t_c2u, mut t_u2c) = IdleTimer::pair(idle);
     let c2u = async {
-        let mut t = IdleTimer::new(idle);
+        let t = &mut t_c2u;
         let mut n: u64 = 0;
         while let Some(Some(Ok(chunk))) = t.park(body.data()).await {
             let len = chunk.len();
@@ -282,7 +283,7 @@ async fn tunnel(
         n
     };
     let u2c = async {
-        let mut t = IdleTimer::new(idle);
+        let t = &mut t_u2c;
         let mut n: u64 = 0;
         let mut buf = BytesMut::with_capacity(DATA_CHUNK);
         loop {
@@ -293,7 +294,7 @@ async fn tunnel(
                     break;
                 }
                 Some(Ok(k)) => {
-                    if !send_all(&mut send, buf.split().freeze(), &mut t).await {
+                    if !send_all(&mut send, buf.split().freeze(), t).await {
                         break;
                     }
                     n += k as u64;

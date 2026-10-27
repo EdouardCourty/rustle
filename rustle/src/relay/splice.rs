@@ -170,21 +170,16 @@ pub(super) async fn tunnel(
     idle: std::time::Duration,
     client_ktls: bool,
 ) -> (u64, u64) {
+    let (ta, tb) = IdleTimer::pair(idle);
     tokio::join!(
-        tunnel_dir(&client, &up, idle, false),
-        tunnel_dir(&up, &client, idle, client_ktls)
+        tunnel_dir(&client, &up, ta, false),
+        tunnel_dir(&up, &client, tb, client_ktls)
     )
 }
 
 /// One tunnel direction: adaptive copy (8 -> 64 KB) until the flow proves
 /// bulk, then splice through a pooled pipe for the rest.
-async fn tunnel_dir(
-    src: &TcpStream,
-    dst: &TcpStream,
-    idle: std::time::Duration,
-    dst_ktls: bool,
-) -> u64 {
-    let mut timer = IdleTimer::new(idle);
+async fn tunnel_dir(src: &TcpStream, dst: &TcpStream, mut timer: IdleTimer, dst_ktls: bool) -> u64 {
     // Allocated only once data is ready: an idle tunnel (most of them)
     // holds no buffer at all.
     let mut buf: Vec<u8> = Vec::new();

@@ -116,10 +116,7 @@ fn variants() -> Vec<Variant> {
             ],
             big: true,
             quick: true,
-            // The 64 MiB tunnels run on a shared runner next to hundreds of other scenarios:
-            // a stall of the test process longer than the 10 s idle timeout of the harness
-            // config must not be mistaken for a proxy failure.
-            ..v("default", |c, _| c.set("timeouts", "idle", "\"60s\""))
+            ..v("default", id)
         },
         v("workers2-pin", |c, _| {
             c.set("server", "workers", "2")

@@ -38,8 +38,7 @@ where
 {
     let (mut ra, mut wa) = tokio::io::split(client);
     let (mut rb, mut wb) = up.into_split();
-    let mut ta = IdleTimer::new(idle);
-    let mut tb = IdleTimer::new(idle);
+    let (mut ta, mut tb) = IdleTimer::pair(idle);
     tokio::join!(
         copy_loop(&mut ra, &mut wb, true, &mut ta),
         copy_loop(&mut rb, &mut wa, true, &mut tb)

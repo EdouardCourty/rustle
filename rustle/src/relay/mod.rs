@@ -23,6 +23,8 @@ pub(crate) use chunked::chunk_size;
 pub use chunked::chunked;
 pub use splice::degraded_pipes;
 
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
 
@@ -36,6 +38,14 @@ use crate::stream::ClientStream;
 pub(crate) struct IdleTimer {
     idle: Duration,
     deadline: Instant,
+    /// Both directions of a tunnel: it is idle only when neither moved data.
+    shared: Option<Arc<Shared>>,
+}
+
+/// Latest progress deadline of a tunnel, as nanoseconds since `base`.
+struct Shared {
+    base: Instant,
+    ns: AtomicU64,
 }
 
 impl IdleTimer {
@@ -43,12 +53,45 @@ impl IdleTimer {
         Self {
             idle,
             deadline: Instant::now() + idle,
+            shared: None,
         }
+    }
+
+    /// Timers for the two directions of one tunnel. A direction that stays
+    /// quiet while the other one moves data is not idle: the tunnel is idle
+    /// only when neither direction made progress for `idle`.
+    pub fn pair(idle: Duration) -> (Self, Self) {
+        let base = Instant::now();
+        let deadline = base + idle;
+        let shared = Arc::new(Shared {
+            base,
+            ns: AtomicU64::new(idle.as_nanos() as u64),
+        });
+        let timer = |shared| Self {
+            idle,
+            deadline,
+            shared: Some(shared),
+        };
+        (timer(shared.clone()), timer(shared))
     }
 
     /// Call after every successful fill/drain (progress = new deadline).
     pub fn reset(&mut self) {
         self.deadline = Instant::now() + self.idle;
+        if let Some(s) = &self.shared {
+            s.ns.fetch_max((self.deadline - s.base).as_nanos() as u64, Relaxed);
+        }
+    }
+
+    /// The deadline in force: this direction's, or the other direction's if
+    /// it made progress later.
+    fn current(&self) -> Instant {
+        match &self.shared {
+            Some(s) => self
+                .deadline
+                .max(s.base + Duration::from_nanos(s.ns.load(Relaxed))),
+            None => self.deadline,
+        }
     }
 
     /// Park on `fut` until it resolves OR the inactivity deadline passes.
@@ -57,11 +100,19 @@ impl IdleTimer {
     where
         F: std::future::Future,
     {
-        // biased: poll the I/O first, no RNG draw per park.
-        tokio::select! {
-            biased;
-            out = fut => Some(out),
-            _ = tokio::time::sleep_until(self.deadline) => None,
+        let mut fut = std::pin::pin!(fut);
+        loop {
+            let deadline = self.current();
+            // biased: poll the I/O first, no RNG draw per park.
+            tokio::select! {
+                biased;
+                out = &mut fut => return Some(out),
+                _ = tokio::time::sleep_until(deadline) => {}
+            }
+            // The other direction may have moved data while we waited.
+            if self.current() <= deadline {
+                return None;
+            }
         }
     }
 }
@@ -171,5 +222,101 @@ mod tests {
         let (a2b, b2a) = relay.await.unwrap().unwrap();
         assert_eq!(a2b, payload.len() as u64);
         assert_eq!(b2a, 0);
+    }
+    /// A tunnel whose client side stays quiet longer than the idle timeout
+    /// while the other direction keeps moving data is not idle: what the
+    /// client sends afterwards must still reach the upstream.
+    #[tokio::test]
+    async fn quiet_direction_survives_while_the_other_one_is_active() {
+        use std::time::Duration;
+        let idle = Duration::from_millis(300);
+        let ln = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = ln.local_addr().unwrap();
+        let up_peer = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (up_srv, _) = ln.accept().await.unwrap();
+        // The client side is a stand-in for a TLS stream (not a plain socket).
+        let (client_peer, client_srv) = tokio::io::duplex(64 * 1024);
+
+        let relay = tokio::spawn(adaptive::bidirectional_io(client_srv, up_srv, idle));
+        let (mut up_r, mut up_w) = up_peer.into_split();
+        let (mut cli_r, mut cli_w) = tokio::io::split(client_peer);
+
+        // Upstream -> client: one byte every 50 ms for about a second.
+        let feeder = tokio::spawn(async move {
+            for _ in 0..20 {
+                up_w.write_all(b"x").await.unwrap();
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            up_w
+        });
+        let drain = tokio::spawn(async move {
+            let mut b = [0u8; 64];
+            while cli_r.read(&mut b).await.map(|n| n > 0).unwrap_or(false) {}
+        });
+
+        // The client says nothing for twice the idle timeout, then sends.
+        tokio::time::sleep(idle * 2).await;
+        cli_w.write_all(b"ping").await.unwrap();
+        cli_w.flush().await.unwrap();
+
+        let mut got = [0u8; 4];
+        let r = tokio::time::timeout(Duration::from_millis(500), up_r.read_exact(&mut got)).await;
+        assert!(
+            matches!(r, Ok(Ok(_))) && &got == b"ping",
+            "the client's data never reached the upstream: its direction was dropped as idle while the other was active"
+        );
+        let _ = feeder.await;
+        drop(cli_w);
+        drain.abort();
+        relay.abort();
+    }
+    /// Same property on a plain socket pair (the zero-copy engine on Linux),
+    /// and a tunnel where both directions are silent is still closed.
+    #[tokio::test]
+    async fn plain_tunnel_idle_only_when_both_directions_are_quiet() {
+        use std::time::Duration;
+        let idle = Duration::from_millis(300);
+        let ln = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = ln.local_addr().unwrap();
+        let cli_peer = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (cli_srv, _) = ln.accept().await.unwrap();
+        let up_peer = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (up_srv, _) = ln.accept().await.unwrap();
+
+        let relay = tokio::spawn(bidirectional(cli_srv, up_srv, idle));
+        let (mut cli_r, mut cli_w) = cli_peer.into_split();
+        let (mut up_r, mut up_w) = up_peer.into_split();
+
+        let feeder = tokio::spawn(async move {
+            for _ in 0..20 {
+                up_w.write_all(b"x").await.unwrap();
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            up_w
+        });
+        let drain = tokio::spawn(async move {
+            let mut b = [0u8; 64];
+            while cli_r.read(&mut b).await.map(|n| n > 0).unwrap_or(false) {}
+            cli_r
+        });
+        tokio::time::sleep(idle * 2).await;
+        cli_w.write_all(b"ping").await.unwrap();
+        let mut got = [0u8; 4];
+        let r = tokio::time::timeout(Duration::from_millis(500), up_r.read_exact(&mut got)).await;
+        assert!(
+            matches!(r, Ok(Ok(_))) && &got == b"ping",
+            "the client's data never reached the upstream"
+        );
+
+        // Nothing moves any more in either direction: the tunnel closes.
+        let up_w = feeder.await.unwrap();
+        let t0 = std::time::Instant::now();
+        let ended = tokio::time::timeout(Duration::from_secs(3), relay).await;
+        assert!(
+            ended.is_ok(),
+            "a tunnel silent in both directions stayed open"
+        );
+        assert!(t0.elapsed() < Duration::from_secs(2));
+        drop((up_w, up_r, cli_w, drain));
     }
 }
