@@ -1,0 +1,9 @@
+# campaign ws, plain+tls, 1 core; merged from campaign-ws-20261028-203449 (rustle 3proxy gost tinyproxy) + campaign-ws-20261028-213218.txt (squid, fixed config)
+rustle plain runs/rustle-ws/remote-auth-on/20261028-203456/results.txt
+3proxy plain runs/3proxy-ws/remote-auth-on/20261028-204200/results.txt
+gost plain runs/gost-ws/remote-auth-on/20261028-205614/results.txt
+tinyproxy plain runs/tinyproxy-ws/remote-auth-on/20261028-210320/results.txt
+rustle tls runs/rustle-tls-ws/remote-auth-on/20261028-211027/results.txt
+gost tls runs/gost-tls-ws/remote-auth-on/20261028-212442/results.txt
+squid plain runs/squid-ws/remote-auth-on/20261028-213225/results.txt
+squid tls runs/squid-tls-ws/remote-auth-on/20261028-213932/results.txt
