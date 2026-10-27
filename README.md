@@ -35,7 +35,7 @@ Table of Contents
 Benchmarks
 ----------
 
-rustle against 3proxy, Squid, gost and Tinyproxy, each pinned to **one core** with authentication on, in Docker, every competitor on its latest stable release with the tuning its own documentation recommends, at the connection count where it performs best ([versions, settings and the A/B behind each one](bench/FAIRNESS.md)). Load generator, origin and sink run on the other core. Fixed-seed shuffled test order, median of 3 runs, no error in any test.
+rustle against 3proxy, Squid, gost and Tinyproxy, each pinned to **one core** with authentication on, every competitor with the tuning its own documentation recommends, at the connection count where it performs best ([versions, settings and the A/B behind each one](bench/FAIRNESS.md)). Three bare-metal servers on a 25 Gbit/s private network (load generator → proxy → origin and sink, measured link 23.5 Gbit/s), the proxy on its own core of a 24-core EPYC. Fixed-seed shuffled test order, median of 3 runs, no error in any test.
 
 ![1 KB requests](docs/benchmarks/plain-1kb.svg)
 ![1 MB requests](docs/benchmarks/plain-1mb.svg)
@@ -43,26 +43,33 @@ rustle against 3proxy, Squid, gost and Tinyproxy, each pinned to **one core** wi
 ![25,000 tunnels](docs/benchmarks/plain-ram.svg)
 ![HTTPS proxy](docs/benchmarks/tls-1kb.svg)
 ![HTTP/2 proxy](docs/benchmarks/h2-1kb.svg)
+![WebSocket, 64 B messages](docs/benchmarks/ws-64b-rps.svg)
 
 <!-- bench:table:start -->
 
 | 1 core | rustle | 3proxy | Squid | gost | Tinyproxy |
 |---|---|---|---|---|---|
-| 1 KB, req/s | **77,959** | 1,504 | 27,558 | 4,610 | 15,509 |
-| 1 MB, req/s | **6,731** | 2,292 | 910 | 2,147 | 537 |
-| 10 MB, req/s | **370** | 342 | 81 | 285 | 49 |
-| Short connections, req/s | **19,173** | 15,735 | 15,002 | 5,503 | 15,073 |
-| Tunnels, Gbit/s | **48.4** | 42.9 | 35.4 | 43.4 | 4.6 |
-| 25,000 tunnels, RAM | **80 MB** | 785 MB | 1.5 GB | 3.6 GB | 468 MB |
+| 1 KB, req/s | **55,258** | 21,032 | 15,140 | 4,755 | 7,580 |
+| 1 MB, req/s | **2,624** | 1,784 | 353 | 1,046 | 199 |
+| 10 MB, req/s | **268** | 191 | 33 | 145 | 21 |
+| Short connections, req/s | **27,827** | 5,132 | 7,804 | 4,780 | 7,584 |
+| Tunnels, Gbit/s | **22.0** | 15.7 | 13.6 | 13.2 | 1.8 |
+| 25,000 tunnels, RAM | **95 MB** | 2.4 GB | 912 MB | 3.2 GB | 274 MB |
+| HTTPS, new connection, resumed, req/s | **6,119** | — | 2,047 | 2,516 | — |
+| HTTPS, new connection, full handshake, req/s | **5,458** | — | 1,922 | 2,246 | — |
+| WebSocket 64 B, msg/s | **58,506** | 33,136 | 43,710 | 46,808 | — |
+| WebSocket 64 KB, Gbit/s | **11.6** | 7.9 | 6.6 | 6.9 | — |
+| WebSocket handshakes/s | **10,740** | 251 | 4,879 | 3,726 | — |
 
 <!-- bench:table:end -->
 
 Reading the numbers:
 
-*   Small requests and memory are where rustle is far ahead (2.8× the next proxy at 1 KB, 5× less RAM than the next one at 25,000 tunnels).
-*   On bulk transfers (10 MB, tunnels) the kernel TCP stack dominates and every serious proxy converges: rustle leads, but by 10 to 15 %. 3proxy spends fewer CPU ms per GB on tunnels.
-*   HTTP/2 tunnels: gost is slightly ahead on raw throughput (within noise).
-*   The load generator is the bottleneck on a shared 2-core host, so absolute numbers are a floor. Multi-core results come from the three-machine setup described in [`bench/REMOTE.md`](bench/REMOTE.md).
+*   **Small requests and memory are where rustle is far ahead**: 2.6× the next proxy (3proxy) at 1 KB, 2.1× at 10 KB, 3.6× on short connections (Squid), and 95 MB for 25,000 idle tunnels against 274 MB for the next one (Tinyproxy) and 0.9 to 3.2 GB for the others.
+*   **Bulk transfers and tunnels reach the network**: at 1 MB, 10 MB and in tunnels rustle runs at about 22 Gbit/s of the 23.5 Gbit/s link, so its lead there is a lower bound. On tunnels it spends about half the CPU per GB of 3proxy (259 against 524 ms/GB).
+*   **Multi-core**: 55,000 req/s per added core at 1 KB, linear up to 8 cores (439,740 req/s), 3.8× the next proxy at 8 cores ([curve](bench/RESULTS.md)).
+*   **HTTPS, HTTP/2 and WebSocket**: ahead of Squid and gost on every test (49,461 req/s at 1 KB over TLS against 13,509 for Squid; 33,451 over HTTP/2 against 5,231 for gost). TLS and h2 carry no `splice`, so throughput is lower than in plain HTTP; on HTTP/2 tunnels the lead over gost is small (8.8 against 7.8 Gbit/s).
+*   One campaign, one seed, noise ±3–5 %: differences below that are not conclusions. The workload is a static origin with `Content-Length` (no chunked bodies, uploads or SOCKS5): those are covered by the tests, not the bench.
 
 Full tables, TLS and HTTP/2 matrices, and the measurement history: [`bench/RESULTS.md`](bench/RESULTS.md). To reproduce (Docker, Linux):
 
@@ -80,7 +87,7 @@ Under the Hood
 *   **Zero-copy relay.** Tunnels and large bodies move through `splice()` and pooled 1 MB pipes, so payload bytes never enter user space; small flows start with an adaptive copy and only switch when the flow is sustained.
 *   **Allocation-free hot path.** Request heads are parsed in place (spans into the read buffer), scratch buffers live as long as the connection, and a keep-alive request costs about two `recv` and two `send` syscalls.
 *   **Socket options set once.** `TCP_NODELAY`, `TCP_DEFER_ACCEPT` and 1 MB buffers are applied on the listener and inherited by every accepted socket: no per-request `setsockopt`.
-*   **Optional extras.** `pin_cores` steers each connection to the shard of the CPU that received its SYN (`SO_ATTACH_REUSEPORT_CBPF`); `ktls` hands TLS sessions to the kernel after the handshake (+13 % on tunnels, −30 % memory, at a cost on large HTTP bodies, hence off by default).
+*   **Optional extras.** `pin_cores` steers each connection to the shard of the CPU that received its SYN (`SO_ATTACH_REUSEPORT_CBPF`); `ktls` hands TLS sessions to the kernel after the handshake (5 to 20 % less memory, but slower than rustls on every throughput test with software kernel TLS, hence off by default).
 
 Features
 --------
@@ -209,7 +216,7 @@ HTTPS proxy and HTTP/2.
 | `cert` / `key` | `""` | PEM certificate chain and private key |
 | `handshake_timeout` | `"10s"` | Max duration of a TLS handshake |
 | `http2` | `true` | Offer HTTP/2 through ALPN |
-| `ktls` | `false` | Kernel TLS offload (Linux, `tls` module). Better for tunnels and memory, slower for large `http://` bodies |
+| `ktls` | `false` | Kernel TLS (Linux, `tls` module). Saves some memory, slower than rustls on throughput without NIC TLS offload |
 
 ### `[filter]`
 

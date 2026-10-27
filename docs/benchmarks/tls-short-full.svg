@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="168" viewBox="0 0 760 168" role="img" aria-label="HTTPS proxy, full handshake every time">
+<style>
+.bg{fill:#fff}.t{fill:#1f2328;font:600 15px -apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+.s{fill:#656d76;font:12px -apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+.l{fill:#1f2328;font:13px -apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+.v{fill:#1f2328;font:600 13px -apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+.o{fill:#8c959f}.r{fill:#e5532d}
+@media (prefers-color-scheme:dark){.bg{fill:#0d1117}.t,.l,.v{fill:#e6edf3}.s{fill:#8b949e}.o{fill:#6e7681}.r{fill:#ff7b54}}
+</style>
+<rect class="bg" width="760" height="168" rx="8"/>
+<text class="t" x="24" y="28">HTTPS proxy, full handshake every time</text>
+<text class="s" x="24" y="47">Requests per second without session resumption (certificate signature each time), higher is better · 1 core · auth on · best of the concurrency sweep · median of 3</text>
+<text class="l" x="24" y="79">rustle</text>
+<rect class="r" x="120" y="65" width="520.0" height="20" rx="3"/>
+<text class="v" x="648.0" y="80">5,458 req/s</text>
+<text class="l" x="24" y="109">gost</text>
+<rect class="o" x="120" y="95" width="213.9" height="20" rx="3"/>
+<text class="v" x="341.9" y="110">2,246 req/s</text>
+<text class="l" x="24" y="139">squid</text>
+<rect class="o" x="120" y="125" width="183.1" height="20" rx="3"/>
+<text class="v" x="311.1" y="140">1,922 req/s</text>
+</svg>

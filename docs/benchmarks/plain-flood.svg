@@ -9,20 +9,20 @@
 </style>
 <rect class="bg" width="760" height="228" rx="8"/>
 <text class="t" x="24" y="28">CONNECT tunnels, bulk transfer</text>
-<text class="s" x="24" y="47">Gbit/s through 8 tunnels, higher is better · 1 core · auth on · median of 3 · seed 2004113323</text>
+<text class="s" x="24" y="47">Gbit/s through 8 tunnels, higher is better · 1 core · auth on · best of the concurrency sweep · median of 3</text>
 <text class="l" x="24" y="79">rustle</text>
 <rect class="r" x="120" y="65" width="520.0" height="20" rx="3"/>
-<text class="v" x="648.0" y="80">48.4 Gbit/s</text>
-<text class="l" x="24" y="109">gost</text>
-<rect class="o" x="120" y="95" width="466.4" height="20" rx="3"/>
-<text class="v" x="594.4" y="110">43.4 Gbit/s</text>
-<text class="l" x="24" y="139">3proxy</text>
-<rect class="o" x="120" y="125" width="460.2" height="20" rx="3"/>
-<text class="v" x="588.2" y="140">42.9 Gbit/s</text>
-<text class="l" x="24" y="169">squid</text>
-<rect class="o" x="120" y="155" width="379.7" height="20" rx="3"/>
-<text class="v" x="507.7" y="170">35.4 Gbit/s</text>
+<text class="v" x="648.0" y="80">22.0 Gbit/s</text>
+<text class="l" x="24" y="109">3proxy</text>
+<rect class="o" x="120" y="95" width="370.1" height="20" rx="3"/>
+<text class="v" x="498.1" y="110">15.7 Gbit/s</text>
+<text class="l" x="24" y="139">squid</text>
+<rect class="o" x="120" y="125" width="320.3" height="20" rx="3"/>
+<text class="v" x="448.3" y="140">13.6 Gbit/s</text>
+<text class="l" x="24" y="169">gost</text>
+<rect class="o" x="120" y="155" width="312.2" height="20" rx="3"/>
+<text class="v" x="440.2" y="170">13.2 Gbit/s</text>
 <text class="l" x="24" y="199">tinyproxy</text>
-<rect class="o" x="120" y="185" width="49.1" height="20" rx="3"/>
-<text class="v" x="177.1" y="200">4.6 Gbit/s</text>
+<rect class="o" x="120" y="185" width="41.7" height="20" rx="3"/>
+<text class="v" x="169.7" y="200">1.8 Gbit/s</text>
 </svg>

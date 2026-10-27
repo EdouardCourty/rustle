@@ -9,11 +9,11 @@
 </style>
 <rect class="bg" width="760" height="138" rx="8"/>
 <text class="t" x="24" y="28">HTTP/2 proxy, 1 KB responses</text>
-<text class="s" x="24" y="47">Requests per second, higher is better · 1 core · auth on · median of 3 · seed 2004113323</text>
+<text class="s" x="24" y="47">Requests per second, higher is better · 1 core · auth on · best of the concurrency sweep · median of 3</text>
 <text class="l" x="24" y="79">rustle</text>
 <rect class="r" x="120" y="65" width="520.0" height="20" rx="3"/>
-<text class="v" x="648.0" y="80">72,462 req/s</text>
+<text class="v" x="648.0" y="80">33,451 req/s</text>
 <text class="l" x="24" y="109">gost</text>
-<rect class="o" x="120" y="95" width="69.4" height="20" rx="3"/>
-<text class="v" x="197.4" y="110">9,668 req/s</text>
+<rect class="o" x="120" y="95" width="81.3" height="20" rx="3"/>
+<text class="v" x="209.3" y="110">5,231 req/s</text>
 </svg>

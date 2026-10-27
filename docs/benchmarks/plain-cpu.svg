@@ -9,19 +9,19 @@
 </style>
 <rect class="bg" width="760" height="228" rx="8"/>
 <text class="t" x="24" y="28">CPU cost per request (1 KB)</text>
-<text class="s" x="24" y="47">Microseconds of proxy CPU per request, lower is better · 1 core · auth on · median of 3 · seed 2004113323</text>
+<text class="s" x="24" y="47">Microseconds of proxy CPU per request, lower is better · 1 core · auth on · best of the concurrency sweep · median of 3</text>
 <text class="l" x="24" y="79">rustle</text>
-<rect class="r" x="120" y="65" width="25.7" height="20" rx="3"/>
-<text class="v" x="153.7" y="80">10 µs</text>
-<text class="l" x="24" y="109">squid</text>
-<rect class="o" x="120" y="95" width="89.6" height="20" rx="3"/>
-<text class="v" x="217.6" y="110">36 µs</text>
-<text class="l" x="24" y="139">3proxy</text>
-<rect class="o" x="120" y="125" width="151.8" height="20" rx="3"/>
-<text class="v" x="279.8" y="140">61 µs</text>
+<rect class="r" x="120" y="65" width="44.8" height="20" rx="3"/>
+<text class="v" x="172.8" y="80">18 µs</text>
+<text class="l" x="24" y="109">3proxy</text>
+<rect class="o" x="120" y="95" width="117.8" height="20" rx="3"/>
+<text class="v" x="245.8" y="110">48 µs</text>
+<text class="l" x="24" y="139">squid</text>
+<rect class="o" x="120" y="125" width="163.5" height="20" rx="3"/>
+<text class="v" x="291.5" y="140">66 µs</text>
 <text class="l" x="24" y="169">tinyproxy</text>
-<rect class="o" x="120" y="155" width="158.5" height="20" rx="3"/>
-<text class="v" x="286.5" y="170">64 µs</text>
+<rect class="o" x="120" y="155" width="320.4" height="20" rx="3"/>
+<text class="v" x="448.4" y="170">129 µs</text>
 <text class="l" x="24" y="199">gost</text>
 <rect class="o" x="120" y="185" width="520.0" height="20" rx="3"/>
 <text class="v" x="648.0" y="200">210 µs</text>

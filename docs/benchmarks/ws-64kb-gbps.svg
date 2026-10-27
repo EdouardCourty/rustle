@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="198" viewBox="0 0 760 198" role="img" aria-label="WebSocket, 64 KB messages">
+<style>
+.bg{fill:#fff}.t{fill:#1f2328;font:600 15px -apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+.s{fill:#656d76;font:12px -apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+.l{fill:#1f2328;font:13px -apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+.v{fill:#1f2328;font:600 13px -apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+.o{fill:#8c959f}.r{fill:#e5532d}
+@media (prefers-color-scheme:dark){.bg{fill:#0d1117}.t,.l,.v{fill:#e6edf3}.s{fill:#8b949e}.o{fill:#6e7681}.r{fill:#ff7b54}}
+</style>
+<rect class="bg" width="760" height="198" rx="8"/>
+<text class="t" x="24" y="28">WebSocket, 64 KB messages</text>
+<text class="s" x="24" y="47">Gbit/s of payload (8 connections, 8 frames in flight), higher is better · 1 core · auth on · best of the concurrency sweep · median of 3</text>
+<text class="l" x="24" y="79">rustle</text>
+<rect class="r" x="120" y="65" width="520.0" height="20" rx="3"/>
+<text class="v" x="648.0" y="80">11.6 Gbit/s</text>
+<text class="l" x="24" y="109">3proxy</text>
+<rect class="o" x="120" y="95" width="356.6" height="20" rx="3"/>
+<text class="v" x="484.6" y="110">7.9 Gbit/s</text>
+<text class="l" x="24" y="139">gost</text>
+<rect class="o" x="120" y="125" width="311.1" height="20" rx="3"/>
+<text class="v" x="439.1" y="140">6.9 Gbit/s</text>
+<text class="l" x="24" y="169">squid</text>
+<rect class="o" x="120" y="155" width="296.5" height="20" rx="3"/>
+<text class="v" x="424.5" y="170">6.6 Gbit/s</text>
+</svg>

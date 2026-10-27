@@ -9,20 +9,20 @@
 </style>
 <rect class="bg" width="760" height="228" rx="8"/>
 <text class="t" x="24" y="28">HTTP, 1 KB responses</text>
-<text class="s" x="24" y="47">Requests per second, higher is better · 1 core · auth on · median of 3 · seed 2004113323</text>
+<text class="s" x="24" y="47">Requests per second, higher is better · 1 core · auth on · best of the concurrency sweep · median of 3</text>
 <text class="l" x="24" y="79">rustle</text>
 <rect class="r" x="120" y="65" width="520.0" height="20" rx="3"/>
-<text class="v" x="648.0" y="80">77,959 req/s</text>
-<text class="l" x="24" y="109">squid</text>
-<rect class="o" x="120" y="95" width="183.8" height="20" rx="3"/>
-<text class="v" x="311.8" y="110">27,558 req/s</text>
-<text class="l" x="24" y="139">tinyproxy</text>
-<rect class="o" x="120" y="125" width="103.4" height="20" rx="3"/>
-<text class="v" x="231.4" y="140">15,509 req/s</text>
-<text class="l" x="24" y="169">gost</text>
-<rect class="o" x="120" y="155" width="30.8" height="20" rx="3"/>
-<text class="v" x="158.8" y="170">4,610 req/s</text>
-<text class="l" x="24" y="199">3proxy</text>
-<rect class="o" x="120" y="185" width="10.0" height="20" rx="3"/>
-<text class="v" x="138.0" y="200">1,504 req/s</text>
+<text class="v" x="648.0" y="80">55,258 req/s</text>
+<text class="l" x="24" y="109">3proxy</text>
+<rect class="o" x="120" y="95" width="197.9" height="20" rx="3"/>
+<text class="v" x="325.9" y="110">21,032 req/s</text>
+<text class="l" x="24" y="139">squid</text>
+<rect class="o" x="120" y="125" width="142.5" height="20" rx="3"/>
+<text class="v" x="270.5" y="140">15,140 req/s</text>
+<text class="l" x="24" y="169">tinyproxy</text>
+<rect class="o" x="120" y="155" width="71.3" height="20" rx="3"/>
+<text class="v" x="199.3" y="170">7,580 req/s</text>
+<text class="l" x="24" y="199">gost</text>
+<rect class="o" x="120" y="185" width="44.7" height="20" rx="3"/>
+<text class="v" x="172.7" y="200">4,755 req/s</text>
 </svg>

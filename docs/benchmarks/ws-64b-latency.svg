@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="198" viewBox="0 0 760 198" role="img" aria-label="WebSocket round trip, 64-byte messages">
+<style>
+.bg{fill:#fff}.t{fill:#1f2328;font:600 15px -apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+.s{fill:#656d76;font:12px -apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+.l{fill:#1f2328;font:13px -apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+.v{fill:#1f2328;font:600 13px -apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+.o{fill:#8c959f}.r{fill:#e5532d}
+@media (prefers-color-scheme:dark){.bg{fill:#0d1117}.t,.l,.v{fill:#e6edf3}.s{fill:#8b949e}.o{fill:#6e7681}.r{fill:#ff7b54}}
+</style>
+<rect class="bg" width="760" height="198" rx="8"/>
+<text class="t" x="24" y="28">WebSocket round trip, 64-byte messages</text>
+<text class="s" x="24" y="47">p99 latency in milliseconds, lower is better · 1 core · auth on · best of the concurrency sweep · median of 3</text>
+<text class="l" x="24" y="79">rustle</text>
+<rect class="r" x="120" y="65" width="211.5" height="20" rx="3"/>
+<text class="v" x="339.5" y="80">1.29 ms</text>
+<text class="l" x="24" y="109">squid</text>
+<rect class="o" x="120" y="95" width="245.2" height="20" rx="3"/>
+<text class="v" x="373.2" y="110">1.49 ms</text>
+<text class="l" x="24" y="139">gost</text>
+<rect class="o" x="120" y="125" width="423.0" height="20" rx="3"/>
+<text class="v" x="551.0" y="140">2.57 ms</text>
+<text class="l" x="24" y="169">3proxy</text>
+<rect class="o" x="120" y="155" width="520.0" height="20" rx="3"/>
+<text class="v" x="648.0" y="170">3.16 ms</text>
+</svg>

@@ -9,20 +9,20 @@
 </style>
 <rect class="bg" width="760" height="228" rx="8"/>
 <text class="t" x="24" y="28">Memory with 25,000 open tunnels</text>
-<text class="s" x="24" y="47">Peak RSS, lower is better · 1 core · auth on · median of 3 · seed 2004113323</text>
+<text class="s" x="24" y="47">Peak RSS, lower is better · 1 core · auth on · best of the concurrency sweep · median of 3</text>
 <text class="l" x="24" y="79">rustle</text>
-<rect class="r" x="120" y="65" width="11.3" height="20" rx="3"/>
-<text class="v" x="139.3" y="80">80 MB</text>
+<rect class="r" x="120" y="65" width="15.3" height="20" rx="3"/>
+<text class="v" x="143.3" y="80">95 MB</text>
 <text class="l" x="24" y="109">tinyproxy</text>
-<rect class="o" x="120" y="95" width="66.4" height="20" rx="3"/>
-<text class="v" x="194.4" y="110">468 MB</text>
-<text class="l" x="24" y="139">3proxy</text>
-<rect class="o" x="120" y="125" width="111.4" height="20" rx="3"/>
-<text class="v" x="239.4" y="140">785 MB</text>
-<text class="l" x="24" y="169">squid</text>
-<rect class="o" x="120" y="155" width="214.7" height="20" rx="3"/>
-<text class="v" x="342.7" y="170">1,513 MB</text>
+<rect class="o" x="120" y="95" width="44.1" height="20" rx="3"/>
+<text class="v" x="172.1" y="110">274 MB</text>
+<text class="l" x="24" y="139">squid</text>
+<rect class="o" x="120" y="125" width="146.9" height="20" rx="3"/>
+<text class="v" x="274.9" y="140">912 MB</text>
+<text class="l" x="24" y="169">3proxy</text>
+<rect class="o" x="120" y="155" width="396.4" height="20" rx="3"/>
+<text class="v" x="524.4" y="170">2,461 MB</text>
 <text class="l" x="24" y="199">gost</text>
 <rect class="o" x="120" y="185" width="520.0" height="20" rx="3"/>
-<text class="v" x="648.0" y="200">3,664 MB</text>
+<text class="v" x="648.0" y="200">3,228 MB</text>
 </svg>
