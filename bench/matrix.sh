@@ -92,6 +92,8 @@ check_valid() { # <test name> <RESULT line>
 # the table keeps the best valid level of each proxy (tools/campaign-table.py).
 # NO_SWEEP=1 runs only the level written in the workload list.
 sweep_levels() { # <test name>
+    # SWEEP_OVERRIDE="256 1024 4096": the connection levels to run for every load test (multi-core curve).
+    [[ -n "${SWEEP_OVERRIDE:-}" ]] && { echo "$SWEEP_OVERRIDE"; return; }
     case "$1" in
         http-1kb|http-10kb|http-1kb-short|ws-64b) echo "64 256 1024" ;;
         http-1mb) echo "16 64 256" ;;
