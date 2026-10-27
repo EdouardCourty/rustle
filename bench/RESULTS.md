@@ -72,7 +72,7 @@ Reading: rustle keeps its lead over Squid and gost in TLS (3.7Ã— Squid and 19.6Ã
 
 ## Chapter 3: HTTP/2 to the proxy, 1 core
 
-h2 is supported by rustle and gost only (ALPN `h2`; one h2 connection per simulated connection, sequential requests; CONNECT is one stream on its own connection).
+Only rustle and gost accept HTTP/2 from the client (ALPN `h2`); 3proxy, Squid and Tinyproxy have no HTTP/2 listener, so they are not in this table. One h2 connection per simulated connection, sequential requests; CONNECT is one stream on its own connection.
 
 | Test | rustle | gost |
 |---|---|---|

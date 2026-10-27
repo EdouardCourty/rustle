@@ -74,7 +74,6 @@ Two checks on the published campaign:
 - Anything that disables or changes what the proxy does for every request (auth caching tricks that skip password checks, `fakeresolve`, `ip` auth caches).
 - Larger `GOGC`/`stacksize` values that trade memory for a few percent.
 - Kernel-level tuning (`sysctl`) beyond what is common to all proxies.
-- Splice for 3proxy: not built by default in the version tested.
 - kTLS for rustle in the main TLS tables: it is opt-in (off by default) and no competitor has an equivalent, so it is measured separately (`RESULTS.md`, kTLS chapter).
 
 ## Known asymmetries
