@@ -108,7 +108,7 @@ CLI (clap derive: `rustle/src/cli.rs` = `Cli` + `Command`; one file per command 
 | `http.max_request_body_bytes` / `max_response_body_bytes` | 0 = unlimited |
 | `http.allow_websocket` | true (`Upgrade: websocket` on the plain-HTTP path; false → 403; CONNECT/wss untouched) |
 | `tls.listen` / `cert` / `key` | `""` (off) / PEM |
-| `tls.handshake_timeout` / `http2` / `ktls` | 10s / true (ALPN h2) / **false** (opt-in: +13 % tunnels, −30 % RAM, but −37 % HTTP bulk) |
+| `tls.handshake_timeout` / `http2` / `ktls` | 10s / true (ALPN h2) / **false** (opt-in: software kernel TLS, 5–20 % less RAM but −12 % to −42 % throughput on the 2026-10-28 campaign) |
 | `auth.allow_clients` | [] (empty = everyone; CIDR, closed at accept on every listener) |
 | `auth.max_failures` / `failure_window` / `ban_duration` | 5 / 1m / 15m (0 = off; missing credentials do not count) |
 | `timeouts.request_head` | 10s (total head / SOCKS5 handshake, anti-slowloris) |
@@ -154,7 +154,7 @@ Optional features: `jemalloc`, `mimalloc` (mutually exclusive; default = glibc m
 - **Fairness (non-negotiable)**: every competitor on its latest stable release with the tuning its own docs recommend, each choice A/B-tested and recorded in `bench/FAIRNESS.md` (3proxy needs `-osTCP_NODELAY -ocTCP_NODELAY`: without it the old "×9.5 at 1 KB" was a Nagle + delayed-ACK artifact, not 3proxy's speed). Never publish a number against a default-config competitor; when a version or setting changes, update FAIRNESS.md and re-run the whole campaign. rustle's bench binary is the shipped release build (no `target-cpu=native`); `SOCK_BUF=0` runs it on kernel autotuning like the competitors that have no buffer option.
 - 1 KB is limited by harness latency (~15k rps); the proxy alone is estimated at 21–24k rps (~42–47 µs/req).
 - Do not compare numbers across bench protocol changes.
-- Multi-core: not measured with the single-host harness (2 cores). Use the three-machine setup (`bench/REMOTE.md`, `run-remote.sh`): a result is valid only if the generator is not saturated.
+- Multi-core: use the three-machine setup (`bench/REMOTE.md`, `run-remote.sh`): a result is valid only if the generator is not saturated. Measured up to 8 proxy cores at 1 KB (`bench/RESULTS.md`).
 - Never compile or edit `run-bench.sh` during a bench (shared CPU; bash rereads the running script).
 
 ### Benchmark tooling
@@ -190,27 +190,26 @@ Format, checked against the current history: `type(scope): description`, **subje
 5. Pool: accept only a complete, keep-alive, framed response with no over-read. The per-origin cap must stay above the expected concurrency per origin: at 1024 concurrent connections a 256 cap collapsed throughput 25× (connection churn, 502s).
 6. An epoll state-machine rewrite was tried and abandoned (same CPU/req as Tokio, worse rps). Do not return to it without new data.
 7. Gains < 5 % = noise. Every performance claim goes through the fixed-seed matrix.
-8. io_uring (monoio prototype, removed from the repo — recoverable at commit `a2b11e3`): ±8 % depending on size, no net gain on 1 core; kTLS: opt-in, wins on tunnels/RAM, loses on HTTP bulk. Do not change these decisions without a new measurement (multi-core).
+8. io_uring (monoio prototype, removed from the repo — recoverable at commit `a2b11e3`): ±8 % depending on size, no net gain on 1 core; kTLS: opt-in, saves 5–20 % RAM but is slower than rustls on every throughput test (software kernel TLS, 2026-10-28). Do not change these decisions without a new measurement (NIC TLS offload, multi-core TLS).
 
 ## Known state
 
 **Keep this section up to date: update it in the same commit whenever the project evolves (feature added, test counts, reference campaign, backlog change).**
 
-- Last updated 2026-10-05, branch `main`. Linux + macOS, CI in `.github/workflows/` (lint, tests + e2e on Linux/macOS, installer; tag `vX.Y.Z` → release).
+- Last updated 2026-10-28, branch `main`, version 1.0.0. Linux + macOS, CI in `.github/workflows/` (lint, tests + e2e on Linux/macOS, installer; tag `vX.Y.Z` → release).
 - `make check` green: fmt, clippy `-D warnings` (workspace, e2e included), `cargo test -p rustle` 75/75 (unit + in-process end-to-end), e2e `--quick` 68 scenarios. `make e2e` on macOS: 523 OK + 26 SKIP (Linux-only paths) out of 549; `robustness/huge-request-line` flaked once under full parallel load (passes alone), to watch.
 - Implemented: HTTP/1.1 + CONNECT, HTTPS proxy (TLS, rustls), HTTP/2, SOCKS5 (TCP + UDP), shared-nothing shards with `SO_REUSEPORT` and optional core pinning, splice relay, chunked uploads, policy (destinations, client allowlist, bans, anti-slowloris), access log, opt-in kTLS, `rustle` CLI (init/check/status/reload/service/update/uninstall), runtime reload (control socket + SIGHUP), WebSocket upgrades (`http.allow_websocket`), `curl | sh` installer, black-box e2e suite.
-- **The reference campaign below predates the fairness pass (3proxy NODELAY, Squid 7.7 + buffers, gost 3.3.0 + GOGC, Tinyproxy 1.11.3, rustle without native codegen): re-run `make bench-all` on the Linux harness, then `make charts` and refresh the README table, before quoting any competitor figure.
-- Reference campaign: 2026-10-05 (`bench/results/campaign-20261005-120351.txt`, rewritten generator/origin harness, 1 core + 2-core harness). Its numbers feed the README charts and table (`make charts`); `bench/RESULTS.md` still holds the older 2026-10-03 campaign and must be refreshed. Produced by `bench/run-campaign.sh` (5 proxies × plain/TLS/h2), tables by `bench/tools/campaign-table.py`.
-- WebSocket bench (`MATRIX=ws`): written and smoke-tested on macOS only (generator, origin, tools); never run on the Linux/Docker harness yet, no published numbers, and which competitors accept Upgrade is unknown until it runs.
+- Reference campaign: 2026-10-28, three Scaleway Elastic Metal servers (generator and proxy EM-I320E, origin EM-I220E, 25 Gbit/s private network), 1 proxy core, seed `2004113323`. Indexes in `bench/results/` (gitignored): `campaign-20261028-235500.txt` (plain, TLS, TLS full handshake, h2), `campaign-ws-20261028-214800.txt` (WebSocket), `campaign-20261028-215104.txt` (rustle + kTLS), `campaign-mc-n{1,2,4,8}.txt` (multi-core curve), preflight `preflight-20261028-142835.txt`. The README charts and table (`make charts`) and `bench/RESULTS.md` come from them. Not measured: tunnel throughput beyond the 23.5 Gbit/s link (single-host phase B, `bench/RUNBOOK.md`), TLS/h2/tunnels on several cores, NIC TLS offload.
+- Bench scripting notes: a competitor step can stop at start-up (`container … is not running`, seen on gost, not understood: re-run the step alone); a driving workstation that sleeps hangs the SSH sessions (use `caffeinate -s -i`); `SWEEP_OVERRIDE` sets the connection levels (multi-core curve).
 - The bench (static origin, Content-Length) exercises neither chunked, SOCKS5 nor uploads: covered by the tests and the e2e suite.
 - e2e suite: one expected behavior = one scenario. Bug found → first a scenario that reproduces it (it must fail), then the fix.
 
 ## Backlog / improvement areas
 
 **Performance**
-- **Multi-core: measure it** (`REMOTE=1 run-scaling.sh` on three machines, `bench/REMOTE.md`; the setup is written, never run yet) — nothing is measured beyond one core. Retest io_uring and kTLS in that setting.
+- Multi-core: measured at 1 KB plain up to 8 cores (linear, 55k req/s per core). Still to measure: TLS, h2 and tunnels on several cores (needs more than a 25 Gbit/s link for tunnels), io_uring in that setting.
 - h2 path: slower than TLS+HTTP/1.1 on bulk (a `Bytes` copy per chunk, framing). h2 flood ahead of gost (4/16 MB windows), bound by the harness core.
-- kTLS: understand the HTTP bulk loss (−37 % at 1 MB) — `perf` unavailable on the current box.
+- kTLS: understand why software kTLS is slower than rustls (−37 % at 10 MB, −42 % on tunnels) and test a NIC with TLS offload (`TlsTxDevice`).
 - Pool: no background reaper (a socket idle > 15 s is dropped when reached, a full origin evicts its oldest). DNS: full wipe when full, no negative cache, no coalescing.
 - PGO/BOLT, `panic=abort` (rejected: a panic would kill the whole shard), `target-cpu=native` outside Docker.
 
