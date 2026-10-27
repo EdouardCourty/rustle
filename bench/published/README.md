@@ -15,7 +15,7 @@ Indexes (one line per run: `<proxy> <mode> <path to its results.txt>`), in `2026
 | `campaign-20261028-215104.txt` | rustle with kTLS (chapter 5) |
 | `campaign-mc-n1.txt` … `campaign-mc-n8.txt` | multi-core curve, `http-1kb`, n = 1, 2, 4, 8 proxy cores (chapter 6) |
 
-Each run is `runs/<proxy>[-tls|-tlsfull|-h2][-ws]/remote-auth-on/<timestamp>/results.txt`: the run's parameters on the first line, then one `RESULT` line per test and connection level (requests per second, latencies, proxy CPU, memory, TCP counters, saturation flags). Only the runs the indexes point to are kept; runs that were stopped by an incident and re-run are described in `RESULTS.md`.
+Each run is `runs/<proxy>[-tls|-tlsfull|-h2][-ws]/remote-auth-on/<timestamp>/results.txt`: the run's parameters on the first line, then one `RESULT` line per test and connection level (requests per second, latencies, proxy CPU, memory, TCP counters, saturation flags). Only the runs the indexes point to are kept.
 
 Rebuild the tables and the validity check from the repository root:
 

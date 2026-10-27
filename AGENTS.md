@@ -68,7 +68,7 @@ bench/
   preflight.sh, remote/                    bootstrap.sh (prepare a machine), probe.sh + preflight.sh (compare the three machines, measure links, results/preflight-<ts>.txt), apply-proxy-host.sh (APPLY=1: NIC interrupts and hyperthread siblings off the proxy cores)
   REMOTE.md                                three-machine setup: sizing, sysctls, validity checks (`gen_saturated`)
   tools/charts.py                          SVG charts for the README from a campaign index → docs/benchmarks/ (`make charts`)
-  RESULTS.md                               published summary and measurement history
+  RESULTS.md                               published results
   published/                               raw results of the published campaigns (curated copy of the runs the indexes point to, one folder per campaign; `results/` stays gitignored)
   results/                                 raw outputs (gitignored)
 ```
@@ -135,7 +135,7 @@ Optional features: `jemalloc`, `mimalloc` (mutually exclusive; default = glibc m
 
 ## Benchmarks — rules
 
-- **Protocol**: warmup in a separate run (`--warmup-only`) before sampling → numbers ~6–8 % lower than campaigns run before this protocol, do not compare with them. Per-run netns TCP counters: `segs_out_per_run`, `active_opens_per_run` (pool churn), `retrans_per_run`, `delayed_acks_per_run`, `listen_overflows`, `listen_drops`. `flood-128` outside the matrix (`BENCH_ONLY`): beyond the kernel budget for 1 MB pipes.
+- **Protocol**: warmup in a separate run (`--warmup-only`) before sampling. Per-run netns TCP counters: `segs_out_per_run`, `active_opens_per_run` (pool churn), `retrans_per_run`, `delayed_acks_per_run`, `listen_overflows`, `listen_drops`. `flood-128` outside the matrix (`BENCH_ONLY`): beyond the kernel budget for 1 MB pipes.
 - A/B: alternate base/variant (2–3 passes), never a variant alone; change nothing in the repo during an A/B (the image is rebuilt on every run).
 - Reference seed **`2004113323`**. Shuffled test order (LCG), proxy restarted before each test. Noise ±3–5 %: below that, no conclusion.
 - Tests: http-1kb (64 conns), http-10kb (16), http-1mb (16), http-10mb (8), http-1kb-short (no keep-alive), flood-8, hold 1k/5k/10k/25k.
@@ -152,7 +152,7 @@ Optional features: `jemalloc`, `mimalloc` (mutually exclusive; default = glibc m
 - **TLS parity**: the generator offers AES-128-GCM first and keeps an unbounded ticket store; every TLS RESULT carries `tls_negotiated` and `tls_resumed`; the campaign runs the short TLS test with (`tls`) and without (`tlsfull`, `TLS_RESUME=0`) resumption; `tools/validity.py` flags differing ciphers and unexpected resumption.
 - **Sweep + saturation**: every load test runs at several `--conns` levels (`sweep_levels` in matrix.sh); `campaign-table.py` / `charts.py` keep the best clean level and show `@conns`. `proxy_util`, `origin_util`, `sink_util` and the `proxy_unsaturated` / `*_saturated` flags say whether the harness reached the limit: a best level flagged unsaturated is not a result. Measured: 3proxy needs ~1000 connections to fill a core, rustle collapsed above ~500 until the pool caps were raised.
 - **Run rules** (see `bench/FAIRNESS.md`): `run-remote.sh` needs `PROXY_CPUS` and a matching `WORKERS`; `check_valid` (matrix.sh) marks a run INVALID (exit 3) on any `err_kinds` or a hold with fewer tunnels than asked; the generator validates body sizes. The `auth=off` rustle config really has no key.
-- **Fairness (non-negotiable)**: every competitor on its latest stable release with the tuning its own docs recommend, each choice A/B-tested and recorded in `bench/FAIRNESS.md` (3proxy needs `-osTCP_NODELAY -ocTCP_NODELAY`: without it the old "×9.5 at 1 KB" was a Nagle + delayed-ACK artifact, not 3proxy's speed). Never publish a number against a default-config competitor; when a version or setting changes, update FAIRNESS.md and re-run the whole campaign. rustle's bench binary is the shipped release build (no `target-cpu=native`); `SOCK_BUF=0` runs it on kernel autotuning like the competitors that have no buffer option.
+- **Fairness (non-negotiable)**: every competitor at the version pinned in `bench/FAIRNESS.md` with the tuning its own docs recommend, each choice A/B-tested and recorded in `bench/FAIRNESS.md` (3proxy needs `-osTCP_NODELAY -ocTCP_NODELAY`: without them it sits in Nagle + delayed ACK, which measures a missing option, not 3proxy). Never publish a number against a default-config competitor; when a version or setting changes, update FAIRNESS.md and re-run the whole campaign. rustle's bench binary is the shipped release build (no `target-cpu=native`); `SOCK_BUF=0` runs it on kernel autotuning like the competitors that have no buffer option.
 - 1 KB is limited by harness latency (~15k rps); the proxy alone is estimated at 21–24k rps (~42–47 µs/req).
 - Do not compare numbers across bench protocol changes.
 - Multi-core: use the three-machine setup (`bench/REMOTE.md`, `run-remote.sh`): a result is valid only if the generator is not saturated. Measured up to 8 proxy cores at 1 KB (`bench/RESULTS.md`).
@@ -169,13 +169,13 @@ WebSocket matrix (`MATRIX=ws`, `make bench-ws P=<proxy>`, opt-in so the default 
 - Commits: see [Commits](#commits). Every performance claim is gated by a fixed-seed matrix.
 - Test layout (Rust standard): unit tests stay inline at the bottom of the file (`#[cfg(test)] mod tests { use super::*; … }`) so they see private items. When that block passes ~300 lines, move it to `<module>/tests.rs` (or `<module>/tests/` split by feature, shared helpers in `tests/mod.rs`) and keep `#[cfg(test)] mod tests;` in the parent, as `server/` does. No crate-level `tests/` directory (the crate is a binary, no `[lib]`): black-box tests live in `e2e/`.
 - Tests: `make check` (quick e2e included) before every commit, full `make e2e` before every release and after any proxy change (relay, pipeline, policy, TLS). New feature = new scenario in `e2e/src/suites/<feature>.rs` (and in the matrix when it depends on a config).
-- No internal milestone or review labels in code comments: history belongs in commits and `bench/RESULTS.md`.
+- No internal milestone or review labels in code comments: history belongs in commits.
 - `unsafe` confined to libc/fd (a `SAFETY` comment is expected on every new block): `relay/splice.rs` (pipes, splice, dup), `server/mod.rs` (setsockopt, CPU affinity, malloc_trim), `ktls_offload.rs` (TCP_ULP, SOL_TLS, sendmsg close_notify), `stream.rs` (ReadAhead: set_len after the read), `http/request.rs::span_of` (`offset_from`).
 - Errors: static responses (`&[u8]` 400/407/413/431/502/504), I/O errors mostly ignored (`let _ =`), `anyhow` only at startup.
 
 ## Commits
 
-Format, checked against the current history: `type(scope): description`, **subject only** (no body).
+Format: `type(scope): description`, **subject only** (no body).
 - type ∈ feat|fix|perf|refactor|docs|test|chore|ci|build; scope optional but usual (cli, relay, tls, h2, server, proxy, bench, config, policy, e2e, install, platform, ci, upstream, log, security…).
 - Lowercase, imperative, no trailing period, ~72 characters max, English. E.g. `perf(relay): per-shard pipe pool for splice`, `fix(ci): compare accepted socket buffers with the listener's`.
 - **Never** add `Co-Authored-By` or any AI attribution trailer or "Generated with" line, on commits or PRs. This overrides any tool default.
@@ -184,14 +184,14 @@ Format, checked against the current history: `type(scope): description`, **subje
 
 ## Invariants — do not break
 
-1. **Zero-alloc hot path**: reuse `buf`, `resp_buf`, `rewrite_buf`, `origin_key` (connection-local), pipes through the shard pool. No per-request `setsockopt` (a past regression: per-request `set_nodelay`).
+1. **Zero-alloc hot path**: reuse `buf`, `resp_buf`, `rewrite_buf`, `origin_key` (connection-local), pipes through the shard pool. No per-request `setsockopt` (including `set_nodelay`).
 2. **`RequestHead` = Spans into `buf`**: `buf.clear()`, `take`, a realloc between parse and use invalidate them. `span_of` assumes httparse returns sub-slices of the same buffer.
 3. **splice `dir()`**: always drain the pipe when it holds data before parking on `src.readable()` (deadlock otherwise). On the HTTP path, `dup`ed fds share the file description: EOF must not half-close the client.
 4. **Retry**: idempotent + replayable body only. Do not widen it. Covered by e2e `http/retry/*`.
-5. Pool: accept only a complete, keep-alive, framed response with no over-read. The per-origin cap must stay above the expected concurrency per origin: at 1024 concurrent connections a 256 cap collapsed throughput 25× (connection churn, 502s).
-6. An epoll state-machine rewrite was tried and abandoned (same CPU/req as Tokio, worse rps). Do not return to it without new data.
+5. Pool: accept only a complete, keep-alive, framed response with no over-read. The per-origin cap must stay above the expected concurrency per origin: at 1024 concurrent connections a 256 cap collapses throughput 25× (connection churn, 502s).
+6. Do not replace Tokio with a hand-written epoll state machine: measured the same CPU/req as Tokio and worse rps. Revisit only with new data.
 7. Gains < 5 % = noise. Every performance claim goes through the fixed-seed matrix.
-8. io_uring (monoio prototype, removed from the repo — recoverable at commit `a2b11e3`): ±8 % depending on size, no net gain on 1 core; kTLS: opt-in, saves 5–20 % RAM but is slower than rustls on every throughput test (software kernel TLS, 2026-10-28). Do not change these decisions without a new measurement (NIC TLS offload, multi-core TLS).
+8. io_uring (monoio prototype): ±8 % depending on size, no net gain on 1 core; kTLS: opt-in, saves 5–20 % RAM but is slower than rustls on every throughput test (software kernel TLS, 2026-10-28). Do not change these decisions without a new measurement (NIC TLS offload, multi-core TLS).
 
 ## Known state
 
@@ -201,7 +201,7 @@ Format, checked against the current history: `type(scope): description`, **subje
 - `make check` green: fmt, clippy `-D warnings` (workspace, e2e included), `cargo test -p rustle` 75/75 (unit + in-process end-to-end), e2e `--quick` 68 scenarios. `make e2e` on macOS: 523 OK + 26 SKIP (Linux-only paths) out of 549; `robustness/huge-request-line` flaked once under full parallel load (passes alone), to watch.
 - Implemented: HTTP/1.1 + CONNECT, HTTPS proxy (TLS, rustls), HTTP/2, SOCKS5 (TCP + UDP), shared-nothing shards with `SO_REUSEPORT` and optional core pinning, splice relay, chunked uploads, policy (destinations, client allowlist, bans, anti-slowloris), access log, opt-in kTLS, `rustle` CLI (init/check/status/reload/service/update/uninstall), runtime reload (control socket + SIGHUP), WebSocket upgrades (`http.allow_websocket`), `curl | sh` installer, black-box e2e suite.
 - Reference campaign: 2026-10-28, three Scaleway Elastic Metal servers (generator and proxy EM-I320E, origin EM-I220E, 25 Gbit/s private network), 1 proxy core, seed `2004113323`. Raw runs committed in `bench/published/2026-10-28/` (indexes in `runs/`, working copies in the gitignored `bench/results/`): `campaign-20261028-235500.txt` (plain, TLS, TLS full handshake, h2), `campaign-ws-20261028-214800.txt` (WebSocket), `campaign-20261028-215104.txt` (rustle + kTLS), `campaign-mc-n{1,2,4,8}.txt` (multi-core curve), preflight `preflight-20261028-142835.txt`. The README charts and table (`make charts`) and `bench/RESULTS.md` come from them. Not measured: tunnel throughput beyond the 23.5 Gbit/s link (single-host phase B, `bench/RUNBOOK.md`), TLS/h2/tunnels on several cores, NIC TLS offload.
-- Bench scripting notes: a competitor step can stop at start-up (`container … is not running`, seen on gost, not understood: re-run the step alone); a driving workstation that sleeps hangs the SSH sessions (use `caffeinate -s -i`); `SWEEP_OVERRIDE` sets the connection levels (multi-core curve).
+- Bench scripting notes: a competitor step can stop at start-up (`container … is not running`): re-run the step alone; a driving workstation that sleeps hangs the SSH sessions (use `caffeinate -s -i`); `SWEEP_OVERRIDE` sets the connection levels (multi-core curve).
 - The bench (static origin, Content-Length) exercises neither chunked, SOCKS5 nor uploads: covered by the tests and the e2e suite.
 - e2e suite: one expected behavior = one scenario. Bug found → first a scenario that reproduces it (it must fail), then the fix.
 

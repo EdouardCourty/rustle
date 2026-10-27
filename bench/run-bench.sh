@@ -135,8 +135,8 @@ run_test() {
     sleep 0.5
     local tick0 tick1 median cpu_s_per_run up0 up1 up_cpu_s_per_run sk0 sk1 sink_cpu_s_per_run tcp0 tcp1
     # Warmup in its own generator run, before the counters are sampled:
-    # the proxy's CPU then covers the measured runs only (it used to
-    # include the warmup, amortized over REPEAT: ~+6 % on every figure).
+    # the proxy's CPU then covers the measured runs only (a warmup inside
+    # the measured runs would add ~6 % to every figure).
     docker compose --profile generator run --rm -T generator \
         --warmup-only "${GEN_ARGS[@]}" "$@" >/dev/null 2>&1 || true
     tick0=$(cpu_ticks)

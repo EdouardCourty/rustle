@@ -71,7 +71,7 @@ Reading the numbers:
 *   **HTTPS, HTTP/2 and WebSocket**: ahead of Squid and gost on every test (49,461 req/s at 1 KB over TLS against 13,509 for Squid; 33,451 over HTTP/2 against 5,231 for gost). TLS and h2 carry no `splice`, so throughput is lower than in plain HTTP; on HTTP/2 tunnels the lead over gost is small (8.8 against 7.8 Gbit/s).
 *   One campaign, one seed, noise ±3–5 %: differences below that are not conclusions. The workload is a static origin with `Content-Length` (no chunked bodies, uploads or SOCKS5): those are covered by the tests, not the bench.
 
-Full tables, TLS and HTTP/2 matrices, and the measurement history: [`bench/RESULTS.md`](bench/RESULTS.md). To reproduce (Docker, Linux):
+Full tables, the TLS, HTTP/2, WebSocket and multi-core matrices, and the raw data: [`bench/RESULTS.md`](bench/RESULTS.md). To reproduce (Docker, Linux):
 
 ```sh
 make bench P=rustle A=on      # one proxy (rustle|3proxy|squid|gost|tinyproxy)

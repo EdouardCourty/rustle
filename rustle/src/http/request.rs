@@ -17,8 +17,8 @@ pub enum HeadError {
 
 /// A byte range inside the buffer a head was parsed from. Plain indices —
 /// `RequestHead` owns no allocation and no borrow; consumers slice through
-/// the buffer (`span.slice(buf)`). Zero-alloc parsing (method, path,
-/// auth and host used to be heap Strings — 4-6 mallocs per request gone).
+/// the buffer (`span.slice(buf)`). Zero-alloc parsing: method, path, auth
+/// and host are spans, not heap Strings.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Span {
     pub start: usize,
