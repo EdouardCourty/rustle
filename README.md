@@ -165,7 +165,7 @@ A single TOML file: `rustle run [CONFIG]`, or looked up in `./config.toml`, `~/.
 | `pin_cores` | `false` | Pin shard *i* to CPU *i* and steer each connection to the shard of the CPU that received it (Linux) |
 | `admin_listen` | `"127.0.0.1:8181"` | `GET /health`, no auth; `""` disables it |
 | `control_socket` | `"auto"` | Unix socket (mode 0600) for `rustle reload`: `/run/rustle/rustle.sock` as root, else `$XDG_RUNTIME_DIR/rustle.sock`, else next to the user config; `""` disables it |
-| `socket_buffer_bytes` | `1048576` | `SO_SNDBUF`/`SO_RCVBUF` of relayed sockets; `0` = kernel autotuning (better for distant clients: a fixed 1 MB caps a 100 ms RTT link at ~80 Mbit/s) |
+| `socket_buffer_bytes` | `0` | `SO_SNDBUF`/`SO_RCVBUF` of relayed sockets; `0` = kernel autotuning. A fixed size (e.g. `1048576`) caps a 100 ms RTT link at ~80 Mbit/s and, on the loopback, can stall bulk flows for seconds |
 
 ### `[auth]`
 

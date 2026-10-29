@@ -15,7 +15,7 @@ Three bare-metal machines (Scaleway Elastic Metal, Paris, hourly billing) in one
 * Network: 25 Gbit/s Private Network (VLAN on the NIC), MTU 1500, `iperf3 -P 4`: **23.5 Gbit/s** generator → proxy and proxy → origin. Bulk and tunnel tests that reach ~22 Gbit/s are limited by this link, not by the proxy.
 * Software: Ubuntu 26.04.1 LTS, kernel 7.0.0-38-generic, Docker 29.1.3, governor `performance`, irqbalance off, identical sysctls on the three hosts (`bench/remote/bootstrap.sh`). Preflight (all three machines compared, links measured): `bench/results/preflight-20261028-142835.txt`, 0 differences.
 * Commit: servers on `7d1c143`; the driving checkout was `0a77316` (only the Mac-side `bench/preflight.sh` differs).
-* Protocol: auth on, 1 proxy core and 1 worker for every proxy, seed `2004113323` (shuffled test order, proxy restarted before each test), warmup run apart, median of 3 measured runs of 15 s, concurrency sweep per test (best clean level kept, `@conns`). Competitor versions and settings: `FAIRNESS.md`.
+* Protocol: auth on, 1 proxy core and 1 worker for every proxy (rustle with `socket_buffer_bytes = 1048576` set in its bench config; its shipped default is kernel autotuning), seed `2004113323` (shuffled test order, proxy restarted before each test), warmup run apart, median of 3 measured runs of 15 s, concurrency sweep per test (best clean level kept, `@conns`). Competitor versions and settings: `FAIRNESS.md`.
 * Date: 2026-10-28.
 * Raw data: every run behind the tables below is committed in [`published/2026-10-28/`](published/2026-10-28/) (indexes, `results.txt` of each run, preflight), with the commands to rebuild the tables.
 

@@ -7,13 +7,12 @@ use anyhow::Context;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::TcpStream;
 
-/// Kernel socket buffer size (`server.socket_buffer_bytes`, 0 = autotuning).
-/// One MB by default: the first in-flight burst before TCP autotuning
-/// catches up was throttled by the 16 KB default (10 MB responses were
-/// -11 % vs 3proxy). Applied best-effort on both sides of every proxied
-/// socket. Kernel memory is allocated on demand (skb) — an idle connection
-/// pays nothing. Process-wide: set once by `start`, read per upstream connect.
-static SOCK_BUF: AtomicUsize = AtomicUsize::new(1024 * 1024);
+/// Kernel socket buffer size (`server.socket_buffer_bytes`, 0 = autotuning,
+/// the default). A fixed size is applied best-effort on both sides of every
+/// proxied socket; kernel memory is allocated on demand (skb), so an idle
+/// connection pays nothing. Process-wide: set once by `start`, read per
+/// upstream connect.
+static SOCK_BUF: AtomicUsize = AtomicUsize::new(0);
 
 /// Records the configured buffer size; warns when the kernel caps it (the
 /// fixed size then both shrinks and disables autotuning: on a stock

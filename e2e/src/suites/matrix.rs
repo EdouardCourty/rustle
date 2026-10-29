@@ -129,9 +129,13 @@ fn variants() -> Vec<Variant> {
                 c.set("http", "upstream_keepalive", "false")
             })
         },
-        v("sockbuf-autotune", |c, _| {
-            c.set("server", "socket_buffer_bytes", "0")
-        }),
+        // The default is kernel autotuning; a fixed size is an explicit option.
+        Variant {
+            transports: &[T::H1(H1::Plain)],
+            ..v("sockbuf-fixed", |c, _| {
+                c.set("server", "socket_buffer_bytes", "1048576")
+            })
+        },
         Variant {
             transports: TLS_ONLY,
             ..v("ktls", |c, _| c.set("tls", "ktls", "true"))
