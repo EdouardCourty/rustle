@@ -46,14 +46,14 @@ def load(p):
             thr = float(kv["rps"]); el = float(kv["elapsed_s"])
             per = cpu / (thr * el) * 1e6 if thr else float("nan")
             if size >= 1024:
-                gb = float(kv["mbps"]) * el / 1024
+                gb = float(kv["mbps"]) * el / 1000  # mbps = 10^6 bytes/s: GB = 10^9 bytes, like the Gbps
                 thr = float(kv["mbps"])
                 cell = f"{float(kv['mbps']) * 8 / 1000:.1f} Gbps {cpu / gb * 1e3 if gb else float('nan'):.0f}ms/GB"
             else:
                 cell = f"{thr:,.0f} msg/s p99 {float(kv['p99_ms']):.2f}ms {per:.0f}µs"
         elif mode == "flood":
             name = "flood"; thr = float(kv["gbps"])
-            per = cpu / (float(kv["mb"]) / 1024) * 1e3 if float(kv["mb"]) else float("nan")
+            per = cpu / (float(kv["mb"]) / 1000) * 1e3 if float(kv["mb"]) else float("nan")  # mb = 10^6 bytes: GB = 10^9 bytes, like the Gbps
             cell = f"{thr:.1f} Gbps {per:.0f}ms/GB"
         else:
             name = "hold-" + kv["conns"]; thr = 0.0
