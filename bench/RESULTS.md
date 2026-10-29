@@ -17,6 +17,7 @@ Three bare-metal machines (Scaleway Elastic Metal, Paris, hourly billing) in one
 * Commit: servers on `7d1c143`; the driving checkout was `0a77316` (only the Mac-side `bench/preflight.sh` differs).
 * Protocol: auth on, 1 proxy core and 1 worker for every proxy (rustle with `socket_buffer_bytes = 1048576` set in its bench config; its shipped default is kernel autotuning), seed `2004113323` (shuffled test order, proxy restarted before each test), warmup run apart, median of 3 measured runs of 15 s, concurrency sweep per test (best clean level kept, `@conns`). Competitor versions and settings: `FAIRNESS.md`.
 * Date: 2026-10-28.
+* Units: memory is the peak RSS of the proxy (`VmHWM`) in MiB, written MB below; "ms/GB" is proxy CPU milliseconds per 10^9 bytes moved, GB being the decimal unit of the Gbit/s.
 * Raw data: every run behind the tables below is committed in [`published/2026-10-28/`](published/2026-10-28/) (indexes, `results.txt` of each run, preflight), with the commands to rebuild the tables.
 
 ## Chapter 1: plain HTTP proxy, 1 core
@@ -31,7 +32,7 @@ Campaign indexes `bench/results/campaign-20261028-143817.txt` (rustle, 3proxy, S
 | HTTP 1 MB, req/s | **2,624** (@16) | 1,784 (@64) | 353 (@16) | 199 (@256) | 1,046 (@64) |
 | HTTP 10 MB, req/s | **268** (@32, link-bound) | 191 (@8) | 33 (@8) | 21 (@32) | 145 (@32) |
 | Tunnels (flood), Gbit/s | **22.0** (@8, link-bound) | 15.7 (@8) | 13.6 (@8) | 1.8 (@32) | 13.2 (@32) |
-| Tunnels, proxy CPU per GB | **259 ms** | 524 ms | 605 ms | 4,684 ms | 623 ms |
+| Tunnels, proxy CPU per GB | **253 ms** | 511 ms | 591 ms | 4,574 ms | 609 ms |
 | RAM, 1,000 idle tunnels | 14 MB | 104 MB | 150 MB | 18 MB | 161 MB |
 | RAM, 5,000 idle tunnels | 40 MB | 499 MB | 275 MB | 61 MB | 653 MB |
 | RAM, 10,000 idle tunnels | 54 MB | 992 MB | 432 MB | 115 MB | 1,243 MB |
@@ -43,9 +44,9 @@ Reading:
 
 * Small requests are where the gap is large: 2.6× the next proxy (3proxy) at 1 KB, 2.1× at 10 KB, 3.6× without keep-alive (against Squid; 5.4× against 3proxy).
 * Bulk transfers: rustle leads, but at 1 MB and especially 10 MB and in tunnels it reaches the link, so the measured margin is a lower bound.
-* Tunnel CPU cost: rustle spends about half the CPU per GB of 3proxy (259 vs 524 ms), measured at the link ceiling for rustle and at the CPU ceiling for the others.
+* Tunnel CPU cost: rustle spends about half the CPU per GB of 3proxy (253 vs 511 ms), measured at the link ceiling for rustle and at the CPU ceiling for the others.
 * Memory: at 25,000 idle tunnels the next best is Tinyproxy (274 MB), 2.9× rustle's 95 MB; the others are 10× to 34× larger.
-* Tinyproxy has no upstream keep-alive (documented limitation), gost and 3proxy needed 256 to 1,024 connections to fill a core at 1 KB (hence the sweep).
+* Tinyproxy has no upstream keep-alive (documented limitation), 3proxy needed 256 connections to fill a core at 1 KB (it used 19 % of a core at 64 and 99 % at 1,024 in the A/B of [`FAIRNESS.md`](FAIRNESS.md)); the other proxies peak at 64 (hence the sweep).
 
 Caveats: one campaign, one seed, 3 runs per point; noise is ±3–5 %, differences below that are not conclusions. The workload is a static origin with `Content-Length` (no chunked, no uploads, no SOCKS5). 1 core in plain HTTP only: TLS, HTTP/2, WebSocket and multi-core are separate chapters.
 
@@ -60,7 +61,7 @@ Index `campaign-20261028-203600.txt` (merged chapters 1 to 3). TLS 1.3, AES-128-
 | 1 KB, no keep-alive, req/s | **6,119** (163 µs, @64) | 2,047 (489 µs, @64) | 2,516 (397 µs, @64) |
 | HTTP 1 MB, req/s | **1,297** (@16) | 277 (@16) | 615 (@64) |
 | HTTP 10 MB, req/s | **142** (@32) | 27 (@8) | 83 (@128) |
-| Tunnels (flood), Gbit/s | **12.0** (688 ms/GB, @32) | 4.9 (1,688 ms/GB, @8) | 7.1 (1,172 ms/GB, @32) |
+| Tunnels (flood), Gbit/s | **12.0** (672 ms/GB, @32) | 4.9 (1,649 ms/GB, @8) | 7.1 (1,145 ms/GB, @32) |
 | RAM, 1,000 idle tunnels | 57 MB | 181 MB | 240 MB |
 | RAM, 5,000 idle tunnels | 253 MB | 432 MB | 903 MB |
 | RAM, 10,000 idle tunnels | 466 MB | 760 MB | 2,110 MB |
@@ -68,7 +69,7 @@ Index `campaign-20261028-203600.txt` (merged chapters 1 to 3). TLS 1.3, AES-128-
 
 TLS without session resumption (every connection a full handshake, `tlsfull`, 1 KB, no keep-alive, req/s): rustle **5,458** (183 µs), gost 2,246 (445 µs), Squid 1,922 (521 µs).
 
-Reading: rustle keeps its lead over Squid and gost in TLS (3.7× Squid and 19.6× gost on 1 KB keep-alive, 2.4× to 2.8× on the full handshake), but the absolute figures fall well below plain HTTP (12.0 against 22.0 Gbit/s on tunnels, 1,297 against 2,624 req/s at 1 MB): without splice the data crosses user space. The memory advantage narrows too: about 32 KB per TLS tunnel (rustls buffers) against about 4 KB in plain HTTP, 810 MB against 2.6 GB (Squid) and 4.1 GB (gost) at 25,000 tunnels. gost does the same 2.5k req/s with or without keep-alive, so its overhead is per request, not per connection. No client error, every tunnel opened, harness not saturated (`validity.py` clean for TLS, tlsfull and h2).
+Reading: rustle keeps its lead over Squid and gost in TLS (3.7× Squid and 19.6× gost on 1 KB keep-alive, 2.4× to 2.8× on the full handshake), but the absolute figures fall well below plain HTTP (12.0 against 22.0 Gbit/s on tunnels, 1,297 against 2,624 req/s at 1 MB): without splice the data crosses user space. The memory advantage narrows too: about 32 KB per TLS tunnel (rustls buffers) against about 4 KB in plain HTTP, 810 MB against 2.5 GB (Squid) and 4.0 GB (gost) at 25,000 tunnels. gost does the same 2.5k req/s with or without keep-alive, so its overhead is per request, not per connection. No client error, every tunnel opened, harness not saturated (`validity.py` clean for TLS, tlsfull and h2).
 
 ## Chapter 3: HTTP/2 to the proxy, 1 core
 
@@ -81,13 +82,13 @@ Only rustle and gost accept HTTP/2 from the client (ALPN `h2`); 3proxy, Squid an
 | 1 KB, no keep-alive, req/s | **4,974** (201 µs, @64) | 2,187 (457 µs, @64) |
 | HTTP 1 MB, req/s | **860** (@16) | 447 (@16) |
 | HTTP 10 MB, req/s | **88** (@8) | 50 (@8) |
-| Tunnels (flood), Gbit/s | **8.8** (933 ms/GB, @8) | 7.8 (1,046 ms/GB, @8) |
+| Tunnels (flood), Gbit/s | **8.8** (911 ms/GB, @8) | 7.8 (1,022 ms/GB, @8) |
 | RAM, 1,000 idle tunnels | 70 MB | 225 MB |
 | RAM, 5,000 idle tunnels | 330 MB | 1,245 MB |
 | RAM, 10,000 idle tunnels | 705 MB | 2,639 MB |
 | RAM, 25,000 idle tunnels | **1,263 MB** | 5,884 MB |
 
-Reading: rustle's h2 path is about 32 % slower than its own TLS + HTTP/1.1 path on 1 KB (33.5k against 49.5k req/s) and 34 % at 1 MB: framing and one `Bytes` copy per chunk (known, in the backlog). It is still 6.4× gost on 1 KB and 4.7× on 25,000 tunnels in memory. On tunnels the two are close (8.8 against 7.8 Gbit/s, +13 %): above the ±3–5 % noise, but from a single campaign, so a small lead rather than a firm one.
+Reading: rustle's h2 path is about 32 % slower than its own TLS + HTTP/1.1 path on 1 KB (33.5k against 49.5k req/s) and 34 % at 1 MB: framing and one `Bytes` copy per chunk (known, in the backlog). It is still 6.4× gost on 1 KB and 4.7× on 25,000 tunnels in memory. On tunnels the two are close (8.8 against 7.8 Gbit/s, +12 %): above the ±3–5 % noise, but from a single campaign, so a small lead rather than a firm one.
 
 ## Chapter 4: WebSocket through the proxy, 1 core
 
@@ -98,7 +99,7 @@ Plain (WebSocket upgrade on the HTTP proxy port):
 | Test | rustle | Squid | gost | 3proxy | Tinyproxy |
 |---|---|---|---|---|---|
 | 64 B messages, msg/s | **58,506** (p99 1.29 ms, 17 µs/msg) | 43,710 (1.49 ms, 23 µs) | 46,808 (2.57 ms, 21 µs) | 33,136 (3.16 ms, 30 µs) | unsupported |
-| 64 KB frames, Gbit/s | **11.6** (666 ms/GB) | 6.6 (1,240 ms/GB) | 6.9 (1,182 ms/GB) | 7.9 (1,031 ms/GB) | unsupported |
+| 64 KB frames, Gbit/s | **11.6** (650 ms/GB) | 6.6 (1,211 ms/GB) | 6.9 (1,154 ms/GB) | 7.9 (1,007 ms/GB) | unsupported |
 | One connection per exchange, msg/s | **10,740** (p99 6.7 ms, 93 µs) | 4,879 (13.2 ms, 205 µs) | 3,726 (29.1 ms, 268 µs) | 251 (402.7 ms, 3,972 µs) | unsupported |
 
 Through the HTTPS proxy (TLS):
@@ -106,7 +107,7 @@ Through the HTTPS proxy (TLS):
 | Test | rustle | gost | Squid |
 |---|---|---|---|
 | 64 B messages, msg/s | **56,955** (p99 1.31 ms) | 44,426 (2.70 ms) | 36,786 (1.77 ms) |
-| 64 KB frames, Gbit/s | **5.8** (1,411 ms/GB) | 3.8 (2,161 ms/GB) | 2.4 (3,458 ms/GB) |
+| 64 KB frames, Gbit/s | **5.8** (1,378 ms/GB) | 3.8 (2,110 ms/GB) | 2.4 (3,377 ms/GB) |
 | One connection per exchange, msg/s | **4,462** (p99 15.1 ms) | 2,190 (44.0 ms) | 1,755 (37.0 ms) |
 
 Reading: rustle leads in every WebSocket test: 1.3× to 1.8× on small messages, 1.5× to 1.8× on 64 KB frames (plain), and 2.2× to 2.9× (43× for 3proxy) when the connection itself is the cost. In TLS the margins are similar (1.3× to 1.6× small messages, 1.5× to 2.4× large frames). Tinyproxy removes the `Upgrade` header (answered 426): it does not support WebSocket and is listed as unsupported, not as zero. 3proxy supports it but spends about 4 ms of CPU per new connection. Validity: no client error, no saturated origin or sink, every point at the proxy's CPU limit (`validity.py` flags only Tinyproxy's unsupported points).
@@ -124,7 +125,7 @@ Squid is configured to pass WebSocket upgrades (`http_upgrade_request_protocols`
 | 1 KB, no keep-alive, req/s | 6,119 | 5,158 | −16 % |
 | HTTP 1 MB, req/s | 1,297 | 896 | −31 % |
 | HTTP 10 MB, req/s | 142 | 89 | −37 % |
-| Tunnels, Gbit/s | 12.0 (688 ms/GB) | 6.9 (1,183 ms/GB) | −42 % (+72 % CPU per GB) |
+| Tunnels, Gbit/s | 12.0 (672 ms/GB) | 6.9 (1,155 ms/GB) | −43 % (+72 % CPU per GB) |
 | RAM, 1,000 idle tunnels | 57 MB | 54 MB | −5 % |
 | RAM, 5,000 idle tunnels | 253 MB | 228 MB | −10 % |
 | RAM, 10,000 idle tunnels | 466 MB | 372 MB | −20 % |

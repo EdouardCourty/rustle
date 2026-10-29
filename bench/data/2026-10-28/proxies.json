@@ -37,7 +37,7 @@
         "websocket": true
       },
       "characteristics": [
-        "Needs about 256 to 1,024 connections to fill a core at 1 KB, hence the concurrency sweep.",
+        "Its best level at 1 KB is 256 connections: it used 19 % of a core at 64 connections and 99 % at 1,024 in the A/B of FAIRNESS.md, hence the concurrency sweep.",
         "Without any socket option it sits in Nagle and a 40 ms delayed ACK (about 1.5k req/s at 1 KB in the A/B): the default config measures a missing documented option, which is why the options above are set.",
         "Supports WebSocket upgrades but spends about 4 ms of CPU per new connection.",
         "No TLS or HTTP/2 listener.",
@@ -89,7 +89,6 @@
       },
       "characteristics": [
         "Reopens an upstream connection for almost every proxied request (its HTTP handler disables keep-alive by default).",
-        "Needs 256 to 1,024 connections to fill a core at 1 KB, hence the concurrency sweep.",
         "HTTP/2 is a dedicated listener, not ALPN on the TLS port.",
         "Gives the same 2.5k req/s over TLS with or without keep-alive: its overhead is per request, not per connection."
       ],

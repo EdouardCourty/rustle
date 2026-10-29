@@ -97,9 +97,10 @@ pub struct TlsConfig {
     /// Offer HTTP/2 through ALPN (clients that do not ask keep HTTP/1.1).
     pub http2: bool,
     /// Kernel TLS after the handshake (when the kernel supports it, probed
-    /// at startup). Off by default: measured faster for CONNECT tunnels
-    /// and lighter in memory, slower for HTTP bulk and per connection
-    /// (bench/RESULTS.md, M17).
+    /// at startup). Off by default: software kernel TLS saves 5 % to 20 % of
+    /// memory but is slower than rustls on every throughput test, -12 % to
+    /// -43 % (bench/RESULTS.md, kTLS chapter: campaign of 2026-10-28, 1 core,
+    /// no NIC TLS offload).
     pub ktls: bool,
 }
 

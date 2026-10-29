@@ -90,11 +90,13 @@ key = "/etc/rustle/key.pem"
 handshake_timeout = "10s"
 # Offer HTTP/2 through ALPN (CONNECT and plain requests as h2 streams).
 http2 = true
-# Kernel TLS: after the rustls handshake, the session keys go to the kernel
-# (module `tls`, probed at startup; userspace TLS otherwise). Measured: CONNECT
-# tunnels +13 % throughput and -30 % memory at 25k tunnels, but HTTP bulk
-# -37 % (1 MB) and +15 % CPU per new connection. Worth it for a mostly-HTTPS
-# (CONNECT) workload with many tunnels.
+# Kernel TLS (Linux, opt-in, off by default). After the rustls handshake, the
+# session keys go to the kernel (module `tls`, probed at startup; userspace TLS
+# otherwise). Software kernel TLS saves memory (5 % to 20 % less RAM with 1,000
+# to 25,000 TLS tunnels) but is slower than rustls on every throughput test:
+# -12 % to -37 % requests per second from 1 KB to 10 MB responses and -43 % on
+# CONNECT tunnels (campaign of 2026-10-28, 1 core, no NIC TLS offload, see
+# bench/RESULTS.md). Leave it off unless memory matters more than throughput.
 ktls = false
 
 [filter]

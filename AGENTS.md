@@ -70,7 +70,7 @@ bench/
   RUNBOOK.md                               the final-benchmark procedure, step by step (phase A: three machines, phase B: tunnels on the Mac); start here
   preflight.sh, remote/                    bootstrap.sh (prepare a machine), probe.sh + preflight.sh (compare the three machines, measure links, results/preflight-<ts>.txt), apply-proxy-host.sh (APPLY=1: NIC interrupts and hyperthread siblings off the proxy cores)
   REMOTE.md                                three-machine setup: sizing, sysctls, validity checks (`gen_saturated`)
-  tools/site-data.py                       data/<campaign>/benchmarks.json from the campaign indexes (`--write`), `--check` for staleness and schema validity of every data file (`make data-check`); `tools/schemalite.py` = the stdlib JSON Schema subset validator it uses
+  tools/site-data.py                       data/<campaign>/benchmarks.json from the campaign indexes (`--write`), `--check` for staleness and schema validity of every data file (`make data-check`); the files are validated against their JSON Schemas by `make schema-check` (check-jsonschema, version pinned in the Makefile)
   tools/charts.py                          SVG charts for the README from a campaign index → docs/benchmarks/ (`make charts`)
   RESULTS.md                               published results
   data/                                    structured copy of the published numbers, read by the website at the release tag, one folder per campaign + `index.json` + `schema/` (JSON Schemas); see data/README.md. `<id>/benchmarks.json` generated (`tools/site-data.py`, `make data`), `campaign.json` + `proxies.json` by hand; `make data-check` fails when stale or off-schema
@@ -93,7 +93,7 @@ bench/
 - **Uploads**: `Transfer-Encoding: chunked` accepted (alone, without Content-Length, not in HTTP/1.0 → 400 otherwise) and relayed verbatim (staging = `rewrite_buf`), budget enforced while relaying (→ 413), bad framing → 400, bytes after the final chunk → close after the response; not replayable. A Content-Length body cut by the client aborts both sides at once. In h2, a body without Content-Length goes upstream as chunked.
 - **Pipelined client requests**: the first one is answered, then the connection closes (the client retries the rest, RFC 9112 §9.3.2).
 - **Limits**: `max_request_body_bytes` → 413, `max_response_body_bytes` → 502 (declared CL) or cut (unknown).
-- **Measured syscalls**: ~2 recv + 2 send / request, epoll_ctl ≈ 0. NODELAY 1×/socket, QUICKACK 1×/connection, SO_SNDBUF/RCVBUF 1 MB, 1 MB pipes.
+- **Measured syscalls**: ~2 recv + 2 send / request, epoll_ctl ≈ 0. NODELAY 1×/socket, QUICKACK 1×/connection, SO_SNDBUF/RCVBUF 1 MB (bench config; the shipped default is kernel autotuning), 1 MB pipes. Counted with `strace` on the single-host dev setup, not part of the published campaign.
 
 ## Config (TOML, the only input for the proxy itself; reloadable at runtime, see Reload)
 
@@ -115,7 +115,7 @@ CLI (clap derive: `rustle/src/cli.rs` = `Cli` + `Command`; one file per command 
 | `http.max_request_body_bytes` / `max_response_body_bytes` | 0 = unlimited |
 | `http.allow_websocket` | true (`Upgrade: websocket` on the plain-HTTP path; false → 403; CONNECT/wss untouched) |
 | `tls.listen` / `cert` / `key` | `""` (off) / PEM |
-| `tls.handshake_timeout` / `http2` / `ktls` | 10s / true (ALPN h2) / **false** (opt-in: software kernel TLS, 5–20 % less RAM but −12 % to −42 % throughput on the 2026-10-28 campaign) |
+| `tls.handshake_timeout` / `http2` / `ktls` | 10s / true (ALPN h2) / **false** (opt-in: software kernel TLS, 5–20 % less RAM but −12 % to −43 % throughput on the 2026-10-28 campaign, no NIC TLS offload) |
 | `auth.allow_clients` | [] (empty = everyone; CIDR, closed at accept on every listener) |
 | `auth.max_failures` / `failure_window` / `ban_duration` | 5 / 1m / 15m (0 = off; missing credentials do not count) |
 | `timeouts.request_head` | 10s (total head / SOCKS5 handshake, anti-slowloris) |
@@ -130,6 +130,7 @@ CLI (clap derive: `rustle/src/cli.rs` = `Cli` + `Command`; one file per command 
 ```bash
 cargo build --release -p rustle         # release profile, no target-cpu (the bench image builds the same binary)
 cargo test -p rustle                    # inline tests (#[cfg(test)]), including in-process end-to-end ones in server/tests/
+make schema-check                        # website data files vs their JSON Schemas (check-jsonschema, pinned in the Makefile); part of `make data-check` and `make check`
 make check                               # fmt + clippy -D warnings + tests + website data check + e2e --quick (~20 s) — before every commit
 make e2e [F="filter"]                    # full e2e suite (~2 min, ~530 scenarios) — before every release or large change
 cargo run --profile e2e -p e2e -- --list # scenarios; --keep keeps the directories (config, logs)
@@ -149,17 +150,17 @@ Optional features: `jemalloc`, `mimalloc` (mutually exclusive; default = glibc m
 - Transports: `PROXY_TLS=1` (HTTPS proxy) / `PROXY_H2=1` (HTTP/2 over TLS) → results under `results/<proxy>-tls|-h2/`. TLS: rustle, Squid, gost. h2: rustle, gost (3proxy/Tinyproxy: plain only). Generator: `--proxy-tls`, `--proxy-h2` (1 h2 connection per conn, sequential requests; CONNECT = 1 stream on its own connection), certificate not verified but handshake signatures verified.
 - `KTLS=true|false` (rustle, TLS port), `SECCOMP=unconfined` (io_uring).
 - Multi-core: `PROXY_NCPU=<n>` (first n CPUs to the proxy, the rest to the harness) or explicit `PROXY_CPU`/`BENCH_CPU`; `WORKERS=<n>`; `GEN_THREADS` = generator threads (size them on BENCH_CPU). The results.txt header = the run's parameters.
-- Harness threads: `GEN_THREADS`, `UP_THREADS` (origin), `SINK_THREADS` (compose reads them). Measured on 11 CPUs (proxy 0..n-1, harness 8-10): old harness (nginx + multi-thread generator) = 15.5 µs/req at 1 KB; new = 7 µs/req → rustle 1 KB 264k → 330k rps (2 cores), 251k → 358k (4 cores). flood needs `GEN_THREADS=1 SINK_THREADS=2` on 3 harness cores (109 Gbps at 4 proxy cores; 1 sink thread caps ~75).
+- Harness threads: `GEN_THREADS`, `UP_THREADS` (origin), `SINK_THREADS` (compose reads them). Measured on 11 CPUs of the single-host dev setup (proxy 0..n-1, harness 8-10): old harness (nginx + multi-thread generator) = 15.5 µs/req at 1 KB; new = 7 µs/req → rustle 1 KB 264k → 330k rps (2 cores), 251k → 358k (4 cores). flood needs `GEN_THREADS=1 SINK_THREADS=2` on 3 harness cores (109 Gbps at 4 proxy cores; 1 sink thread caps ~75).
 - Generator: honors `Connection: close`/HTTP/1.0 (reconnect) and replays a GET once on a reused connection closed before any byte (RFC 9112 §9.3.1) → `reconnects` (Tinyproxy: 1 per request, it closes without announcing it).
 - Metric to track: **proxy CPU per request** (`cpu_s_per_run / (rps × duration)`), throughput being capped by the harness. Noise between two identical matrices: up to ±7 % CPU, ±15 % on flood.
-- Measured split (1kb): user ≈ 9 µs/req, sys ≈ 35 µs/req. Syscalls at the floor. Profiling: `dut/rustle/Dockerfile.debug` image (strace). No perf on the box (paranoid=4).
+- Measured split (1kb, single-host dev setup, not the published campaign): user ≈ 9 µs/req, sys ≈ 35 µs/req. Syscalls at the floor. Profiling: `dut/rustle/Dockerfile.debug` image (strace). No perf on the box (paranoid=4).
 - `ALLOCATOR="--features mimalloc" ./run-bench.sh …` for an allocator A/B (retested: neutral). **`err_kinds` must be empty.**
 - Do not build images in parallel (OOM on 4 GB). The harness shares 2 cores: ceiling ~23 µs/req on the generator+nginx side.
 - **TLS parity**: the generator offers AES-128-GCM first and keeps an unbounded ticket store; every TLS RESULT carries `tls_negotiated` and `tls_resumed`; the campaign runs the short TLS test with (`tls`) and without (`tlsfull`, `TLS_RESUME=0`) resumption; `tools/validity.py` flags differing ciphers and unexpected resumption.
 - **Sweep + saturation**: every load test runs at several `--conns` levels (`sweep_levels` in matrix.sh); `campaign-table.py` / `charts.py` keep the best clean level and show `@conns`. `proxy_util`, `origin_util`, `sink_util` and the `proxy_unsaturated` / `*_saturated` flags say whether the harness reached the limit: a best level flagged unsaturated is not a result. Measured: 3proxy needs ~1000 connections to fill a core, rustle collapsed above ~500 until the pool caps were raised.
 - **Run rules** (see `bench/FAIRNESS.md`): `run-remote.sh` needs `PROXY_CPUS` and a matching `WORKERS`; `check_valid` (matrix.sh) marks a run INVALID (exit 3) on any `err_kinds` or a hold with fewer tunnels than asked; the generator validates body sizes. The `auth=off` rustle config really has no key.
 - **Fairness (non-negotiable)**: every competitor at the version pinned in `bench/FAIRNESS.md` with the tuning its own docs recommend, each choice A/B-tested and recorded in `bench/FAIRNESS.md` (3proxy needs `-osTCP_NODELAY -ocTCP_NODELAY`: without them it sits in Nagle + delayed ACK, which measures a missing option, not 3proxy). Never publish a number against a default-config competitor; when a version or setting changes, update FAIRNESS.md and re-run the whole campaign. rustle's bench binary is the shipped release build (no `target-cpu=native`); `SOCK_BUF=0` runs it on kernel autotuning like the competitors that have no buffer option.
-- 1 KB is limited by harness latency (~15k rps); the proxy alone is estimated at 21–24k rps (~42–47 µs/req).
+- On the single-host dev setup (2 shared harness cores) 1 KB is limited by harness latency (~15k rps; the proxy alone is estimated at 21–24k rps, ~42–47 µs/req). The published three-machine campaign measures 55,258 req/s and 18 µs/req on one core: do not compare the two.
 - Do not compare numbers across bench protocol changes.
 - Multi-core: use the three-machine setup (`bench/REMOTE.md`, `run-remote.sh`): a result is valid only if the generator is not saturated. Measured up to 8 proxy cores at 1 KB (`bench/RESULTS.md`).
 - Never compile or edit `run-bench.sh` during a bench (shared CPU; bash rereads the running script).
@@ -218,7 +219,7 @@ Format: `type(scope): description`, **subject only** (no body).
 **Performance**
 - Multi-core: measured at 1 KB plain up to 8 cores (linear, 55k req/s per core). Still to measure: TLS, h2 and tunnels on several cores (needs more than a 25 Gbit/s link for tunnels), io_uring in that setting.
 - h2 path: slower than TLS+HTTP/1.1 on bulk (a `Bytes` copy per chunk, framing). h2 flood ahead of gost (4/16 MB windows), bound by the harness core.
-- kTLS: understand why software kTLS is slower than rustls (−37 % at 10 MB, −42 % on tunnels) and test a NIC with TLS offload (`TlsTxDevice`).
+- kTLS: understand why software kTLS is slower than rustls (−37 % at 10 MB, −43 % on tunnels) and test a NIC with TLS offload (`TlsTxDevice`).
 - Pool: no background reaper (a socket idle > 15 s is dropped when reached, a full origin evicts its oldest). DNS: full wipe when full, no negative cache, no coalescing.
 - PGO/BOLT, `panic=abort` (rejected: a panic would kill the whole shard), `target-cpu=native` outside Docker.
 

@@ -77,7 +77,7 @@ pub(crate) const KEYS: &[(&str, &str, &str)] = &[
     ("tls.key", "string", "PEM private key."),
     ("tls.handshake_timeout", "duration", "Max duration of a TLS handshake."),
     ("tls.http2", "boolean", "Offer HTTP/2 through ALPN."),
-    ("tls.ktls", "boolean", "Kernel TLS (Linux, `tls` module). Saves some memory, slower than rustls on throughput without NIC TLS offload."),
+    ("tls.ktls", "boolean", "Kernel TLS (Linux, `tls` module), opt-in. Software kernel TLS saves 5 % to 20 % of memory but is slower than rustls on every throughput test, from -12 % to -43 % (campaign of 2026-10-28, 1 core, no NIC TLS offload; see `bench/RESULTS.md`)."),
     ("filter.block_private", "boolean", "Refuse loopback, private, link-local, CGNAT, multicast and ULA destinations (403). Set `false` to reach your LAN."),
     ("filter.deny", "string list", "Extra refused networks (CIDR)."),
     ("filter.allowed_ports", "integer list", "Allowed destination ports, e.g. `[80, 443]`; empty = all."),
