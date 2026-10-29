@@ -3,6 +3,7 @@
 #
 #   HTTP/CONNECT campaign (5 proxies x plain/TLS/h2)  ->  WebSocket campaign (plain, TLS)
 #   -> Markdown report -> validity check -> SVG charts (docs/benchmarks/) -> README table
+#   -> site data (data/benchmarks.json, read by the website)
 #
 # Single host (Docker, Linux):      ./run-all.sh
 # Three machines (bench/REMOTE.md): REMOTE=1 GEN_HOST=... PROXY_HOST=... UP_HOST=... PROXY_CPUS=0 ./run-all.sh
@@ -12,6 +13,7 @@
 #   FLOOD_FROM=<index>  take the tunnel throughput row and chart from another campaign
 #                  (run on one big host over loopback: the three-machine link caps tunnels)
 #   NO_README=1    do not touch README.md (charts and report only)
+#   NO_DATA=1      do not touch data/benchmarks.json
 #   AUTH=on|off, PROXIES="...", BENCH_SEED, REPEAT: as run-campaign.sh
 #
 # Nothing is published blindly: tools/validity.py runs before the charts and
@@ -61,6 +63,11 @@ fi
 [[ -n "$ws_idx" ]] && python3 tools/charts.py "$ws_idx" >/dev/null && echo "==> charts: docs/benchmarks/ (WebSocket)"
 if [[ "${NO_README:-0}" != 1 ]]; then
     ./tools/readme-table.py "$http_idx" ${ws_idx:+"$ws_idx"} ${FLOOD_FROM:+--flood-from "$FLOOD_FROM"} --write ../README.md || status=1
+fi
+if [[ "${NO_DATA:-0}" != 1 ]]; then
+    # hardware, network, limits and the kTLS / multi-core indexes come from data/campaign.json:
+    # update it (and point it at the refreshed published/ copy) before committing
+    python3 tools/site-data.py --main "$http_idx" ${ws_idx:+--ws "$ws_idx"} ${FLOOD_FROM:+--flood-from "$FLOOD_FROM"} --write || status=1
 fi
 ((status == 0)) && echo "==> done, nothing to review" || echo "==> done: review the points above before committing" >&2
 exit $status

@@ -4,7 +4,7 @@ readme-table.py.
 An index (run-campaign.sh) has lines `<proxy> <plain|tls|h2> <results.txt>`;
 a results file has one `RESULT median ...` line per test and sweep level. For
 each test the best clean level is kept (see sweep_levels in matrix.sh)."""
-import os, re
+import datetime, os, re
 
 NAMES = {"myproxy": "rustle", "rustle": "rustle"}
 
@@ -63,3 +63,39 @@ def load_index(idx):
         if len(p) >= 3 and os.path.exists(os.path.join(base, p[2])):
             data.setdefault(p[1], {})[NAMES.get(p[0], p[0])] = load(os.path.join(base, p[2]))
     return data
+
+
+def index_entries(idx):
+    """[(proxy, transport, results.txt path)] for every line of an index whose
+    results file exists, including runs without any RESULT line (a proxy that
+    does not support the test)."""
+    base = os.path.dirname(os.path.dirname(os.path.abspath(idx)))  # bench/
+    out = []
+    for line in open(idx):
+        if line.startswith("#") or line.startswith("==>"):
+            continue
+        p = line.split()
+        if len(p) >= 3 and os.path.exists(os.path.join(base, p[2])):
+            out.append((NAMES.get(p[0], p[0]), p[1], os.path.join(base, p[2])))
+    return out
+
+
+_MONTHS = {m: i for i, m in enumerate("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(), 1)}
+
+
+def run_header(path):
+    """Parameters and date of one run, from the first line of its results.txt
+    (`# <proxy> remote auth=on ... Wed Oct 28 14:38:24 CET 2026`) and the
+    `seed=` line: {"params": {k: v}, "date": datetime.date | None, "seed": str | None}."""
+    with open(path, errors="replace") as f:
+        head = f.readline()
+        seed = None
+        for line in f:
+            if line.startswith("seed="):
+                seed = line.strip().split("=", 1)[1]
+                break
+            if line.startswith("RESULT"):
+                break
+    m = re.search(r"\b([A-Z][a-z]{2}) +(\d{1,2}) \d\d:\d\d:\d\d \S+ (\d{4})\s*$", head)
+    date = datetime.date(int(m.group(3)), _MONTHS[m.group(1)], int(m.group(2))) if m else None
+    return {"params": dict(re.findall(r"(\w+)=(\S*)", head)), "date": date, "seed": seed}
