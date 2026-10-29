@@ -1,7 +1,9 @@
 {
+  "$schema": "../schema/campaign.schema.json",
   "schema_version": 1,
-  "name": "2026-10-28",
+  "id": "2026-10-28",
   "date": "2026-10-28",
+  "rustle_version": "1.0.0",
   "commit": "7d1c143",
   "hardware": {
     "provider": "Scaleway Elastic Metal, Paris",
@@ -40,21 +42,45 @@
     "docker": "29.1.3",
     "governor": "performance"
   },
+  "seed": 2004113323,
+  "repeats": 3,
   "run_seconds": 15,
-  "noise_pct": { "min": 3, "max": 5 },
+  "proxy_cores": 1,
+  "auth": true,
+  "noise_pct": {
+    "min": 3,
+    "max": 5
+  },
+  "protocol": "auth on, one proxy core and one worker for every proxy, shuffled test order, proxy restarted before each test, warmup run apart, median of the repeats, concurrency sweep per test (best clean level kept, at_conns)",
+  "fairness": "bench/FAIRNESS.md",
+  "results": "bench/RESULTS.md",
   "sources": {
     "main": "published/2026-10-28/runs/campaign-20261028-235500.txt",
     "ws": "published/2026-10-28/runs/campaign-ws-20261028-214800.txt",
     "ktls": "published/2026-10-28/runs/campaign-20261028-215104.txt",
     "scaling": [
-      { "cores": 1, "index": "published/2026-10-28/runs/campaign-mc-n1.txt" },
-      { "cores": 2, "index": "published/2026-10-28/runs/campaign-mc-n2.txt" },
-      { "cores": 4, "index": "published/2026-10-28/runs/campaign-mc-n4.txt" },
-      { "cores": 8, "index": "published/2026-10-28/runs/campaign-mc-n8.txt" }
+      {
+        "cores": 1,
+        "index": "published/2026-10-28/runs/campaign-mc-n1.txt"
+      },
+      {
+        "cores": 2,
+        "index": "published/2026-10-28/runs/campaign-mc-n2.txt"
+      },
+      {
+        "cores": 4,
+        "index": "published/2026-10-28/runs/campaign-mc-n4.txt"
+      },
+      {
+        "cores": 8,
+        "index": "published/2026-10-28/runs/campaign-mc-n8.txt"
+      }
     ]
   },
   "unsupported": {
-    "ws": ["tinyproxy"]
+    "ws": [
+      "tinyproxy"
+    ]
   },
   "limits": [
     {

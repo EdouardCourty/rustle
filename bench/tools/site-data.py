@@ -1,36 +1,42 @@
 #!/usr/bin/env python3
-"""bench/data/benchmarks.json: the published benchmark numbers as one
-structured file, read by https://github.com/EdouardCourty/rustle-site at the
-release tag (see bench/data/README.md for the contract).
+"""bench/data/<campaign>/benchmarks.json: the published benchmark numbers of one
+campaign as a structured file, read by https://github.com/EdouardCourty/rustle-site
+at the release tag (see bench/data/README.md for the contract).
 
-    tools/site-data.py                 print the JSON
-    tools/site-data.py --write         write bench/data/benchmarks.json
-    tools/site-data.py --check         fail when the data files are stale or invalid
+    tools/site-data.py                 print the JSON of the latest campaign
+    tools/site-data.py --write         write bench/data/<latest>/benchmarks.json
+    tools/site-data.py --check         fail when any data file is stale or invalid
+
+    --campaign <id>                    another campaign than index.json's `latest`
 
 Inputs: the campaign indexes (same parsing and same "best clean sweep level"
-rule as charts.py and readme-table.py, through benchlib.py) and
-bench/data/campaign.json (hand-edited: hardware, network, which indexes make up
-the campaign, limits). With no option the indexes are the ones listed in
-campaign.json (the committed published runs); a fresh campaign overrides them:
+rule as charts.py and readme-table.py, through benchlib.py) and the campaign's
+hand-edited campaign.json (hardware, network, which indexes make up the
+campaign, limits, notes). The seed, repeats, proxy cores and auth it states are
+checked against the runs. With no source option the indexes are the ones listed
+in campaign.json (the committed published runs); a fresh campaign overrides them:
 
     --main <index> --ws <index> [--flood-from <index>] [--meta <campaign.json>]
 
---check re-generates from campaign.json and compares with the committed file.
-It also checks bench/data/proxies.json (versions against FAIRNESS.md, TLS and
-HTTP/2 support against the `# bench-ports:` lines of dut/*/Dockerfile), the
-schema_version of every data file and that each chart file exists.
+--check, for every campaign of index.json: the files exist and match the
+schemas in bench/data/schema/ (and their `$schema` pointer), ids agree between
+the folder, index.json and the files, benchmarks.json is what the indexes
+generate. For the latest campaign it also checks proxies.json against
+FAIRNESS.md (versions) and dut/*/Dockerfile (TLS and HTTP/2 support), and that
+each chart file exists. docs/config.json is checked against its schema.
 Nothing is ever taken from two campaigns: a run dated more than a day from
 campaign.json's date is an error."""
 import datetime, json, os, re, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from benchlib import index_entries, load_index, run_header  # noqa: E402
+from schemalite import lint, validate  # noqa: E402
 
 BENCH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT = os.path.dirname(BENCH)
 DATA = os.path.join(BENCH, "data")
+SCHEMAS = os.path.join(DATA, "schema")
 SCHEMA_VERSION = 1
-ORDER = ["rustle", "3proxy", "squid", "gost", "tinyproxy"]
 
 # transport -> (key in the index, how the proxy is reached)
 TRANSPORTS = {
@@ -166,7 +172,7 @@ def cell(data, support, unsupported, transport, proxy, test, key):
     return v, at, flags, "ok"
 
 
-def build(meta, main_idx, ws_idx, ktls_idx, scaling_idx, flood_idx):
+def build(meta, order, main_idx, ws_idx, ktls_idx, scaling_idx, flood_idx):
     data_main = load_index(main_idx)
     data_ws = load_index(ws_idx) if ws_idx else {}
     data_ktls = load_index(ktls_idx) if ktls_idx else {}
@@ -195,18 +201,11 @@ def build(meta, main_idx, ws_idx, ktls_idx, scaling_idx, flood_idx):
         die(f"the runs use several seeds: {sorted(seeds)}")
     params = plain_header["params"]
 
-    campaign = {
-        "name": meta["name"], "date": meta["date"], "commit": meta["commit"],
-        "hardware": meta["hardware"], "network": meta["network"], "software": meta["software"],
-        "seed": int(seeds.pop()), "repeats": int(params["repeat"]), "run_seconds": meta["run_seconds"],
-        "proxy_cores": int(params["workers"]), "auth": params["auth"] == "on",
-        "noise_pct": meta["noise_pct"],
-        "protocol": "auth on, one proxy core and one worker for every proxy, shuffled test order, proxy "
-                    "restarted before each test, warmup run apart, median of the repeats, concurrency sweep "
-                    "per test (best clean level kept, at_conns)",
-        "fairness": "bench/FAIRNESS.md",
-        "results": "bench/RESULTS.md",
-    }
+    # what campaign.json states must be what the runs say
+    for field, found in (("seed", int(seeds.pop())), ("repeats", int(params["repeat"])),
+                         ("proxy_cores", int(params["workers"])), ("auth", params["auth"] == "on")):
+        if meta[field] != found:
+            die(f"campaign.json says {field} = {meta[field]!r}, the runs say {found!r}")
 
     tests = []
     for s in specs():
@@ -217,7 +216,7 @@ def build(meta, main_idx, ws_idx, ktls_idx, scaling_idx, flood_idx):
             data = data_flood
             flood_note = " Measured on one host over loopback (the three-machine link caps tunnels)."
         values, at_conns, flags, status = {}, {}, {}, {}
-        for p in ORDER:
+        for p in order:
             v, at, fl, st = cell(data, support, unsupported, tr, p, s["test"], s["key"])
             values[p], at_conns[p], flags[p], status[p] = v, at, fl, st
         if all(v is None for v in values.values()):
@@ -226,7 +225,6 @@ def build(meta, main_idx, ws_idx, ktls_idx, scaling_idx, flood_idx):
             "id": s["id"], "transport": tr, "label": s["label"], "unit": s["unit"], "direction": s["direction"],
             "conditions": f"{up(s['what'])}. {up(TRANSPORTS[tr][1])}.{flood_note}",
             "chart": CHARTS.get(s["id"]),
-            "note": meta["test_notes"].get(s["id"]),
             "values": values, "at_conns": at_conns, "status": status, "flags": flags,
         }
         tests.append(t)
@@ -239,7 +237,7 @@ def build(meta, main_idx, ws_idx, ktls_idx, scaling_idx, flood_idx):
     for cores, idx in sorted(scaling_idx):
         rows = load_index(idx).get("plain", {})
         values, at_conns, flags = {}, {}, {}
-        for p in ORDER:
+        for p in order:
             r = rows.get(p, {}).get("http-1kb")
             ok = r and r["valid"]
             values[p] = round(r["rps"], 3) if ok else None
@@ -256,7 +254,7 @@ def build(meta, main_idx, ws_idx, ktls_idx, scaling_idx, flood_idx):
             "conditions": "Same hosts, seed and protocol as the single-core matrix, one test (http-1kb), "
                           "connection levels 64, 256, 1,024 and 4,096, best clean level kept. The proxy gets n "
                           "physical cores and n workers.",
-            "not_measured": [p for p in ORDER if p not in seen],
+            "not_measured": [p for p in order if p not in seen],
             "points": scaling_points,
         })
 
@@ -273,14 +271,30 @@ def build(meta, main_idx, ws_idx, ktls_idx, scaling_idx, flood_idx):
                          "user_space": a[0], "ktls": b[0]})
 
     return {
+        "$schema": "../schema/benchmarks.schema.json",
         "schema_version": SCHEMA_VERSION,
-        "campaign": campaign,
-        "proxies": ORDER,
+        "campaign": meta["id"],
         "tests": tests,
         "scaling": scaling,
         "ktls": ktls,
-        "limits": meta["limits"],
     }
+
+
+def index_file():
+    return os.path.join(DATA, "index.json")
+
+
+def latest_id():
+    return load_json(index_file())["latest"]
+
+
+def campaign_dir(cid):
+    return os.path.join(DATA, cid)
+
+
+def proxy_order(cid):
+    """The proxy ids of a campaign, in column order (its proxies.json)."""
+    return [p["id"] for p in load_json(os.path.join(campaign_dir(cid), "proxies.json"))["proxies"]]
 
 
 def sources(meta, args):
@@ -293,76 +307,149 @@ def sources(meta, args):
         abspath(args["flood-from"]) if args.get("flood-from") else None
 
 
-def generate(args):
-    meta_path = abspath(args.get("meta") or os.path.join(DATA, "campaign.json"))
+def generate(args, cid):
+    meta_path = abspath(args.get("meta") or os.path.join(campaign_dir(cid), "campaign.json"))
+    if not os.path.isfile(meta_path):
+        die(f"{meta_path} does not exist: a new campaign starts with its folder, campaign.json and proxies.json "
+            "(see bench/data/README.md)")
     meta = load_json(meta_path)
     if meta.get("schema_version") != SCHEMA_VERSION:
         die(f"{meta_path}: schema_version {meta.get('schema_version')!r}, expected {SCHEMA_VERSION}")
-    out = build(meta, *sources(meta, args))
+    if meta.get("id") != cid:
+        die(f"{meta_path}: id {meta.get('id')!r} is not the campaign folder {cid!r}")
+    out = build(meta, proxy_order(cid), *sources(meta, args))
     return json.dumps(out, indent=2, ensure_ascii=False) + "\n"
 
 
-def check_proxies(problems):
-    path = os.path.join(DATA, "proxies.json")
+def schema_for(name):
+    return load_json(os.path.join(SCHEMAS, f"{name}.schema.json"))
+
+
+def check_schemas(problems):
+    """Every schema is well formed, has a stable $id and a const schema_version."""
+    for name in ("index", "campaign", "benchmarks", "proxies"):
+        path = os.path.join(SCHEMAS, f"{name}.schema.json")
+        try:
+            sc = load_json(path)
+        except (OSError, ValueError) as e:
+            problems.append(f"{path}: {e}")
+            continue
+        rel = os.path.relpath(path, ROOT)
+        for p in lint(sc):
+            problems.append(f"{rel}: {p}")
+        if sc.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
+            problems.append(f"{rel}: $schema must be the 2020-12 dialect")
+        if not str(sc.get("$id", "")).endswith(f"/bench/data/schema/{name}.schema.json"):
+            problems.append(f"{rel}: $id must end with /bench/data/schema/{name}.schema.json")
+        if sc.get("properties", {}).get("schema_version", {}).get("const") != SCHEMA_VERSION:
+            problems.append(f"{rel}: schema_version must be const {SCHEMA_VERSION}")
+
+
+def check_file(problems, path, schema_name, pointer):
+    """The file is valid JSON, points at its schema and satisfies it. Returns the document."""
+    rel = os.path.relpath(path, ROOT)
     try:
         doc = load_json(path)
     except (OSError, ValueError) as e:
-        problems.append(f"{path}: {e}")
-        return
-    if doc.get("schema_version") != SCHEMA_VERSION:
-        problems.append(f"proxies.json: schema_version {doc.get('schema_version')!r}, expected {SCHEMA_VERSION}")
-    ids = [p.get("id") for p in doc.get("proxies", [])]
-    if ids != ORDER:
-        problems.append(f"proxies.json: proxies are {ids}, expected {ORDER}")
+        problems.append(f"{rel}: {e}")
+        return None
+    if doc.get("$schema") != pointer or not os.path.isfile(os.path.normpath(os.path.join(os.path.dirname(path), pointer))):
+        problems.append(f"{rel}: $schema must be {pointer!r} and point at an existing schema")
+    try:
+        schema = load_json(os.path.join(SCHEMAS, f"{schema_name}.schema.json")) if schema_name != "config" \
+            else load_json(os.path.join(ROOT, "docs", "config.schema.json"))
+        for e in validate(doc, schema):
+            problems.append(f"{rel}: {e}")
+    except (OSError, ValueError) as e:
+        problems.append(f"{rel}: cannot validate: {e}")
+    return doc
+
+
+def check_proxies_latest(problems, doc):
+    """Versions against FAIRNESS.md and protocols against the Dockerfiles: they describe the
+    current setup, so only the latest campaign can be compared with them."""
     fairness = open(os.path.join(BENCH, "FAIRNESS.md")).read()
     support = ports_support()
-    for p in doc.get("proxies", []):
-        pid = p.get("id")
-        row = next((l for l in fairness.splitlines() if l.startswith(f"| **{p.get('name')}**")), None)
+    for p in doc["proxies"]:
+        pid = p["id"]
+        row = next((l for l in fairness.splitlines() if l.startswith(f"| **{p['name']}**")), None)
         if row is None:
             problems.append(f"proxies.json: {pid}: no row in FAIRNESS.md's table")
-        elif p.get("version") not in row:
-            problems.append(f"proxies.json: {pid}: version {p.get('version')!r} is not the one in FAIRNESS.md")
+        elif p["version"] not in row:
+            problems.append(f"proxies.json: {pid}: version {p['version']!r} is not the one in FAIRNESS.md")
         s = support.get(pid, {"tls": False, "h2": False})
         for proto in ("tls", "h2"):
-            if bool(p.get("protocols", {}).get(proto)) != s[proto]:
+            if bool(p["protocols"].get(proto)) != s[proto]:
                 problems.append(f"proxies.json: {pid}: protocols.{proto} disagrees with dut/{pid}/Dockerfile bench-ports")
+
+
+def check_campaign(problems, entry, latest):
+    cid, cdir = entry["id"], os.path.join(DATA, entry["path"])
+    if os.path.basename(cdir.rstrip("/")) != cid:
+        problems.append(f"index.json: campaign {cid}: path {entry['path']!r} is not its folder")
+    if not os.path.isdir(cdir):
+        problems.append(f"index.json: campaign {cid}: {entry['path']} does not exist")
+        return
+    camp = check_file(problems, os.path.join(cdir, "campaign.json"), "campaign", "../schema/campaign.schema.json")
+    prox = check_file(problems, os.path.join(cdir, "proxies.json"), "proxies", "../schema/proxies.schema.json")
+    bench = check_file(problems, os.path.join(cdir, "benchmarks.json"), "benchmarks", "../schema/benchmarks.schema.json")
+    for name, doc, key in (("campaign.json", camp, "id"), ("proxies.json", prox, "campaign"), ("benchmarks.json", bench, "campaign")):
+        if doc is not None and doc.get(key) != cid:
+            problems.append(f"{cid}/{name}: {key} is {doc.get(key)!r}, expected {cid!r}")
+    if camp is not None:
+        for field in ("date", "rustle_version"):
+            if camp.get(field) != entry[field]:
+                problems.append(f"index.json: campaign {cid}: {field} {entry[field]!r} differs from campaign.json's {camp.get(field)!r}")
+    ids = [p["id"] for p in prox["proxies"]] if prox is not None else None
+    if prox is not None:
+        if ids != entry["proxies"]:
+            problems.append(f"index.json: campaign {cid}: proxies {entry['proxies']} differ from proxies.json's {ids}")
+        if latest:
+            check_proxies_latest(problems, prox)
+    if bench is not None and ids is not None:
+        # every by-proxy map has exactly the campaign's proxies
+        for t in bench["tests"] + [pt for sc in bench["scaling"] for pt in sc["points"]]:
+            for field in ("values", "at_conns", "flags") + (("status",) if "status" in t else ()):
+                if sorted(t[field]) != sorted(ids):
+                    problems.append(f"{cid}/benchmarks.json: {t.get('id', t.get('cores'))}: {field} keys are not the campaign's proxies")
+        if latest:
+            for t in bench["tests"]:
+                if t["chart"] and not os.path.isfile(os.path.join(ROOT, "docs", "benchmarks", t["chart"])):
+                    problems.append(f"{cid}/benchmarks.json: test {t['id']}: chart docs/benchmarks/{t['chart']} does not exist")
+    if camp is not None and prox is not None:
+        try:
+            fresh = generate({}, cid)
+        except SystemExit as e:
+            problems.append(f"{cid}: " + str(e).replace("site-data: ", "", 1))
+            return
+        committed = open(os.path.join(cdir, "benchmarks.json")).read() if os.path.isfile(os.path.join(cdir, "benchmarks.json")) else None
+        if committed != fresh:
+            problems.append(f"{cid}/benchmarks.json is stale: run `python3 bench/tools/site-data.py --write --campaign {cid}`")
 
 
 def check(args):
     problems = []
-    try:
-        fresh = generate(args)
-    except SystemExit as e:
-        problems.append(str(e).replace("site-data: ", "", 1))
-        fresh = None
-    committed_path = os.path.join(DATA, "benchmarks.json")
-    if fresh is not None:
-        try:
-            committed = open(committed_path).read()
-        except OSError:
-            committed = None
-        if committed != fresh:
-            problems.append("bench/data/benchmarks.json is stale: run `python3 bench/tools/site-data.py --write`")
-        else:
-            for t in json.loads(fresh)["tests"]:
-                if t["chart"] and not os.path.isfile(os.path.join(ROOT, "docs", "benchmarks", t["chart"])):
-                    problems.append(f"test {t['id']}: chart docs/benchmarks/{t['chart']} does not exist")
-    check_proxies(problems)
-    for name in ("benchmarks.json", "campaign.json", "proxies.json"):
-        try:
-            v = load_json(os.path.join(DATA, name)).get("schema_version")
-        except (OSError, ValueError):
-            continue
-        if v != SCHEMA_VERSION:
-            problems.append(f"bench/data/{name}: schema_version {v!r}, expected {SCHEMA_VERSION}")
+    check_schemas(problems)
+    index = check_file(problems, index_file(), "index", "./schema/index.schema.json")
+    if index is not None:
+        ids = [c["id"] for c in index["campaigns"]]
+        if len(set(ids)) != len(ids):
+            problems.append("index.json: duplicate campaign ids")
+        if index["latest"] not in ids:
+            problems.append(f"index.json: latest {index['latest']!r} is not a listed campaign")
+        for entry in index["campaigns"]:
+            check_campaign(problems, entry, entry["id"] == index["latest"])
+        on_disk = sorted(d for d in os.listdir(DATA) if os.path.isdir(os.path.join(DATA, d)) and d != "schema")
+        if on_disk != sorted(ids):
+            problems.append(f"bench/data: folders {on_disk} differ from the campaigns of index.json {sorted(ids)}")
     cfg = os.path.join(ROOT, "docs", "config.json")
+    check_file(problems, cfg, "config", "./config.schema.json")
     try:
-        v = load_json(cfg).get("schema_version")
-        if v != SCHEMA_VERSION:
-            problems.append(f"docs/config.json: schema_version {v!r}, expected {SCHEMA_VERSION}")
+        sc = load_json(os.path.join(ROOT, "docs", "config.schema.json"))
+        for p in lint(sc):
+            problems.append(f"docs/config.schema.json: {p}")
     except (OSError, ValueError) as e:
-        problems.append(f"docs/config.json: {e}")
+        problems.append(f"docs/config.schema.json: {e}")
     if problems:
         print("\n".join(f"site-data: {p}" for p in problems), file=sys.stderr)
         sys.exit(1)
@@ -375,7 +462,7 @@ def main(argv):
         a = argv[i]
         if a in ("--write", "--check"):
             flags.add(a)
-        elif a in ("--main", "--ws", "--flood-from", "--meta") and i + 1 < len(argv):
+        elif a in ("--main", "--ws", "--flood-from", "--meta", "--campaign") and i + 1 < len(argv):
             args[a[2:]] = argv[i + 1]
             i += 1
         else:
@@ -383,11 +470,12 @@ def main(argv):
         i += 1
     if "--check" in flags:
         if args:
-            sys.exit("--check takes no source option: it checks the committed files against campaign.json")
+            sys.exit("--check takes no option: it checks every committed campaign")
         return check(args)
-    out = generate(args)
+    cid = args.get("campaign") or latest_id()
+    out = generate(args, cid)
     if "--write" in flags:
-        path = os.path.join(DATA, "benchmarks.json")
+        path = os.path.join(campaign_dir(cid), "benchmarks.json")
         with open(path, "w") as f:
             f.write(out)
         print(f"data written to {os.path.relpath(path, ROOT)}")

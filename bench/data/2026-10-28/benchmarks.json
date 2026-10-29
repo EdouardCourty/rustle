@@ -1,66 +1,7 @@
 {
+  "$schema": "../schema/benchmarks.schema.json",
   "schema_version": 1,
-  "campaign": {
-    "name": "2026-10-28",
-    "date": "2026-10-28",
-    "commit": "7d1c143",
-    "hardware": {
-      "provider": "Scaleway Elastic Metal, Paris",
-      "generator": {
-        "server": "EM-I320E-NVMe",
-        "cpu": "AMD EPYC 8224P",
-        "cores": 24,
-        "threads": 48,
-        "role": "bench-client, 24 threads"
-      },
-      "proxy": {
-        "server": "EM-I320E-NVMe",
-        "cpu": "AMD EPYC 8224P",
-        "cores": 24,
-        "threads": 48,
-        "role": "proxy under test, one core (CPU 0, its hyperthread sibling offline, NIC interrupts moved to the other cores)"
-      },
-      "origin_sink": {
-        "server": "EM-I220E-NVMe",
-        "cpu": "AMD EPYC 8124P",
-        "cores": 16,
-        "threads": 32,
-        "role": "static origin (8 threads) and discard sink (8 threads)"
-      }
-    },
-    "network": {
-      "kind": "25 Gbit/s Private Network (VLAN on the NIC)",
-      "mtu": 1500,
-      "nominal_gbit_s": 25,
-      "measured_gbit_s": 23.5,
-      "measured_with": "iperf3 -P 4"
-    },
-    "software": {
-      "os": "Ubuntu 26.04.1 LTS",
-      "kernel": "7.0.0-38-generic",
-      "docker": "29.1.3",
-      "governor": "performance"
-    },
-    "seed": 2004113323,
-    "repeats": 3,
-    "run_seconds": 15,
-    "proxy_cores": 1,
-    "auth": true,
-    "noise_pct": {
-      "min": 3,
-      "max": 5
-    },
-    "protocol": "auth on, one proxy core and one worker for every proxy, shuffled test order, proxy restarted before each test, warmup run apart, median of the repeats, concurrency sweep per test (best clean level kept, at_conns)",
-    "fairness": "bench/FAIRNESS.md",
-    "results": "bench/RESULTS.md"
-  },
-  "proxies": [
-    "rustle",
-    "3proxy",
-    "squid",
-    "gost",
-    "tinyproxy"
-  ],
+  "campaign": "2026-10-28",
   "tests": [
     {
       "id": "plain-1kb",
@@ -70,7 +11,6 @@
       "direction": "higher",
       "conditions": "1 KB responses, keep-alive. Plain HTTP proxy port.",
       "chart": "plain-1kb.svg",
-      "note": null,
       "values": {
         "rustle": 55257.595,
         "3proxy": 21032.03,
@@ -108,7 +48,6 @@
       "direction": "higher",
       "conditions": "10 KB responses, keep-alive. Plain HTTP proxy port.",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 40782.877,
         "3proxy": 19169.111,
@@ -146,7 +85,6 @@
       "direction": "higher",
       "conditions": "1 KB responses, no keep-alive. Plain HTTP proxy port.",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 27826.851,
         "3proxy": 5131.65,
@@ -184,7 +122,6 @@
       "direction": "higher",
       "conditions": "1 MB responses, keep-alive. Plain HTTP proxy port.",
       "chart": "plain-1mb.svg",
-      "note": "rustle is at 95 % of its core, near the link ceiling: its lead is a lower bound.",
       "values": {
         "rustle": 2624.351,
         "3proxy": 1783.881,
@@ -222,7 +159,6 @@
       "direction": "higher",
       "conditions": "10 MB responses, keep-alive. Plain HTTP proxy port.",
       "chart": null,
-      "note": "rustle is at 83 % of its core, at the link ceiling (about 22 of 23.5 Gbit/s): its figure is a lower bound.",
       "values": {
         "rustle": 268.202,
         "3proxy": 191.143,
@@ -262,7 +198,6 @@
       "direction": "higher",
       "conditions": "Bulk upload through CONNECT tunnels. Plain HTTP proxy port.",
       "chart": "plain-flood.svg",
-      "note": "rustle is at 70 % of its core, at the link ceiling (about 22 of 23.5 Gbit/s): its figure is a lower bound.",
       "values": {
         "rustle": 22.029,
         "3proxy": 15.68,
@@ -302,7 +237,6 @@
       "direction": "lower",
       "conditions": "Proxy CPU per request, 1 KB responses, keep-alive. Plain HTTP proxy port.",
       "chart": "plain-cpu.svg",
-      "note": null,
       "values": {
         "rustle": 18.096,
         "3proxy": 47.569,
@@ -340,7 +274,6 @@
       "direction": "lower",
       "conditions": "1,000 idle CONNECT tunnels held open, peak RSS of the proxy. Plain HTTP proxy port.",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 14.0,
         "3proxy": 104.1,
@@ -378,7 +311,6 @@
       "direction": "lower",
       "conditions": "5,000 idle CONNECT tunnels held open, peak RSS of the proxy. Plain HTTP proxy port.",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 40.4,
         "3proxy": 498.7,
@@ -416,7 +348,6 @@
       "direction": "lower",
       "conditions": "10,000 idle CONNECT tunnels held open, peak RSS of the proxy. Plain HTTP proxy port.",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 54.2,
         "3proxy": 992.1,
@@ -454,7 +385,6 @@
       "direction": "lower",
       "conditions": "25,000 idle CONNECT tunnels held open, peak RSS of the proxy. Plain HTTP proxy port.",
       "chart": "plain-ram.svg",
-      "note": null,
       "values": {
         "rustle": 94.8,
         "3proxy": 2461.1,
@@ -492,7 +422,6 @@
       "direction": "higher",
       "conditions": "1 KB responses, keep-alive. HTTPS proxy (TLS 1.3, AES-128-GCM, session resumption on).",
       "chart": "tls-1kb.svg",
-      "note": null,
       "values": {
         "rustle": 49460.971,
         "3proxy": null,
@@ -530,7 +459,6 @@
       "direction": "higher",
       "conditions": "10 KB responses, keep-alive. HTTPS proxy (TLS 1.3, AES-128-GCM, session resumption on).",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 35459.861,
         "3proxy": null,
@@ -568,7 +496,6 @@
       "direction": "higher",
       "conditions": "1 KB responses, no keep-alive. HTTPS proxy (TLS 1.3, AES-128-GCM, session resumption on).",
       "chart": "tls-short.svg",
-      "note": null,
       "values": {
         "rustle": 6118.791,
         "3proxy": null,
@@ -606,7 +533,6 @@
       "direction": "higher",
       "conditions": "1 MB responses, keep-alive. HTTPS proxy (TLS 1.3, AES-128-GCM, session resumption on).",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 1296.641,
         "3proxy": null,
@@ -644,7 +570,6 @@
       "direction": "higher",
       "conditions": "10 MB responses, keep-alive. HTTPS proxy (TLS 1.3, AES-128-GCM, session resumption on).",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 141.633,
         "3proxy": null,
@@ -682,7 +607,6 @@
       "direction": "higher",
       "conditions": "1 KB responses, no keep-alive. HTTPS proxy (TLS 1.3, AES-128-GCM), a full handshake on every connection.",
       "chart": "tls-short-full.svg",
-      "note": "Session resumption is off: every connection is a full handshake with the certificate signature.",
       "values": {
         "rustle": 5458.284,
         "3proxy": null,
@@ -720,7 +644,6 @@
       "direction": "higher",
       "conditions": "Bulk upload through CONNECT tunnels. HTTPS proxy (TLS 1.3, AES-128-GCM, session resumption on).",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 12.024,
         "3proxy": null,
@@ -758,7 +681,6 @@
       "direction": "lower",
       "conditions": "1,000 idle CONNECT tunnels held open, peak RSS of the proxy. HTTPS proxy (TLS 1.3, AES-128-GCM, session resumption on).",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 57.3,
         "3proxy": null,
@@ -796,7 +718,6 @@
       "direction": "lower",
       "conditions": "5,000 idle CONNECT tunnels held open, peak RSS of the proxy. HTTPS proxy (TLS 1.3, AES-128-GCM, session resumption on).",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 253.0,
         "3proxy": null,
@@ -834,7 +755,6 @@
       "direction": "lower",
       "conditions": "10,000 idle CONNECT tunnels held open, peak RSS of the proxy. HTTPS proxy (TLS 1.3, AES-128-GCM, session resumption on).",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 465.9,
         "3proxy": null,
@@ -872,7 +792,6 @@
       "direction": "lower",
       "conditions": "25,000 idle CONNECT tunnels held open, peak RSS of the proxy. HTTPS proxy (TLS 1.3, AES-128-GCM, session resumption on).",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 809.7,
         "3proxy": null,
@@ -910,7 +829,6 @@
       "direction": "higher",
       "conditions": "1 KB responses, keep-alive. HTTP/2 to the proxy over TLS (ALPN h2), one HTTP/2 connection per client connection, sequential requests.",
       "chart": "h2-1kb.svg",
-      "note": null,
       "values": {
         "rustle": 33450.63,
         "3proxy": null,
@@ -948,7 +866,6 @@
       "direction": "higher",
       "conditions": "10 KB responses, keep-alive. HTTP/2 to the proxy over TLS (ALPN h2), one HTTP/2 connection per client connection, sequential requests.",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 24788.625,
         "3proxy": null,
@@ -986,7 +903,6 @@
       "direction": "higher",
       "conditions": "1 KB responses, no keep-alive. HTTP/2 to the proxy over TLS (ALPN h2), one HTTP/2 connection per client connection, sequential requests.",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 4973.964,
         "3proxy": null,
@@ -1024,7 +940,6 @@
       "direction": "higher",
       "conditions": "1 MB responses, keep-alive. HTTP/2 to the proxy over TLS (ALPN h2), one HTTP/2 connection per client connection, sequential requests.",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 860.23,
         "3proxy": null,
@@ -1062,7 +977,6 @@
       "direction": "higher",
       "conditions": "10 MB responses, keep-alive. HTTP/2 to the proxy over TLS (ALPN h2), one HTTP/2 connection per client connection, sequential requests.",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 88.067,
         "3proxy": null,
@@ -1100,7 +1014,6 @@
       "direction": "higher",
       "conditions": "Bulk upload through CONNECT tunnels. HTTP/2 to the proxy over TLS (ALPN h2), one HTTP/2 connection per client connection, sequential requests.",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 8.801,
         "3proxy": null,
@@ -1138,7 +1051,6 @@
       "direction": "lower",
       "conditions": "1,000 idle CONNECT tunnels held open, peak RSS of the proxy. HTTP/2 to the proxy over TLS (ALPN h2), one HTTP/2 connection per client connection, sequential requests.",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 70.1,
         "3proxy": null,
@@ -1176,7 +1088,6 @@
       "direction": "lower",
       "conditions": "5,000 idle CONNECT tunnels held open, peak RSS of the proxy. HTTP/2 to the proxy over TLS (ALPN h2), one HTTP/2 connection per client connection, sequential requests.",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 329.6,
         "3proxy": null,
@@ -1214,7 +1125,6 @@
       "direction": "lower",
       "conditions": "10,000 idle CONNECT tunnels held open, peak RSS of the proxy. HTTP/2 to the proxy over TLS (ALPN h2), one HTTP/2 connection per client connection, sequential requests.",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 704.6,
         "3proxy": null,
@@ -1252,7 +1162,6 @@
       "direction": "lower",
       "conditions": "25,000 idle CONNECT tunnels held open, peak RSS of the proxy. HTTP/2 to the proxy over TLS (ALPN h2), one HTTP/2 connection per client connection, sequential requests.",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 1262.8,
         "3proxy": null,
@@ -1290,7 +1199,6 @@
       "direction": "higher",
       "conditions": "64-byte messages, 64 connections, ping-pong. WebSocket upgrade on the plain HTTP proxy port.",
       "chart": "ws-64b-rps.svg",
-      "note": null,
       "values": {
         "rustle": 58506.259,
         "3proxy": 33135.809,
@@ -1328,7 +1236,6 @@
       "direction": "lower",
       "conditions": "64-byte messages, 64 connections, ping-pong, p99 latency. WebSocket upgrade on the plain HTTP proxy port.",
       "chart": "ws-64b-latency.svg",
-      "note": null,
       "values": {
         "rustle": 1.286,
         "3proxy": 3.162,
@@ -1366,7 +1273,6 @@
       "direction": "lower",
       "conditions": "Proxy CPU per 64-byte message. WebSocket upgrade on the plain HTTP proxy port.",
       "chart": "ws-cpu.svg",
-      "note": null,
       "values": {
         "rustle": 17.094,
         "3proxy": 30.195,
@@ -1404,7 +1310,6 @@
       "direction": "higher",
       "conditions": "64 KB frames, 8 connections, 8 frames in flight. WebSocket upgrade on the plain HTTP proxy port.",
       "chart": "ws-64kb-gbps.svg",
-      "note": null,
       "values": {
         "rustle": 11.587,
         "3proxy": 7.945,
@@ -1442,7 +1347,6 @@
       "direction": "higher",
       "conditions": "One connection per exchange. WebSocket upgrade on the plain HTTP proxy port.",
       "chart": null,
-      "note": "Tinyproxy removes the Upgrade header (answered 426): it does not support WebSocket and is listed as unsupported, not as zero.",
       "values": {
         "rustle": 10740.216,
         "3proxy": 251.473,
@@ -1480,7 +1384,6 @@
       "direction": "higher",
       "conditions": "64-byte messages, 64 connections, ping-pong. WebSocket upgrade through the HTTPS proxy (TLS 1.3, AES-128-GCM).",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 56954.67,
         "3proxy": null,
@@ -1518,7 +1421,6 @@
       "direction": "lower",
       "conditions": "64-byte messages, 64 connections, ping-pong, p99 latency. WebSocket upgrade through the HTTPS proxy (TLS 1.3, AES-128-GCM).",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 1.311,
         "3proxy": null,
@@ -1556,7 +1458,6 @@
       "direction": "higher",
       "conditions": "64 KB frames, 8 connections, 8 frames in flight. WebSocket upgrade through the HTTPS proxy (TLS 1.3, AES-128-GCM).",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 5.807,
         "3proxy": null,
@@ -1594,7 +1495,6 @@
       "direction": "higher",
       "conditions": "One connection per exchange. WebSocket upgrade through the HTTPS proxy (TLS 1.3, AES-128-GCM).",
       "chart": null,
-      "note": null,
       "values": {
         "rustle": 4462.138,
         "3proxy": null,
@@ -1815,44 +1715,6 @@
       "direction": "lower",
       "user_space": 809.7,
       "ktls": 753.0
-    }
-  ],
-  "limits": [
-    {
-      "id": "workload",
-      "text": "The origin is static with Content-Length. Chunked bodies, uploads, SOCKS5, IPv6, many origins and large header sets are not part of the matrix; they are covered functionally by the end-to-end suite."
-    },
-    {
-      "id": "one-campaign",
-      "text": "One campaign, one seed, three repeats, medians, noise about ±3 to 5 %, no confidence intervals. Differences below the noise are not conclusions."
-    },
-    {
-      "id": "closed-loop",
-      "text": "Latency is closed-loop at each concurrency level (no open-loop rate); CPU per request is measured at saturation, not at an equal offered load."
-    },
-    {
-      "id": "link-bound",
-      "text": "The 25 Gbit/s link (23.5 measured) is a ceiling: a proxy that reaches it (rustle at 1 MB, 10 MB and in plain tunnels) shows the link, not its own limit, and its figure is a lower bound."
-    },
-    {
-      "id": "tls-no-splice",
-      "text": "There is no splice on a TLS port (the proxy decrypts in user space), so TLS and HTTP/2 throughput is lower than plain HTTP."
-    },
-    {
-      "id": "h2-sequential",
-      "text": "The HTTP/2 test opens one connection per client connection and sends sequential requests (no multiplexing)."
-    },
-    {
-      "id": "multi-core",
-      "text": "Multi-core was measured for plain HTTP at 1 KB only; TLS, HTTP/2 and tunnels were not measured on several cores."
-    },
-    {
-      "id": "cpu-attribution",
-      "text": "Proxy CPU is the container cgroup's (user + system); softirq time spent on other cores is not attributed."
-    },
-    {
-      "id": "flood-upload",
-      "text": "The tunnel test counts bytes written by the client and measures the upload direction only."
     }
   ]
 }

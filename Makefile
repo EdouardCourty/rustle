@@ -59,10 +59,10 @@ bench: ## full matrix: make bench [P=rustle|3proxy|squid|gost|tinyproxy] [A=on|o
 charts: ## regenerate docs/benchmarks/*.svg from a campaign: make charts [C=bench/results/campaign[-ws]-<ts>.txt]
 	python3 bench/tools/charts.py $${C:-$$(ls -t bench/results/campaign-[0-9]*.txt | head -1)}
 
-data: ## regenerate bench/data/benchmarks.json from the published campaign (indexes in bench/data/campaign.json)
-	python3 bench/tools/site-data.py --write
+data: ## regenerate bench/data/<campaign>/benchmarks.json from the published runs: make data [CAMPAIGN=2026-10-28] (default: latest)
+	python3 bench/tools/site-data.py --write $(if $(CAMPAIGN),--campaign $(CAMPAIGN))
 
-data-check: ## the website data files (bench/data/, docs/config.json) are up to date and valid
+data-check: ## the website data files (bench/data/, docs/config.json) are up to date and match their JSON Schemas
 	python3 bench/tools/site-data.py --check
 
 latest: ## show the latest result pass of the current proxy
