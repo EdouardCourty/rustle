@@ -15,6 +15,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changelog:
+    name: changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: parse-changelog
+      - name: Format, and a section for the current version
+        run: |
+          parse-changelog CHANGELOG.md > /dev/null
+          crate="$(sed -n 's/^version = "\(.*\)"/\1/p' rustle/Cargo.toml | head -n1)"
+          parse-changelog CHANGELOG.md "${crate}" > /dev/null
+
   lint:
     name: fmt + clippy (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
