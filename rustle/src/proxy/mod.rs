@@ -257,9 +257,8 @@ async fn serve<C: ClientStream>(client: &mut C, peer: IpAddr, svc: &Services) ->
 
         match target {
             Target::Connect { host, port } => {
-                // Build the origin key from the CONNECT
-                // authority — it used to stay empty, so every CONNECT
-                // shared a single DNS cache entry.
+                // The origin key is the CONNECT authority: each tunnel
+                // target gets its own DNS cache entry.
                 origin_key.clear();
                 origin_key.push_str(&String::from_utf8_lossy(host.slice(&buf)));
                 origin_key.push(':');

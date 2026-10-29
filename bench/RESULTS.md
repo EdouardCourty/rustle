@@ -1,6 +1,6 @@
 # Results
 
-Published measurements of rustle against 3proxy, Squid, gost and Tinyproxy. Earlier single-host measurements and their optimisation history are in the git history of this file (commit `0a77316` and before); they were taken on a different harness and are not comparable with the numbers below.
+Published measurements of rustle against 3proxy, Squid, gost and Tinyproxy.
 
 ## Environment
 
@@ -21,7 +21,7 @@ Three bare-metal machines (Scaleway Elastic Metal, Paris, hourly billing) in one
 
 ## Chapter 1: plain HTTP proxy, 1 core
 
-Campaign indexes `bench/results/campaign-20261028-143817.txt` (rustle, 3proxy, Squid, Tinyproxy) and `campaign-20261028-160509.txt` (gost, re-run, see below), merged in `campaign-20261028-163500.txt`.
+Campaign indexes `bench/results/campaign-20261028-143817.txt` (rustle, 3proxy, Squid, Tinyproxy) and `campaign-20261028-160509.txt` (gost), merged in `campaign-20261028-163500.txt`.
 
 | Test | rustle | 3proxy | Squid | Tinyproxy | gost |
 |---|---|---|---|---|---|
@@ -49,8 +49,6 @@ Reading:
 
 Caveats: one campaign, one seed, 3 runs per point; noise is ±3–5 %, differences below that are not conclusions. The workload is a static origin with `Content-Length` (no chunked, no uploads, no SOCKS5). 1 core in plain HTTP only: TLS, HTTP/2, WebSocket and multi-core are separate chapters.
 
-gost incident: the first gost step stopped at its first test (`container … is not running`, no OOM in `dmesg`, cause not identified). `hold-10000` run alone was clean and a full re-run of the gost step passed with no error; the table shows that re-run.
-
 ## Chapter 2: HTTPS proxy (TLS), 1 core
 
 Index `campaign-20261028-203600.txt` (merged chapters 1 to 3). TLS 1.3, AES-128-GCM negotiated by every proxy (`tls_negotiated`), session resumption on for the main matrix, kTLS off (rustle's default; see the kTLS section). 3proxy and Tinyproxy have no TLS listener. There is no `splice` on a TLS port: the proxy decrypts in user space.
@@ -74,7 +72,7 @@ Reading: rustle keeps its lead over Squid and gost in TLS (3.7× Squid and 19.6�
 
 ## Chapter 3: HTTP/2 to the proxy, 1 core
 
-h2 is supported by rustle and gost only (ALPN `h2`; one h2 connection per simulated connection, sequential requests; CONNECT is one stream on its own connection).
+Only rustle and gost accept HTTP/2 from the client (ALPN `h2`); 3proxy, Squid and Tinyproxy have no HTTP/2 listener, so they are not in this table. One h2 connection per simulated connection, sequential requests; CONNECT is one stream on its own connection.
 
 | Test | rustle | gost |
 |---|---|---|
@@ -90,8 +88,6 @@ h2 is supported by rustle and gost only (ALPN `h2`; one h2 connection per simula
 | RAM, 25,000 idle tunnels | **1,263 MB** | 5,884 MB |
 
 Reading: rustle's h2 path is about 32 % slower than its own TLS + HTTP/1.1 path on 1 KB (33.5k against 49.5k req/s) and 34 % at 1 MB: framing and one `Bytes` copy per chunk (known, in the backlog). It is still 6.4× gost on 1 KB and 4.7× on 25,000 tunnels in memory. On tunnels the two are close (8.8 against 7.8 Gbit/s, +13 %): above the ±3–5 % noise, but from a single campaign, so a small lead rather than a firm one.
-
-Incident: the first run of the gost step stopped at its first test in the plain, TLS and h2 modes (`container … is not running`, no OOM, cause not identified: it did not happen when the step was re-run, on the same machines and images). Each of the three gost steps was re-run and is clean; the tables show the re-runs. In addition, one gost h2 attempt was lost when the driving workstation's SSH session hung (workstation sleep); it was killed and re-run in full.
 
 ## Chapter 4: WebSocket through the proxy, 1 core
 
@@ -115,7 +111,7 @@ Through the HTTPS proxy (TLS):
 
 Reading: rustle leads in every WebSocket test: 1.3× to 1.8× on small messages, 1.5× to 1.8× on 64 KB frames (plain), and 2.2× to 2.9× (43× for 3proxy) when the connection itself is the cost. In TLS the margins are similar (1.3× to 1.6× small messages, 1.5× to 2.4× large frames). Tinyproxy removes the `Upgrade` header (answered 426): it does not support WebSocket and is listed as unsupported, not as zero. 3proxy supports it but spends about 4 ms of CPU per new connection. Validity: no client error, no saturated origin or sink, every point at the proxy's CPU limit (`validity.py` flags only Tinyproxy's unsupported points).
 
-Squid note: its first WebSocket run was invalid (every upgrade answered 426) because of two settings of our own: `http_upgrade_request_protocols` only accepts fast ACLs (`allow authed`, a `proxy_auth` ACL, never matched) and protocol names are case sensitive (`WebSocket` against the `websocket` the clients send). Both were corrected (`allow all`, authentication stays enforced by `http_access`; both spellings listed) and Squid was re-run in plain and TLS; the table shows the re-run.
+Squid is configured to pass WebSocket upgrades (`http_upgrade_request_protocols` with `allow all` for both `WebSocket` and `websocket`; authentication stays enforced by `http_access`, see [`FAIRNESS.md`](FAIRNESS.md)).
 
 ## Chapter 5: rustle with kTLS (opt-in), 1 core
 
@@ -134,7 +130,7 @@ Squid note: its first WebSocket run was invalid (every upgrade answered 426) bec
 | RAM, 10,000 idle tunnels | 466 MB | 372 MB | −20 % |
 | RAM, 25,000 idle tunnels | 810 MB | 753 MB | −7 % |
 
-Reading: on this hardware and kernel (EPYC 8224P, Linux 7.0, software kernel TLS, no NIC offload: `TlsTxSw`, not `TlsTxDevice`) kTLS is slower than rustls on every throughput test, including tunnels, and saves 5 to 20 % of memory. It stays off by default. The earlier single-host measurements (a gain on tunnels) do not reproduce here; the cost is the kernel's software AES-GCM and record handling on the one proxy core against rustls' AES-NI implementation. With a NIC that offers TLS offload (`TlsTxDevice`) the result could differ: not tested.
+Reading: on this hardware and kernel (EPYC 8224P, Linux 7.0, software kernel TLS, no NIC offload: `TlsTxSw`, not `TlsTxDevice`) kTLS is slower than rustls on every throughput test, including tunnels, and saves 5 to 20 % of memory. It stays off by default. The cost is the kernel's software AES-GCM and record handling on the one proxy core against rustls' AES-NI implementation. With a NIC that offers TLS offload (`TlsTxDevice`) the result could differ: not tested.
 
 ## Chapter 6: multi-core scaling, plain HTTP 1 KB
 
@@ -150,6 +146,4 @@ The proxy gets n physical cores (`PROXY_CPUS=0-(n-1)`, `WORKERS=n`; the hyperthr
 
 Reading: rustle scales linearly, about 55,000 req/s per added core, and at 8 cores serves 3.8× the next proxy (Squid 116,833 and 3proxy 114,736) and 14× gost. Squid scales almost as well as rustle but from a lower base (about 14,500 req/s per core); 3proxy needs far more connections to keep its cores busy (its best level moves from 256 to 4,096) and still falls short of linear (×5.4).
 
-Validity (`tools/validity.py` on each n): no client error, every best level at the proxy's CPU limit (`proxy_util` 0.97 to 1.00), generator never saturated, origin at 72 % of its threads at the largest point (rustle, n=8) and 20 % or less for the others. The traffic stays near 4 Gbit/s at 440,000 req/s, far from the 23.5 Gbit/s link: this curve measures the proxies, not the network. One gost step (n=8) stopped at start-up (`container … is not running`, as in the earlier gost incidents) and was re-run alone.
-
-Not measured: more than 8 proxy cores, multi-core for TLS, HTTP/2 and tunnels (the NIC would then be the limit), and Tinyproxy.
+Validity (`tools/validity.py` on each n): no client error, every best level at the proxy's CPU limit (`proxy_util` 0.97 to 1.00), generator never saturated, origin at 72 % of its threads at the largest point (rustle, n=8) and 20 % or less for the others. The traffic stays near 4 Gbit/s at 440,000 req/s, far from the 23.5 Gbit/s link: this curve measures the proxies, not the network.

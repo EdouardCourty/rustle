@@ -83,7 +83,15 @@ pub fn scenarios() -> Vec<Scenario> {
             drop(c);
             let st = p.wait_exit(Duration::from_secs(8)).await?;
             ensure!(st.success(), "exit {st}");
-            ensure!(p.stderr().contains("shutdown complete"));
+            // The proxy's stderr is read by a background task: give it a moment after the exit.
+            let t0 = Instant::now();
+            while !p.stderr().contains("shutdown complete") {
+                ensure!(
+                    t0.elapsed() < Duration::from_secs(3),
+                    "no `shutdown complete` in stderr"
+                );
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
             Ok(())
         }),
         scenario("process/sigterm-stops-accepting", |_env| async move {

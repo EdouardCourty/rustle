@@ -21,11 +21,10 @@ const ORIGINS_PER_CAP: usize = 16;
 
 /// Idle-upstream connection pool, keyed by origin (`host:port`).
 ///
-/// Rationale (profiled): the HTTP path used to open and close an upstream
-/// connection per request. At 2600 req/s that is ~5200 connect/accept/close
-/// syscall chains per second spread across the proxy and the backend; the
-/// benchmark shows the HTTP bulk gap versus 3proxy narrowing heavily when
-/// the connections are reused.
+/// Rationale (profiled): opening and closing an upstream connection per
+/// request costs ~2 connect/accept/close syscall chains per request (~5200
+/// per second at 2600 req/s) spread across the proxy and the backend;
+/// reusing the connections removes them.
 ///
 /// LIFO keeps the warmest socket in play. A full origin evicts its *oldest*
 /// idle socket rather than the one being returned, and a socket idle longer
