@@ -1,0 +1,232 @@
+{
+ "$schema": "../../../../../../data/schema/run.schema.json",
+ "schema_version": 1,
+ "proxy": "rustle",
+ "transport": "plain",
+ "matrix": "http",
+ "host": "remote",
+ "auth": true,
+ "started": "2026-10-28T22:29:59+0100",
+ "seed": 2004113323,
+ "repeat": 3,
+ "workers": 2,
+ "params": {
+  "proxy_cpus": "0-1",
+  "gen_threads": 24,
+  "up_threads": 8,
+  "sink_threads": 8,
+  "gen": "bench-generator",
+  "proxy": "bench-proxy",
+  "up": "bench-origin-sink"
+ },
+ "results": [
+  {
+   "test": "http-1kb",
+   "mode": "http",
+   "workload": {
+    "url": "http://172.16.12.2:8000/1kb",
+    "conns": 64,
+    "budget": "15s",
+    "keepalive": true
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 111587.401,
+    "mbps": 114.265,
+    "elapsed_s": 15.001,
+    "p50_ms": 0.565,
+    "p95_ms": 0.709,
+    "p99_ms": 0.786,
+    "errors": 0.0,
+    "reconnects": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 23.55,
+    "own_rss_mb": 3.9,
+    "own_rss_end_mb": 7.7,
+    "tls": null
+   },
+   "proxy": {
+    "cpu_s_per_run": 29.993,
+    "rss_mb": 7.2,
+    "peak_rss_mb": 7.2,
+    "tcp": {
+     "segs_out_per_run": 3349469,
+     "active_opens_per_run": 2,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 681,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 20.79,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.17,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "http-1kb",
+   "mode": "http",
+   "workload": {
+    "url": "http://172.16.12.2:8000/1kb",
+    "conns": 256,
+    "budget": "15s",
+    "keepalive": true
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 109152.073,
+    "mbps": 111.772,
+    "elapsed_s": 15.003,
+    "p50_ms": 2.376,
+    "p95_ms": 2.523,
+    "p99_ms": 2.605,
+    "errors": 0.0,
+    "reconnects": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 23.32,
+    "own_rss_mb": 3.7,
+    "own_rss_end_mb": 7.5,
+    "tls": null
+   },
+   "proxy": {
+    "cpu_s_per_run": 29.993,
+    "rss_mb": 11.5,
+    "peak_rss_mb": 11.5,
+    "tcp": {
+     "segs_out_per_run": 3277796,
+     "active_opens_per_run": 15,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 1288,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 20.76,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.17,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "http-1kb",
+   "mode": "http",
+   "workload": {
+    "url": "http://172.16.12.2:8000/1kb",
+    "conns": 1024,
+    "budget": "15s",
+    "keepalive": true
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 102676.51,
+    "mbps": 105.141,
+    "elapsed_s": 15.013,
+    "p50_ms": 9.961,
+    "p95_ms": 10.158,
+    "p99_ms": 10.224,
+    "errors": 0.0,
+    "reconnects": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 22.58,
+    "own_rss_mb": 3.7,
+    "own_rss_end_mb": 7.7,
+    "tls": null
+   },
+   "proxy": {
+    "cpu_s_per_run": 29.993,
+    "rss_mb": 9.8,
+    "peak_rss_mb": 27.2,
+    "tcp": {
+     "segs_out_per_run": 3085009,
+     "active_opens_per_run": 4,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 1248,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 19.78,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.16,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "http-1kb",
+   "mode": "http",
+   "workload": {
+    "url": "http://172.16.12.2:8000/1kb",
+    "conns": 4096,
+    "budget": "15s",
+    "keepalive": true
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 70264.495,
+    "mbps": 71.951,
+    "elapsed_s": 15.068,
+    "p50_ms": 56.885,
+    "p95_ms": 60.293,
+    "p99_ms": 64.75,
+    "errors": 0.0,
+    "reconnects": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 17.47,
+    "own_rss_mb": 3.8,
+    "own_rss_end_mb": 7.7,
+    "tls": null
+   },
+   "proxy": {
+    "cpu_s_per_run": 30.07,
+    "rss_mb": 12.4,
+    "peak_rss_mb": 98.6,
+    "tcp": {
+     "segs_out_per_run": 3819854,
+     "active_opens_per_run": 6620,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 170877,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 14.84,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.12,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  }
+ ]
+}

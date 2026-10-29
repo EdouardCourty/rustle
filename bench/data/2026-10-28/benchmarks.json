@@ -38,6 +38,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 18.096,
+        "3proxy": 47.569,
+        "squid": 66.048,
+        "gost": 210.01,
+        "tinyproxy": 129.391
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": 1.0,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": 0.98
       }
     },
     {
@@ -75,6 +89,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 24.528,
+        "3proxy": 52.199,
+        "squid": 92.489,
+        "gost": 225.194,
+        "tinyproxy": 174.159
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": 1.0,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": 0.99
       }
     },
     {
@@ -112,6 +140,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 35.738,
+        "3proxy": 192.084,
+        "squid": 128.075,
+        "gost": 208.872,
+        "tinyproxy": 129.419
+      },
+      "proxy_util": {
+        "rustle": 0.99,
+        "3proxy": 0.99,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": 0.98
       }
     },
     {
@@ -149,6 +191,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 363.727,
+        "3proxy": 560.836,
+        "squid": 2835.255,
+        "gost": 956.36,
+        "tinyproxy": 5010.862
+      },
+      "proxy_util": {
+        "rustle": 0.95,
+        "3proxy": 1.0,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": 1.0
       }
     },
     {
@@ -188,6 +244,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 3077.735,
+        "3proxy": 5227.507,
+        "squid": 30342.996,
+        "gost": 6900.004,
+        "tinyproxy": 48411.318
+      },
+      "proxy_util": {
+        "rustle": 0.83,
+        "3proxy": 1.0,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": 1.0
       }
     },
     {
@@ -227,6 +297,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_ms_per_gb": {
+        "rustle": 253.125,
+        "3proxy": 511.373,
+        "squid": 590.569,
+        "gost": 608.743,
+        "tinyproxy": 4573.915
+      },
+      "proxy_util": {
+        "rustle": 0.7,
+        "3proxy": 1.0,
+        "squid": 1.0,
+        "gost": 1.01,
+        "tinyproxy": 1.01
       }
     },
     {
@@ -449,6 +533,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 20.225,
+        "3proxy": null,
+        "squid": 74.017,
+        "gost": 395.491,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
       }
     },
     {
@@ -486,6 +584,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 28.197,
+        "3proxy": null,
+        "squid": 107.078,
+        "gost": 410.908,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
       }
     },
     {
@@ -523,6 +635,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 163.333,
+        "3proxy": null,
+        "squid": 488.556,
+        "gost": 397.412,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
       }
     },
     {
@@ -560,6 +686,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 771.326,
+        "3proxy": null,
+        "squid": 3613.163,
+        "gost": 1626.895,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
       }
     },
     {
@@ -597,6 +737,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 7063.297,
+        "3proxy": null,
+        "squid": 36896.091,
+        "gost": 12081.402,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
       }
     },
     {
@@ -634,6 +788,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 183.122,
+        "3proxy": null,
+        "squid": 520.508,
+        "gost": 445.227,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
       }
     },
     {
@@ -671,6 +839,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_ms_per_gb": {
+        "rustle": 672.164,
+        "3proxy": null,
+        "squid": 1648.749,
+        "gost": 1144.544,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.01,
+        "3proxy": null,
+        "squid": 1.0,
+        "gost": 1.02,
+        "tinyproxy": null
       }
     },
     {
@@ -856,6 +1038,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 29.889,
+        "3proxy": null,
+        "squid": null,
+        "gost": 191.12,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": null,
+        "gost": 1.0,
+        "tinyproxy": null
       }
     },
     {
@@ -893,6 +1089,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 40.349,
+        "3proxy": null,
+        "squid": null,
+        "gost": 211.361,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": null,
+        "gost": 1.0,
+        "tinyproxy": null
       }
     },
     {
@@ -930,6 +1140,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 200.993,
+        "3proxy": null,
+        "squid": null,
+        "gost": 457.23,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": null,
+        "gost": 1.0,
+        "tinyproxy": null
       }
     },
     {
@@ -967,6 +1191,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 1162.635,
+        "3proxy": null,
+        "squid": null,
+        "gost": 2238.576,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": null,
+        "gost": 1.0,
+        "tinyproxy": null
       }
     },
     {
@@ -1004,6 +1242,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 11356.5,
+        "3proxy": null,
+        "squid": null,
+        "gost": 19815.738,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": null,
+        "gost": 1.0,
+        "tinyproxy": null
       }
     },
     {
@@ -1041,6 +1293,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_ms_per_gb": {
+        "rustle": 911.054,
+        "3proxy": null,
+        "squid": null,
+        "gost": 1021.785,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": null,
+        "gost": 1.0,
+        "tinyproxy": null
       }
     },
     {
@@ -1226,6 +1492,27 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 17.094,
+        "3proxy": 30.195,
+        "squid": 22.884,
+        "gost": 21.368,
+        "tinyproxy": null
+      },
+      "p99_ms": {
+        "rustle": 1.286,
+        "3proxy": 3.162,
+        "squid": 1.491,
+        "gost": 2.572,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": 1.0,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
       }
     },
     {
@@ -1337,6 +1624,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_ms_per_gb": {
+        "rustle": 650.454,
+        "3proxy": 1007.296,
+        "squid": 1211.001,
+        "gost": 1154.36,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 0.94,
+        "3proxy": 1.0,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
       }
     },
     {
@@ -1374,6 +1675,27 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 92.81,
+        "3proxy": 3971.827,
+        "squid": 204.758,
+        "gost": 268.186,
+        "tinyproxy": null
+      },
+      "p99_ms": {
+        "rustle": 6.717,
+        "3proxy": 402.653,
+        "squid": 13.238,
+        "gost": 29.098,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": 1.0,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
       }
     },
     {
@@ -1411,6 +1733,27 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 17.565,
+        "3proxy": null,
+        "squid": 27.195,
+        "gost": 22.514,
+        "tinyproxy": null
+      },
+      "p99_ms": {
+        "rustle": 1.311,
+        "3proxy": null,
+        "squid": 1.769,
+        "gost": 2.703,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
       }
     },
     {
@@ -1485,6 +1828,20 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_ms_per_gb": {
+        "rustle": 1377.818,
+        "3proxy": null,
+        "squid": 3376.628,
+        "gost": 2110.104,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
       }
     },
     {
@@ -1522,6 +1879,27 @@
         "squid": [],
         "gost": [],
         "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 223.899,
+        "3proxy": null,
+        "squid": 570.038,
+        "gost": 456.536,
+        "tinyproxy": null
+      },
+      "p99_ms": {
+        "rustle": 15.073,
+        "3proxy": null,
+        "squid": 36.962,
+        "gost": 44.04,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
       }
     }
   ],
@@ -1558,6 +1936,20 @@
             "squid": [],
             "gost": [],
             "tinyproxy": []
+          },
+          "proxy_util": {
+            "rustle": 1.0,
+            "3proxy": 1.0,
+            "squid": 1.0,
+            "gost": 1.0,
+            "tinyproxy": null
+          },
+          "origin_util": {
+            "rustle": 0.09,
+            "3proxy": 0.03,
+            "squid": 0.02,
+            "gost": 0.03,
+            "tinyproxy": null
           }
         },
         {
@@ -1582,6 +1974,20 @@
             "squid": [],
             "gost": [],
             "tinyproxy": []
+          },
+          "proxy_util": {
+            "rustle": 1.0,
+            "3proxy": 1.0,
+            "squid": 1.0,
+            "gost": 0.98,
+            "tinyproxy": null
+          },
+          "origin_util": {
+            "rustle": 0.17,
+            "3proxy": 0.06,
+            "squid": 0.05,
+            "gost": 0.05,
+            "tinyproxy": null
           }
         },
         {
@@ -1606,6 +2012,20 @@
             "squid": [],
             "gost": [],
             "tinyproxy": []
+          },
+          "proxy_util": {
+            "rustle": 1.0,
+            "3proxy": 1.0,
+            "squid": 1.0,
+            "gost": 0.99,
+            "tinyproxy": null
+          },
+          "origin_util": {
+            "rustle": 0.35,
+            "3proxy": 0.11,
+            "squid": 0.1,
+            "gost": 0.1,
+            "tinyproxy": null
           }
         },
         {
@@ -1630,6 +2050,20 @@
             "squid": [],
             "gost": [],
             "tinyproxy": []
+          },
+          "proxy_util": {
+            "rustle": 1.0,
+            "3proxy": 0.99,
+            "squid": 1.0,
+            "gost": 0.98,
+            "tinyproxy": null
+          },
+          "origin_util": {
+            "rustle": 0.72,
+            "3proxy": 0.2,
+            "squid": 0.18,
+            "gost": 0.18,
+            "tinyproxy": null
           }
         }
       ]
@@ -1682,7 +2116,9 @@
       "unit": "Gbit/s",
       "direction": "higher",
       "user_space": 12.024,
-      "ktls": 6.857
+      "ktls": 6.857,
+      "user_space_cpu_ms_per_gb": 672.164,
+      "ktls_cpu_ms_per_gb": 1155.08
     },
     {
       "id": "tls-ram-1000",

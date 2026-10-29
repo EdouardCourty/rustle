@@ -1,0 +1,1169 @@
+{
+ "$schema": "../../../../../../data/schema/run.schema.json",
+ "schema_version": 1,
+ "proxy": "gost",
+ "transport": "h2",
+ "matrix": "http",
+ "host": "remote",
+ "auth": true,
+ "started": "2026-10-28T20:14:31+0100",
+ "seed": 2004113323,
+ "repeat": 3,
+ "workers": 1,
+ "params": {
+  "proxy_cpus": 0,
+  "gen_threads": 24,
+  "up_threads": 8,
+  "sink_threads": 8,
+  "gen": "bench-generator",
+  "proxy": "bench-proxy",
+  "up": "bench-origin-sink"
+ },
+ "results": [
+  {
+   "test": "hold-10000",
+   "mode": "hold",
+   "workload": {
+    "target": "172.16.12.2:9000",
+    "conns": 10000,
+    "duration": 10,
+    "ramp": 4096
+   },
+   "measured": {
+    "opened": 10000.0,
+    "failed": 0.0,
+    "rate": 2111.041,
+    "open_s": 4.737,
+    "elapsed_s": 10.064,
+    "p50_ms": 1768.714,
+    "p95_ms": 2393.509,
+    "p99_ms": 2642.085
+   },
+   "generator": {
+    "cpu_s_per_run": 3.92,
+    "own_rss_mb": 4.0,
+    "own_rss_end_mb": 666.7,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 0.86
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 5.14,
+    "rss_mb": 2638.9,
+    "peak_rss_mb": 2638.9,
+    "tcp": {
+     "segs_out_per_run": 188666,
+     "active_opens_per_run": 10000,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 9059,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 0.0,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 0.51,
+    "origin_util": 0.0,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "http-10mb",
+   "mode": "http",
+   "workload": {
+    "url": "http://172.16.12.2:8000/10mb",
+    "conns": 8,
+    "budget": "15s",
+    "keepalive": true
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 50.485,
+    "mbps": 529.371,
+    "elapsed_s": 15.094,
+    "p50_ms": 156.238,
+    "p95_ms": 179.306,
+    "p99_ms": 186.647,
+    "errors": 0.0,
+    "reconnects": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 13.88,
+    "own_rss_mb": 3.9,
+    "own_rss_end_mb": 9.0,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 0.67
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 15.1,
+    "rss_mb": 76.7,
+    "peak_rss_mb": 76.7,
+    "tcp": {
+     "segs_out_per_run": 6560494,
+     "active_opens_per_run": 761,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 1,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 1.88,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.02,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "http-10mb",
+   "mode": "http",
+   "workload": {
+    "url": "http://172.16.12.2:8000/10mb",
+    "conns": 32,
+    "budget": "15s",
+    "keepalive": true
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 50.303,
+    "mbps": 527.462,
+    "elapsed_s": 15.268,
+    "p50_ms": 633.34,
+    "p95_ms": 658.506,
+    "p99_ms": 671.089,
+    "errors": 0.0,
+    "reconnects": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 13.86,
+    "own_rss_mb": 4.0,
+    "own_rss_end_mb": 14.6,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 0.67
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 15.26,
+    "rss_mb": 91.0,
+    "peak_rss_mb": 91.0,
+    "tcp": {
+     "segs_out_per_run": 6587250,
+     "active_opens_per_run": 768,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 1,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 1.81,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.01,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "http-10mb",
+   "mode": "http",
+   "workload": {
+    "url": "http://172.16.12.2:8000/10mb",
+    "conns": 128,
+    "budget": "15s",
+    "keepalive": true
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 47.456,
+    "mbps": 497.616,
+    "elapsed_s": 16.183,
+    "p50_ms": 2667.577,
+    "p95_ms": 2751.463,
+    "p99_ms": 2768.241,
+    "errors": 0.0,
+    "reconnects": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 13.21,
+    "own_rss_mb": 4.0,
+    "own_rss_end_mb": 26.7,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 0.67
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 16.18,
+    "rss_mb": 134.8,
+    "peak_rss_mb": 136.5,
+    "tcp": {
+     "segs_out_per_run": 6499842,
+     "active_opens_per_run": 768,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 129,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 1.43,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.01,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "http-1kb",
+   "mode": "http",
+   "workload": {
+    "url": "http://172.16.12.2:8000/1kb",
+    "conns": 64,
+    "budget": "15s",
+    "keepalive": true
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 5230.911,
+    "mbps": 5.356,
+    "elapsed_s": 15.011,
+    "p50_ms": 11.272,
+    "p95_ms": 18.219,
+    "p99_ms": 20.972,
+    "errors": 0.0,
+    "reconnects": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 3.35,
+    "own_rss_mb": 3.9,
+    "own_rss_end_mb": 16.7,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 0.67
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 15.007,
+    "rss_mb": 86.5,
+    "peak_rss_mb": 96.0,
+    "tcp": {
+     "segs_out_per_run": 709795,
+     "active_opens_per_run": 78797,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 2,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 3.67,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.03,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "http-1kb",
+   "mode": "http",
+   "workload": {
+    "url": "http://172.16.12.2:8000/1kb",
+    "conns": 256,
+    "budget": "15s",
+    "keepalive": true
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 4468.714,
+    "mbps": 4.576,
+    "elapsed_s": 15.048,
+    "p50_ms": 54.788,
+    "p95_ms": 71.303,
+    "p99_ms": 78.119,
+    "errors": 0.0,
+    "reconnects": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 3.18,
+    "own_rss_mb": 3.9,
+    "own_rss_end_mb": 46.3,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 0.67
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 15.033,
+    "rss_mb": 132.7,
+    "peak_rss_mb": 142.8,
+    "tcp": {
+     "segs_out_per_run": 674151,
+     "active_opens_per_run": 67219,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 5295,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 3.28,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.03,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "http-1kb",
+   "mode": "http",
+   "workload": {
+    "url": "http://172.16.12.2:8000/1kb",
+    "conns": 1024,
+    "budget": "15s",
+    "keepalive": true
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 4024.273,
+    "mbps": 4.121,
+    "elapsed_s": 15.179,
+    "p50_ms": 241.172,
+    "p95_ms": 297.796,
+    "p99_ms": 438.305,
+    "errors": 0.0,
+    "reconnects": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 3.44,
+    "own_rss_mb": 3.9,
+    "own_rss_end_mb": 172.5,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 0.69
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 15.157,
+    "rss_mb": 300.4,
+    "peak_rss_mb": 321.9,
+    "tcp": {
+     "segs_out_per_run": 625471,
+     "active_opens_per_run": 61075,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 2810,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 3.11,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.03,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "hold-1000",
+   "mode": "hold",
+   "workload": {
+    "target": "172.16.12.2:9000",
+    "conns": 1000,
+    "duration": 10,
+    "ramp": 4096
+   },
+   "measured": {
+    "opened": 1000.0,
+    "failed": 0.0,
+    "rate": 2169.197,
+    "open_s": 0.461,
+    "elapsed_s": 10.008,
+    "p50_ms": 431.729,
+    "p95_ms": 456.689,
+    "p99_ms": 457.642
+   },
+   "generator": {
+    "cpu_s_per_run": 0.49,
+    "own_rss_mb": 3.9,
+    "own_rss_end_mb": 84.4,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 0.67
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 0.51,
+    "rss_mb": 225.4,
+    "peak_rss_mb": 225.4,
+    "tcp": {
+     "segs_out_per_run": 18122,
+     "active_opens_per_run": 1000,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 302,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 0.0,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 0.05,
+    "origin_util": 0.0,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "http-1kb-short",
+   "mode": "http",
+   "workload": {
+    "url": "http://172.16.12.2:8000/1kb",
+    "conns": 64,
+    "budget": "15s",
+    "keepalive": false
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 2187.227,
+    "mbps": 2.24,
+    "elapsed_s": 15.019,
+    "p50_ms": 29.884,
+    "p95_ms": 39.059,
+    "p99_ms": 41.419,
+    "errors": 0.0,
+    "reconnects": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 9.32,
+    "own_rss_mb": 4.0,
+    "own_rss_end_mb": 19.6,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 1.0
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 15.02,
+    "rss_mb": 93.2,
+    "peak_rss_mb": 94.6,
+    "tcp": {
+     "segs_out_per_run": 591404,
+     "active_opens_per_run": 32849,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 1,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 1.62,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.01,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "http-1kb-short",
+   "mode": "http",
+   "workload": {
+    "url": "http://172.16.12.2:8000/1kb",
+    "conns": 256,
+    "budget": "15s",
+    "keepalive": false
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 2056.917,
+    "mbps": 2.106,
+    "elapsed_s": 15.074,
+    "p50_ms": 123.208,
+    "p95_ms": 156.238,
+    "p99_ms": 173.015,
+    "errors": 0.0,
+    "reconnects": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 8.83,
+    "own_rss_mb": 4.0,
+    "own_rss_end_mb": 50.5,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 1.0
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 15.063,
+    "rss_mb": 139.4,
+    "peak_rss_mb": 143.2,
+    "tcp": {
+     "segs_out_per_run": 593917,
+     "active_opens_per_run": 31002,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 23758,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 1.6,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.01,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "http-1kb-short",
+   "mode": "http",
+   "workload": {
+    "url": "http://172.16.12.2:8000/1kb",
+    "conns": 1024,
+    "budget": "15s",
+    "keepalive": false
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 1968.368,
+    "mbps": 2.016,
+    "elapsed_s": 15.242,
+    "p50_ms": 517.997,
+    "p95_ms": 654.311,
+    "p99_ms": 717.226,
+    "errors": 0.0,
+    "reconnects": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 8.87,
+    "own_rss_mb": 3.9,
+    "own_rss_end_mb": 169.5,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 0.99
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 15.24,
+    "rss_mb": 229.6,
+    "peak_rss_mb": 306.4,
+    "tcp": {
+     "segs_out_per_run": 656675,
+     "active_opens_per_run": 30023,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 28153,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 1.61,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.01,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "hold-5000",
+   "mode": "hold",
+   "workload": {
+    "target": "172.16.12.2:9000",
+    "conns": 5000,
+    "duration": 10,
+    "ramp": 4096
+   },
+   "measured": {
+    "opened": 5000.0,
+    "failed": 0.0,
+    "rate": 2141.328,
+    "open_s": 2.335,
+    "elapsed_s": 10.023,
+    "p50_ms": 1439.836,
+    "p95_ms": 2274.752,
+    "p99_ms": 2284.917
+   },
+   "generator": {
+    "cpu_s_per_run": 2.02,
+    "own_rss_mb": 3.9,
+    "own_rss_end_mb": 335.1,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 0.73
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 2.54,
+    "rss_mb": 1244.9,
+    "peak_rss_mb": 1244.9,
+    "tcp": {
+     "segs_out_per_run": 93677,
+     "active_opens_per_run": 5000,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 4236,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 0.0,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 0.25,
+    "origin_util": 0.0,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "http-1mb",
+   "mode": "http",
+   "workload": {
+    "url": "http://172.16.12.2:8000/1mb",
+    "conns": 16,
+    "budget": "15s",
+    "keepalive": true
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 446.772,
+    "mbps": 468.475,
+    "elapsed_s": 15.021,
+    "p50_ms": 35.127,
+    "p95_ms": 40.894,
+    "p99_ms": 44.04,
+    "errors": 0.0,
+    "reconnects": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 11.78,
+    "own_rss_mb": 4.0,
+    "own_rss_end_mb": 11.3,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 0.67
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 15.023,
+    "rss_mb": 82.5,
+    "peak_rss_mb": 82.5,
+    "tcp": {
+     "segs_out_per_run": 5818904,
+     "active_opens_per_run": 6726,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 1,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 1.92,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.02,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "http-1mb",
+   "mode": "http",
+   "workload": {
+    "url": "http://172.16.12.2:8000/1mb",
+    "conns": 64,
+    "budget": "15s",
+    "keepalive": true
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 436.529,
+    "mbps": 457.734,
+    "elapsed_s": 15.071,
+    "p50_ms": 146.801,
+    "p95_ms": 180.355,
+    "p99_ms": 182.452,
+    "errors": 0.0,
+    "reconnects": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 11.29,
+    "own_rss_mb": 4.0,
+    "own_rss_end_mb": 19.2,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 0.67
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 15.073,
+    "rss_mb": 106.0,
+    "peak_rss_mb": 106.0,
+    "tcp": {
+     "segs_out_per_run": 5627800,
+     "active_opens_per_run": 6546,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 2,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 1.66,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.01,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "http-1mb",
+   "mode": "http",
+   "workload": {
+    "url": "http://172.16.12.2:8000/1mb",
+    "conns": 256,
+    "budget": "15s",
+    "keepalive": true
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 403.502,
+    "mbps": 423.103,
+    "elapsed_s": 15.408,
+    "p50_ms": 629.146,
+    "p95_ms": 679.477,
+    "p99_ms": 692.06,
+    "errors": 0.0,
+    "reconnects": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 11.51,
+    "own_rss_mb": 3.9,
+    "own_rss_end_mb": 48.6,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 0.67
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 15.397,
+    "rss_mb": 186.0,
+    "peak_rss_mb": 194.9,
+    "tcp": {
+     "segs_out_per_run": 5347212,
+     "active_opens_per_run": 6218,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 7426,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 1.55,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.01,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "http-10kb",
+   "mode": "http",
+   "workload": {
+    "url": "http://172.16.12.2:8000/10kb",
+    "conns": 64,
+    "budget": "15s",
+    "keepalive": true
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 4731.876,
+    "mbps": 48.454,
+    "elapsed_s": 15.008,
+    "p50_ms": 13.042,
+    "p95_ms": 20.054,
+    "p99_ms": 22.807,
+    "errors": 0.0,
+    "reconnects": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 4.36,
+    "own_rss_mb": 4.1,
+    "own_rss_end_mb": 18.2,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 0.67
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 15.01,
+    "rss_mb": 89.0,
+    "peak_rss_mb": 99.2,
+    "tcp": {
+     "segs_out_per_run": 1206807,
+     "active_opens_per_run": 70924,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 1,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 3.69,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.03,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "http-10kb",
+   "mode": "http",
+   "workload": {
+    "url": "http://172.16.12.2:8000/10kb",
+    "conns": 256,
+    "budget": "15s",
+    "keepalive": true
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 4142.475,
+    "mbps": 42.419,
+    "elapsed_s": 15.05,
+    "p50_ms": 58.982,
+    "p95_ms": 79.167,
+    "p99_ms": 88.605,
+    "errors": 0.0,
+    "reconnects": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 4.1,
+    "own_rss_mb": 4.0,
+    "own_rss_end_mb": 47.4,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 0.67
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 15.047,
+    "rss_mb": 149.5,
+    "peak_rss_mb": 151.9,
+    "tcp": {
+     "segs_out_per_run": 1125366,
+     "active_opens_per_run": 62404,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 31098,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 3.34,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.03,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "http-10kb",
+   "mode": "http",
+   "workload": {
+    "url": "http://172.16.12.2:8000/10kb",
+    "conns": 1024,
+    "budget": "15s",
+    "keepalive": true
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 3809.815,
+    "mbps": 39.013,
+    "elapsed_s": 15.192,
+    "p50_ms": 252.707,
+    "p95_ms": 314.573,
+    "p99_ms": 457.179,
+    "errors": 0.0,
+    "reconnects": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 4.35,
+    "own_rss_mb": 4.0,
+    "own_rss_end_mb": 155.9,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 0.67
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 15.187,
+    "rss_mb": 346.4,
+    "peak_rss_mb": 355.7,
+    "tcp": {
+     "segs_out_per_run": 1082923,
+     "active_opens_per_run": 57908,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 28040,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 3.24,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.03,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "flood",
+   "mode": "flood",
+   "workload": {
+    "target": "172.16.12.2:9000",
+    "conns": 8,
+    "duration": 10,
+    "chunk": 65536
+   },
+   "measured": {
+    "gbps": 7.837,
+    "mb": 9796.583,
+    "p50_ms": 3.441,
+    "p95_ms": 3.572,
+    "p99_ms": 3.572,
+    "errors": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 5.59,
+    "own_rss_mb": 4.0,
+    "own_rss_end_mb": 8.5,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 0.67
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 10.01,
+    "rss_mb": 115.8,
+    "peak_rss_mb": 115.8,
+    "tcp": {
+     "segs_out_per_run": 6914752,
+     "active_opens_per_run": 8,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 1,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 0.0,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.0,
+    "sink_util": 0.04,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "flood",
+   "mode": "flood",
+   "workload": {
+    "target": "172.16.12.2:9000",
+    "conns": 32,
+    "duration": 10,
+    "chunk": 65536
+   },
+   "measured": {
+    "gbps": 6.962,
+    "mb": 8703.099,
+    "p50_ms": 13.107,
+    "p95_ms": 15.073,
+    "p99_ms": 15.204,
+    "errors": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 5.84,
+    "own_rss_mb": 4.0,
+    "own_rss_end_mb": 11.2,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 0.67
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 10.033,
+    "rss_mb": 155.8,
+    "peak_rss_mb": 155.8,
+    "tcp": {
+     "segs_out_per_run": 6133096,
+     "active_opens_per_run": 32,
+     "retrans_per_run": 2,
+     "delayed_acks_per_run": 6,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 0.0,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.0,
+    "sink_util": 0.04,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "hold-25000",
+   "mode": "hold",
+   "workload": {
+    "target": "172.16.12.2:9000",
+    "conns": 25000,
+    "duration": 10,
+    "ramp": 4096
+   },
+   "measured": {
+    "opened": 25000.0,
+    "failed": 0.0,
+    "rate": 1880.831,
+    "open_s": 13.292,
+    "elapsed_s": 13.292,
+    "p50_ms": 1775.056,
+    "p95_ms": 3549.496,
+    "p99_ms": 3852.185
+   },
+   "generator": {
+    "cpu_s_per_run": 10.08,
+    "own_rss_mb": 3.9,
+    "own_rss_end_mb": 1557.8,
+    "tls": {
+     "negotiated": "TLSv1_3/TLS13_AES_128_GCM_SHA256",
+     "resumed": 0.95
+    }
+   },
+   "proxy": {
+    "cpu_s_per_run": 12.313,
+    "rss_mb": 5883.5,
+    "peak_rss_mb": 5883.5,
+    "tcp": {
+     "segs_out_per_run": 474186,
+     "active_opens_per_run": 25000,
+     "retrans_per_run": 241,
+     "delayed_acks_per_run": 23835,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 0.0,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 0.93,
+    "origin_util": 0.0,
+    "sink_util": 0.01,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  }
+ ]
+}

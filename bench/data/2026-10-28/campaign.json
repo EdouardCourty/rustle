@@ -55,25 +55,250 @@
   "fairness": "bench/FAIRNESS.md",
   "results": "bench/RESULTS.md",
   "sources": {
-    "main": "published/2026-10-28/runs/campaign-20261028-235500.txt",
-    "ws": "published/2026-10-28/runs/campaign-ws-20261028-214800.txt",
-    "ktls": "published/2026-10-28/runs/campaign-20261028-215104.txt",
-    "scaling": [
+    "runs": [
       {
+        "role": "main",
+        "proxy": "rustle",
+        "transport": "tls",
+        "run": "published/2026-10-28/runs/rustle-tls/remote-auth-on/20261028-163639"
+      },
+      {
+        "role": "main",
+        "proxy": "squid",
+        "transport": "tls",
+        "run": "published/2026-10-28/runs/squid-tls/remote-auth-on/20261028-165612"
+      },
+      {
+        "role": "main",
+        "proxy": "rustle",
+        "transport": "tlsfull",
+        "run": "published/2026-10-28/runs/rustle-tlsfull/remote-auth-on/20261028-171614"
+      },
+      {
+        "role": "main",
+        "proxy": "squid",
+        "transport": "tlsfull",
+        "run": "published/2026-10-28/runs/squid-tlsfull/remote-auth-on/20261028-171931"
+      },
+      {
+        "role": "main",
+        "proxy": "gost",
+        "transport": "tlsfull",
+        "run": "published/2026-10-28/runs/gost-tlsfull/remote-auth-on/20261028-172250"
+      },
+      {
+        "role": "main",
+        "proxy": "rustle",
+        "transport": "h2",
+        "run": "published/2026-10-28/runs/rustle-h2/remote-auth-on/20261028-172607"
+      },
+      {
+        "role": "main",
+        "proxy": "rustle",
+        "transport": "plain",
+        "run": "published/2026-10-28/runs/rustle/remote-auth-on/20261028-143824"
+      },
+      {
+        "role": "main",
+        "proxy": "3proxy",
+        "transport": "plain",
+        "run": "published/2026-10-28/runs/3proxy/remote-auth-on/20261028-145749"
+      },
+      {
+        "role": "main",
+        "proxy": "squid",
+        "transport": "plain",
+        "run": "published/2026-10-28/runs/squid/remote-auth-on/20261028-152258"
+      },
+      {
+        "role": "main",
+        "proxy": "tinyproxy",
+        "transport": "plain",
+        "run": "published/2026-10-28/runs/tinyproxy/remote-auth-on/20261028-154323"
+      },
+      {
+        "role": "main",
+        "proxy": "gost",
+        "transport": "h2",
+        "run": "published/2026-10-28/runs/gost-h2/remote-auth-on/20261028-201431"
+      },
+      {
+        "role": "main",
+        "proxy": "gost",
+        "transport": "plain",
+        "run": "published/2026-10-28/runs/gost/remote-auth-on/20261028-160515"
+      },
+      {
+        "role": "main",
+        "proxy": "gost",
+        "transport": "tls",
+        "run": "published/2026-10-28/runs/gost-tls/remote-auth-on/20261028-175641"
+      },
+      {
+        "role": "ws",
+        "proxy": "rustle",
+        "transport": "plain",
+        "run": "published/2026-10-28/runs/rustle-ws/remote-auth-on/20261028-203456"
+      },
+      {
+        "role": "ws",
+        "proxy": "3proxy",
+        "transport": "plain",
+        "run": "published/2026-10-28/runs/3proxy-ws/remote-auth-on/20261028-204200"
+      },
+      {
+        "role": "ws",
+        "proxy": "gost",
+        "transport": "plain",
+        "run": "published/2026-10-28/runs/gost-ws/remote-auth-on/20261028-205614"
+      },
+      {
+        "role": "ws",
+        "proxy": "tinyproxy",
+        "transport": "plain",
+        "run": "published/2026-10-28/runs/tinyproxy-ws/remote-auth-on/20261028-210320"
+      },
+      {
+        "role": "ws",
+        "proxy": "rustle",
+        "transport": "tls",
+        "run": "published/2026-10-28/runs/rustle-tls-ws/remote-auth-on/20261028-211027"
+      },
+      {
+        "role": "ws",
+        "proxy": "gost",
+        "transport": "tls",
+        "run": "published/2026-10-28/runs/gost-tls-ws/remote-auth-on/20261028-212442"
+      },
+      {
+        "role": "ws",
+        "proxy": "squid",
+        "transport": "plain",
+        "run": "published/2026-10-28/runs/squid-ws/remote-auth-on/20261028-213225"
+      },
+      {
+        "role": "ws",
+        "proxy": "squid",
+        "transport": "tls",
+        "run": "published/2026-10-28/runs/squid-tls-ws/remote-auth-on/20261028-213932"
+      },
+      {
+        "role": "ktls",
+        "proxy": "rustle",
+        "transport": "tls",
+        "run": "published/2026-10-28/runs/rustle-tls/remote-auth-on/20261028-215112"
+      },
+      {
+        "role": "scaling",
+        "proxy": "rustle",
+        "transport": "plain",
         "cores": 1,
-        "index": "published/2026-10-28/runs/campaign-mc-n1.txt"
+        "run": "published/2026-10-28/runs/rustle/remote-auth-on/20261028-221208"
       },
       {
+        "role": "scaling",
+        "proxy": "3proxy",
+        "transport": "plain",
+        "cores": 1,
+        "run": "published/2026-10-28/runs/3proxy/remote-auth-on/20261028-221630"
+      },
+      {
+        "role": "scaling",
+        "proxy": "squid",
+        "transport": "plain",
+        "cores": 1,
+        "run": "published/2026-10-28/runs/squid/remote-auth-on/20261028-222054"
+      },
+      {
+        "role": "scaling",
+        "proxy": "gost",
+        "transport": "plain",
+        "cores": 1,
+        "run": "published/2026-10-28/runs/gost/remote-auth-on/20261028-222518"
+      },
+      {
+        "role": "scaling",
+        "proxy": "rustle",
+        "transport": "plain",
         "cores": 2,
-        "index": "published/2026-10-28/runs/campaign-mc-n2.txt"
+        "run": "published/2026-10-28/runs/rustle/remote-auth-on/20261028-222959"
       },
       {
+        "role": "scaling",
+        "proxy": "3proxy",
+        "transport": "plain",
+        "cores": 2,
+        "run": "published/2026-10-28/runs/3proxy/remote-auth-on/20261028-223420"
+      },
+      {
+        "role": "scaling",
+        "proxy": "squid",
+        "transport": "plain",
+        "cores": 2,
+        "run": "published/2026-10-28/runs/squid/remote-auth-on/20261028-223842"
+      },
+      {
+        "role": "scaling",
+        "proxy": "gost",
+        "transport": "plain",
+        "cores": 2,
+        "run": "published/2026-10-28/runs/gost/remote-auth-on/20261028-224304"
+      },
+      {
+        "role": "scaling",
+        "proxy": "rustle",
+        "transport": "plain",
         "cores": 4,
-        "index": "published/2026-10-28/runs/campaign-mc-n4.txt"
+        "run": "published/2026-10-28/runs/rustle/remote-auth-on/20261028-224743"
       },
       {
+        "role": "scaling",
+        "proxy": "3proxy",
+        "transport": "plain",
+        "cores": 4,
+        "run": "published/2026-10-28/runs/3proxy/remote-auth-on/20261028-225205"
+      },
+      {
+        "role": "scaling",
+        "proxy": "squid",
+        "transport": "plain",
+        "cores": 4,
+        "run": "published/2026-10-28/runs/squid/remote-auth-on/20261028-225626"
+      },
+      {
+        "role": "scaling",
+        "proxy": "gost",
+        "transport": "plain",
+        "cores": 4,
+        "run": "published/2026-10-28/runs/gost/remote-auth-on/20261028-230048"
+      },
+      {
+        "role": "scaling",
+        "proxy": "rustle",
+        "transport": "plain",
         "cores": 8,
-        "index": "published/2026-10-28/runs/campaign-mc-n8.txt"
+        "run": "published/2026-10-28/runs/rustle/remote-auth-on/20261028-230524"
+      },
+      {
+        "role": "scaling",
+        "proxy": "3proxy",
+        "transport": "plain",
+        "cores": 8,
+        "run": "published/2026-10-28/runs/3proxy/remote-auth-on/20261028-230944"
+      },
+      {
+        "role": "scaling",
+        "proxy": "squid",
+        "transport": "plain",
+        "cores": 8,
+        "run": "published/2026-10-28/runs/squid/remote-auth-on/20261028-231405"
+      },
+      {
+        "role": "scaling",
+        "proxy": "gost",
+        "transport": "plain",
+        "cores": 8,
+        "run": "published/2026-10-28/runs/gost/remote-auth-on/20261028-231925"
       }
     ]
   },

@@ -238,54 +238,22 @@
     },
     "sources": {
       "title": "Sources",
-      "description": "The campaign indexes the numbers are computed from, relative to bench/ (normally the committed copy under published/).",
+      "description": "The raw runs the numbers are computed from: the manifest of the campaign. tools/aggregate.py reads them, nothing else.",
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "main"
+        "runs"
       ],
       "properties": {
-        "main": {
-          "title": "Main index",
-          "description": "Plain, TLS, TLS full handshake and HTTP/2 matrices.",
-          "type": "string"
-        },
-        "ws": {
-          "title": "WebSocket index",
-          "description": "WebSocket matrix, plain and TLS.",
-          "type": "string"
-        },
-        "ktls": {
-          "title": "kTLS index",
-          "description": "rustle with tls.ktls = true.",
-          "type": "string"
-        },
-        "scaling": {
-          "title": "Scaling indexes",
-          "description": "One index per core count of the multi-core curve.",
+        "runs": {
+          "title": "Runs",
+          "description": "Every run of the campaign. For a role, a later entry for the same proxy and transport replaces an earlier one.",
           "type": "array",
+          "minItems": 1,
           "items": {
-            "title": "Scaling index",
-            "description": "The index of one core count.",
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "cores",
-              "index"
-            ],
-            "properties": {
-              "cores": {
-                "title": "Cores",
-                "description": "Cores given to the proxy.",
-                "type": "integer",
-                "minimum": 1
-              },
-              "index": {
-                "title": "Index",
-                "description": "Path of the index.",
-                "type": "string"
-              }
-            }
+            "$ref": "#/$defs/run",
+            "title": "Run",
+            "description": "One run directory."
           }
         }
       }
@@ -416,16 +384,71 @@
       "description": "A list of proxy ids.",
       "type": "array",
       "items": {
-        "title": "Proxy id",
-        "description": "Identifier of a compared proxy. A new proxy is added here: an additive change.",
-        "enum": [
-          "rustle",
-          "3proxy",
-          "squid",
-          "gost",
-          "tinyproxy"
-        ]
+        "$ref": "#/$defs/proxyId"
       }
+    },
+    "run": {
+      "title": "Run",
+      "description": "One run directory (a proxy on one transport) and the part it plays in the campaign.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "proxy",
+        "transport",
+        "run"
+      ],
+      "properties": {
+        "role": {
+          "title": "Role",
+          "description": "main: the plain, TLS, TLS full-handshake and HTTP/2 matrices. ws: the WebSocket matrix. ktls: rustle with tls.ktls = true. scaling: the multi-core curve (one run per proxy and core count). flood: the tunnel test taken from another campaign (a single host over loopback).",
+          "enum": [
+            "main",
+            "ws",
+            "ktls",
+            "scaling",
+            "flood"
+          ]
+        },
+        "proxy": {
+          "$ref": "#/$defs/proxyId",
+          "title": "Proxy",
+          "description": "Proxy of the run (checked against its run.json)."
+        },
+        "transport": {
+          "title": "Transport",
+          "description": "Transport of the run (checked against its run.json).",
+          "enum": [
+            "plain",
+            "tls",
+            "tlsfull",
+            "h2"
+          ]
+        },
+        "cores": {
+          "title": "Cores",
+          "description": "Cores given to the proxy; scaling runs only.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "run": {
+          "title": "Run",
+          "description": "Directory of the run (it holds run.json), relative to bench/; normally the committed copy under published/.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "proxyId": {
+      "title": "Proxy id",
+      "description": "Identifier of a compared proxy. A new proxy is added here: an additive change.",
+      "enum": [
+        "rustle",
+        "3proxy",
+        "squid",
+        "gost",
+        "tinyproxy"
+      ]
     }
   }
 }

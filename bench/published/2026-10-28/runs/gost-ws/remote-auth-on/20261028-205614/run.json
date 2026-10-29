@@ -1,0 +1,395 @@
+{
+ "$schema": "../../../../../../data/schema/run.schema.json",
+ "schema_version": 1,
+ "proxy": "gost",
+ "transport": "plain",
+ "matrix": "ws",
+ "host": "remote",
+ "auth": true,
+ "started": "2026-10-28T20:56:14+0100",
+ "seed": 2004113323,
+ "repeat": 3,
+ "workers": 1,
+ "params": {
+  "proxy_cpus": 0,
+  "gen_threads": 24,
+  "up_threads": 8,
+  "sink_threads": 8,
+  "gen": "bench-generator",
+  "proxy": "bench-proxy",
+  "up": "bench-origin-sink"
+ },
+ "results": [
+  {
+   "test": "ws-64b",
+   "mode": "ws",
+   "workload": {
+    "url": "ws://172.16.12.2:8000/ws",
+    "conns": 64,
+    "size": 64,
+    "window": 1,
+    "short": false,
+    "budget": "15s"
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 46808.464,
+    "mbps": 2.996,
+    "elapsed_s": 15.004,
+    "p50_ms": 1.278,
+    "p95_ms": 2.507,
+    "p99_ms": 2.572,
+    "errors": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 9.76,
+    "own_rss_mb": 3.9,
+    "own_rss_end_mb": 7.9,
+    "tls": null
+   },
+   "proxy": {
+    "cpu_s_per_run": 15.007,
+    "rss_mb": 56.9,
+    "peak_rss_mb": 56.9,
+    "tcp": {
+     "segs_out_per_run": 1405430,
+     "active_opens_per_run": 64,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 1,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 8.4,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.07,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "ws-64b",
+   "mode": "ws",
+   "workload": {
+    "url": "ws://172.16.12.2:8000/ws",
+    "conns": 256,
+    "size": 64,
+    "window": 1,
+    "short": false,
+    "budget": "15s"
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 45280.232,
+    "mbps": 2.898,
+    "elapsed_s": 15.01,
+    "p50_ms": 5.603,
+    "p95_ms": 5.669,
+    "p99_ms": 5.702,
+    "errors": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 9.56,
+    "own_rss_mb": 3.7,
+    "own_rss_end_mb": 10.0,
+    "tls": null
+   },
+   "proxy": {
+    "cpu_s_per_run": 15.01,
+    "rss_mb": 100.8,
+    "peak_rss_mb": 100.8,
+    "tcp": {
+     "segs_out_per_run": 1362712,
+     "active_opens_per_run": 256,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 5,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 8.32,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.07,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "ws-64b",
+   "mode": "ws",
+   "workload": {
+    "url": "ws://172.16.12.2:8000/ws",
+    "conns": 1024,
+    "size": 64,
+    "window": 1,
+    "short": false,
+    "budget": "15s"
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 41046.864,
+    "mbps": 2.627,
+    "elapsed_s": 15.033,
+    "p50_ms": 24.379,
+    "p95_ms": 24.51,
+    "p99_ms": 25.035,
+    "errors": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 9.25,
+    "own_rss_mb": 3.7,
+    "own_rss_end_mb": 11.5,
+    "tls": null
+   },
+   "proxy": {
+    "cpu_s_per_run": 15.037,
+    "rss_mb": 277.6,
+    "peak_rss_mb": 277.6,
+    "tcp": {
+     "segs_out_per_run": 1252893,
+     "active_opens_per_run": 1024,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 637,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 7.91,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.07,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "ws-short",
+   "mode": "ws",
+   "workload": {
+    "url": "ws://172.16.12.2:8000/ws",
+    "conns": 64,
+    "size": 64,
+    "window": 1,
+    "short": true,
+    "budget": "15s"
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 3725.528,
+    "mbps": 0.238,
+    "elapsed_s": 15.01,
+    "p50_ms": 16.45,
+    "p95_ms": 24.642,
+    "p99_ms": 29.098,
+    "errors": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 5.66,
+    "own_rss_mb": 3.7,
+    "own_rss_end_mb": 7.8,
+    "tls": null
+   },
+   "proxy": {
+    "cpu_s_per_run": 14.997,
+    "rss_mb": 110.6,
+    "peak_rss_mb": 115.2,
+    "tcp": {
+     "segs_out_per_run": 917883,
+     "active_opens_per_run": 55965,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 1,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 5.29,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.04,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "ws-short",
+   "mode": "ws",
+   "workload": {
+    "url": "ws://172.16.12.2:8000/ws",
+    "conns": 256,
+    "size": 64,
+    "window": 1,
+    "short": true,
+    "budget": "15s"
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 3413.462,
+    "mbps": 0.218,
+    "elapsed_s": 15.045,
+    "p50_ms": 72.352,
+    "p95_ms": 96.469,
+    "p99_ms": 108.528,
+    "errors": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 5.45,
+    "own_rss_mb": 3.7,
+    "own_rss_end_mb": 10.2,
+    "tls": null
+   },
+   "proxy": {
+    "cpu_s_per_run": 15.017,
+    "rss_mb": 220.4,
+    "peak_rss_mb": 228.9,
+    "tcp": {
+     "segs_out_per_run": 924179,
+     "active_opens_per_run": 51407,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 28198,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 4.6,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.04,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "ws-64kb",
+   "mode": "ws",
+   "workload": {
+    "url": "ws://172.16.12.2:8000/ws",
+    "conns": 8,
+    "size": 65536,
+    "window": 8,
+    "short": false,
+    "budget": "15s"
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 13221.046,
+    "mbps": 866.454,
+    "elapsed_s": 15.004,
+    "p50_ms": 4.817,
+    "p95_ms": 6.128,
+    "p99_ms": 6.652,
+    "errors": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 7.49,
+    "own_rss_mb": 3.8,
+    "own_rss_end_mb": 10.0,
+    "tls": null
+   },
+   "proxy": {
+    "cpu_s_per_run": 15.007,
+    "rss_mb": 41.5,
+    "peak_rss_mb": 41.5,
+    "tcp": {
+     "segs_out_per_run": 18388926,
+     "active_opens_per_run": 8,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 1,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 7.18,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.06,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  },
+  {
+   "test": "ws-64kb",
+   "mode": "ws",
+   "workload": {
+    "url": "ws://172.16.12.2:8000/ws",
+    "conns": 32,
+    "size": 65536,
+    "window": 8,
+    "short": false,
+    "budget": "15s"
+   },
+   "err_kinds": "",
+   "measured": {
+    "rps": 13131.61,
+    "mbps": 860.593,
+    "elapsed_s": 15.015,
+    "p50_ms": 20.054,
+    "p95_ms": 20.972,
+    "p99_ms": 21.496,
+    "errors": 0.0
+   },
+   "generator": {
+    "cpu_s_per_run": 7.87,
+    "own_rss_mb": 3.7,
+    "own_rss_end_mb": 17.9,
+    "tls": null
+   },
+   "proxy": {
+    "cpu_s_per_run": 15.02,
+    "rss_mb": 49.5,
+    "peak_rss_mb": 49.5,
+    "tcp": {
+     "segs_out_per_run": 18281678,
+     "active_opens_per_run": 32,
+     "retrans_per_run": 0,
+     "delayed_acks_per_run": 1,
+     "listen_overflows": 0,
+     "listen_drops": 0
+    }
+   },
+   "harness": {
+    "up_cpu_s_per_run": 7.41,
+    "sink_cpu_s_per_run": null
+   },
+   "saturation": {
+    "proxy_util": 1.0,
+    "origin_util": 0.06,
+    "sink_util": 0.0,
+    "flags": []
+   },
+   "valid": true,
+   "problems": []
+  }
+ ]
+}

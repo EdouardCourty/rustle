@@ -365,6 +365,26 @@
           "$ref": "#/$defs/flagsByProxy",
           "title": "Flags",
           "description": "Saturation flags of each proxy's point."
+        },
+        "cpu_us": {
+          "$ref": "#/$defs/valuesByProxy",
+          "title": "CPU per request",
+          "description": "Microseconds of proxy CPU per request or message at each proxy's best point (http, ws-64b, ws-short tests)."
+        },
+        "cpu_ms_per_gb": {
+          "$ref": "#/$defs/valuesByProxy",
+          "title": "CPU per GB",
+          "description": "Milliseconds of proxy CPU per decimal gigabyte moved at each proxy's best point (tunnels and 64 KB WebSocket frames)."
+        },
+        "p99_ms": {
+          "$ref": "#/$defs/valuesByProxy",
+          "title": "p99 latency",
+          "description": "p99 latency in milliseconds at each proxy's best point (WebSocket tests)."
+        },
+        "proxy_util": {
+          "$ref": "#/$defs/valuesByProxy",
+          "title": "Proxy utilisation",
+          "description": "Proxy CPU over the cores it was given at each proxy's best point, 0 to 1."
         }
       }
     },
@@ -400,6 +420,16 @@
           "$ref": "#/$defs/flagsByProxy",
           "title": "Flags",
           "description": "Saturation flags of each proxy's point."
+        },
+        "proxy_util": {
+          "$ref": "#/$defs/valuesByProxy",
+          "title": "Proxy utilisation",
+          "description": "Proxy CPU over the cores it was given, 0 to 1."
+        },
+        "origin_util": {
+          "$ref": "#/$defs/valuesByProxy",
+          "title": "Origin utilisation",
+          "description": "Origin CPU over its threads, 0 to 1."
         }
       }
     },
@@ -513,6 +543,16 @@
         "ktls": {
           "title": "Kernel TLS",
           "description": "rustle with tls.ktls = true.",
+          "type": "number"
+        },
+        "user_space_cpu_ms_per_gb": {
+          "title": "CPU per GB, user-space TLS",
+          "description": "Milliseconds of proxy CPU per decimal gigabyte with tls.ktls = false (tunnel test only).",
+          "type": "number"
+        },
+        "ktls_cpu_ms_per_gb": {
+          "title": "CPU per GB, kernel TLS",
+          "description": "Milliseconds of proxy CPU per decimal gigabyte with tls.ktls = true (tunnel test only).",
           "type": "number"
         }
       }
