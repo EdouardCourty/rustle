@@ -63,7 +63,7 @@ BENCH_ONLY=http-1kb REPEAT=1 REMOTE=1 ./bench/run-remote.sh rustle on
 BENCH_ONLY=http-1kb REPEAT=1 REMOTE=1 ./bench/run-remote.sh 3proxy on
 ```
 
-Check in `results.txt`: `err_kinds=` empty, `proxy_util` near 1.00 at the best level, no `proxy_unsaturated` (if it shows, the sweep needs a higher level for that proxy: edit `sweep_levels` in `matrix.sh`), `gen_saturated` absent. If the generator or origin is saturated, raise `GEN_THREADS` / `UP_THREADS`.
+Check in `results/<label>/remote-auth-on/<timestamp>/run.json` (or let `python3 bench/tools/aggregate.py --report --sources <manifest>` list the points): `err_kinds` empty, `proxy_util` near 1.00 at the best level, no `proxy_unsaturated` flag (if it shows, the sweep needs a higher level for that proxy: edit `sweep_levels` in `matrix.sh`), no `generator_saturated` flag. If the generator or origin is saturated, raise `GEN_THREADS` / `UP_THREADS`.
 
 ### 6. The campaigns
 
@@ -107,11 +107,11 @@ One CPU for the proxy, the rest for the generator and the sink (`env.sh` reads t
 ## Publish
 
 ```sh
-FLOOD_FROM=bench/results/campaign-<single-host-index>.txt REMOTE=1 REPORT_ONLY=1 ./bench/run-all.sh
-git diff                     # README table + docs/benchmarks/*.svg
+FLOOD_FROM=bench/results/campaign-<single-host-manifest>.json REMOTE=1 REPORT_ONLY=1 ./bench/run-all.sh
+git diff                     # benchmarks.json, README table and numbers, RESULTS.md, docs/benchmarks/*.svg
 ```
 
-Then update `bench/RESULTS.md` (environment, preflight file, dates), AGENTS.md "Known state" (campaign files), and commit. `make bench-publish` is `run-all.sh`.
+Every table and number of `bench/RESULTS.md`, the README table and the charts are written from the raw runs. By hand: the new campaign's folder under `bench/data/` (`campaign.json`, `proxies.json`, `index.json`, see `bench/data/README.md`), the prose of `RESULTS.md`, AGENTS.md "Known state" (campaign files), and copy the runs you publish into `bench/published/<date>/` (point the campaign's `sources` at them). `make data-check` must pass. `make bench-publish` is `run-all.sh`.
 
 ## If something looks wrong
 

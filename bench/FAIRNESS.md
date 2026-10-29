@@ -87,7 +87,7 @@ Two checks on the published campaign:
 ## Run rules
 
 - **Every proxy at its own best concurrency.** Each load test runs at several connection counts (`sweep_levels` in `matrix.sh`: 64/256/1024 for small objects, 16/64/256 for 1 MB, 8/32/128 for 10 MB, 8/32 for tunnels) and the published figure is the best level without client errors. A fixed count understated 3proxy 5.8× (19 % CPU at 64 connections, 99 % at 1024). `NO_SWEEP=1` disables it.
-- **Saturation is measured, not assumed.** Every result carries `proxy_util` (proxy CPU / cores given), `origin_util` and `sink_util`; `proxy_unsaturated=1` (below 90 % at the level shown) or `origin_saturated` / `sink_saturated` (above 90 %) mean the number is limited by the harness, by the link or by a latency-bound proxy, not by the CPU of the proxy. `tools/validity.py` lists those points before anything is published.
+- **Saturation is measured, not assumed.** Every result carries `proxy_util` (proxy CPU / cores given), `origin_util` and `sink_util`; the `proxy_unsaturated` flag (below 90 % at the level shown) or `origin_saturated` / `sink_saturated` (above 90 %) mean the number is limited by the harness, by the link or by a latency-bound proxy, not by the CPU of the proxy. `tools/aggregate.py --report` lists those points before anything is published.
 - **Same cores for everybody.** `run-remote.sh` refuses to start without `PROXY_CPUS` (0 = one core, 0-3 = four) and requires `WORKERS` to equal that core count. The proxy's hyperthread siblings are offline and the NIC interrupts sit on other cores (`preflight.sh APPLY=1`).
 - **A run is invalid, and the script exits non-zero, when** any client-side error kind appears (`err_kinds` not empty), a hold test opens fewer tunnels than asked (a kernel or harness limit, never a proxy result), or the generator saturates. The generator also checks each response body against the exact size of the object it asked for.
 - **The three machines are compared before every campaign** (sysctls, governor, MTU, offloads, kernel, Docker, commit) and the links measured (`preflight.sh`); a difference or a link below the minimum stops the run.
@@ -114,7 +114,7 @@ The three-machine figures are in `RESULTS.md`.
 - Latency is closed-loop at each concurrency level (no open-loop rate); CPU per request is measured at saturation, not at an equal offered load.
 - One campaign, one seed, three repeats, medians, noise about ±3 to 5 %; no confidence intervals.
 - DNS is resolved once by the generator, IPv6, many origins, large header sets, chunked bodies, uploads and SOCKS5 are not part of the matrix (they are covered functionally by `e2e/`). The origin is static with `Content-Length`.
-- TLS footing is checked, not assumed: the generator offers AES-128-GCM first (as hardware-AES clients do), logs the version/cipher negotiated and the share of resumed handshakes on every TLS result, and `tools/validity.py` flags proxies that differ. rustle, Squid 7.7 and gost all negotiate TLS 1.3 / AES-128-GCM; with the generator's default order (ring: AES-256 first) Squid negotiated AES-256-GCM, which is why the order is set.
+- TLS footing is checked, not assumed: the generator offers AES-128-GCM first (as hardware-AES clients do), logs the version/cipher negotiated and the share of resumed handshakes on every TLS result, and `tools/aggregate.py --report` flags proxies that differ. rustle, Squid 7.7 and gost all negotiate TLS 1.3 / AES-128-GCM; with the generator's default order (ring: AES-256 first) Squid negotiated AES-256-GCM, which is why the order is set.
 - The HTTP/2 test opens one connection per client connection and sends sequential requests (no multiplexing); gost's h2 is a dedicated listener, rustle's is ALPN on the TLS port.
 - Proxy CPU is the container cgroup's (user + system); softirq time spent on other cores is not attributed.
 - Flood counts bytes written by the client and measures the upload direction only.
@@ -123,5 +123,5 @@ The three-machine figures are in `RESULTS.md`.
 
 1. Update the version in the table above and in the Dockerfile.
 2. A/B the change before keeping it; put the numbers in this file.
-3. Re-run the campaign on the three-machine setup ([`RUNBOOK.md`](RUNBOOK.md), `make bench-publish`), regenerate the charts and the README table, and refresh `published/`. Never mix numbers from two campaigns.
+3. Re-run the campaign on the three-machine setup ([`RUNBOOK.md`](RUNBOOK.md), `make bench-publish`), regenerate everything published from the raw runs (`make bench-publish`: `benchmarks.json`, charts, README and RESULTS.md numbers), and refresh `published/`. Never mix numbers from two campaigns.
 

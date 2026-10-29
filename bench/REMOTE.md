@@ -8,7 +8,7 @@ On one host the load generator, origin and sink share cores with (or next to) th
 GEN_HOST  (load generator)  ──►  PROXY_HOST  (proxy under test)  ──►  UP_HOST  (origin + sink)
 ```
 
-Same matrix, seed, shuffle and `RESULT` lines as `run-bench.sh` (shared `matrix.sh`), driven by `run-remote.sh` over SSH. Containers use the host network.
+Same matrix, seed, shuffle and results (`run.json`) as `run-bench.sh` (shared `matrix.sh`), driven by `run-remote.sh` over SSH. Containers use the host network.
 
 ## Machines
 
@@ -57,11 +57,11 @@ REMOTE=1 ./bench/run-campaign.sh                                 # the whole cam
 REMOTE=1 MATRIX=ws ./bench/run-campaign.sh                       # the WebSocket campaign
 ```
 
-Results land in `bench/results/<proxy>/remote-auth-<on|off>/<timestamp>/results.txt` on the machine you run from; the header records the hosts and parameters.
+Results land in `bench/results/<label>/remote-auth-<on|off>/<timestamp>/run.json` on the machine you run from (the generator prints one JSON document per test, `tools/record.py` adds the machines' counters and the verdicts); the header of the file records the hosts and parameters.
 
 ## Valid results
 
-*   **The generator must not be saturated.** `run-remote.sh` appends `gen_saturated=1` to a `RESULT` line when the generator used more than 70 % of its threads: raise `GEN_THREADS` or use a bigger generator host, and discard the point. Same check by hand: the proxy's CPU should be at its cpuset limit while the generator and the origin are not.
-*   `err_kinds` must be empty, `retrans_per_run` / `listen_drops` close to 0.
+*   **The generator must not be saturated.** `run-remote.sh` records `generator_saturated` among the saturation flags of a result when the generator used more than 70 % of its threads: raise `GEN_THREADS` or use a bigger generator host, and discard the point. Same check by hand: the proxy's CPU should be at its cpuset limit while the generator and the origin are not.
+*   `err_kinds` must be empty (a result with a client error is recorded as invalid), `retrans_per_run` / `listen_drops` close to 0.
 *   Compare every proxy with the same host settings, same `PROXY_CPUS` and same seed. Noise is about ±3–5 %: below that, no conclusion. Do not compare with numbers from the single-host harness (`run-bench.sh`).
 *   Do not edit the repo or the scripts during a run, and build images one machine at a time if they are small (rustc peaks at 1–2 GB).
