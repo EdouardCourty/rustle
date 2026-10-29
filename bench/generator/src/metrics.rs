@@ -1,4 +1,5 @@
-//! Run-measurement plumbing: per-run field bag, RESULT-line rendering,
+//! Run-measurement plumbing: per-run field bag, JSON rendering (the result
+//! document the harness collects), a short human line for the operator,
 //! index-wise medians and latency percentiles.
 
 /// One measured run. Static fields describe the workload; numeric fields
@@ -9,9 +10,77 @@ pub(crate) struct Metrics {
     pub(crate) nums: Vec<(&'static str, f64)>,
 }
 
+/// Workload fields that are numbers / booleans in the JSON document (every
+/// other static is a string).
+const INT_KEYS: [&str; 6] = ["conns", "duration", "ramp", "chunk", "size", "window"];
+const BOOL_KEYS: [&str; 2] = ["keepalive", "short"];
+
+/// A JSON string literal.
+pub(crate) fn json_str(s: &str) -> String {
+    let mut o = String::with_capacity(s.len() + 2);
+    o.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => o.push_str("\\\""),
+            '\\' => o.push_str("\\\\"),
+            '\n' => o.push_str("\\n"),
+            c if (c as u32) < 0x20 => o.push_str(&format!("\\u{:04x}", c as u32)),
+            c => o.push(c),
+        }
+    }
+    o.push('"');
+    o
+}
+
+/// A measurement as a JSON number with three decimals (what the figures
+/// have always been rounded to); NaN and infinities are `null`.
+pub(crate) fn json_num(v: f64) -> String {
+    if v.is_finite() {
+        format!("{v:.3}")
+    } else {
+        "null".to_string()
+    }
+}
+
 impl Metrics {
-    pub(crate) fn line(&self, tag: &str) -> String {
-        let mut s = format!("RESULT {tag}");
+    /// The workload description as a JSON object, `err_kinds` left out
+    /// (it is a result, not a parameter).
+    pub(crate) fn workload_json(&self) -> String {
+        let fields: Vec<String> = self
+            .statics
+            .iter()
+            .filter(|(k, _)| *k != "err_kinds")
+            .map(|(k, v)| {
+                let bare = (INT_KEYS.contains(k) && v.parse::<u64>().is_ok())
+                    || (BOOL_KEYS.contains(k) && (v == "true" || v == "false"));
+                let val = if bare { v.clone() } else { json_str(v) };
+                format!("{}:{val}", json_str(k))
+            })
+            .collect();
+        format!("{{{}}}", fields.join(","))
+    }
+
+    /// The measurements as a JSON object.
+    pub(crate) fn nums_json(&self) -> String {
+        let fields: Vec<String> = self
+            .nums
+            .iter()
+            .map(|(k, v)| format!("{}:{}", json_str(k), json_num(*v)))
+            .collect();
+        format!("{{{}}}", fields.join(","))
+    }
+
+    /// The `err_kinds` static (client-side error kinds), if the mode has one.
+    pub(crate) fn err_kinds(&self) -> Option<&str> {
+        self.statics
+            .iter()
+            .find(|(k, _)| *k == "err_kinds")
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// One line for the operator on stderr; nothing downstream parses it.
+    pub(crate) fn human(&self, tag: &str) -> String {
+        let mut s = tag.to_string();
         for (k, v) in &self.statics {
             s.push_str(&format!(" {k}={v}"));
         }
@@ -145,5 +214,46 @@ mod hist_tests {
         for (got, want) in [(p50, 5.0), (p95, 9.5), (p99, 9.9)] {
             assert!((got - want).abs() / want < 0.01, "{got} vs {want}");
         }
+    }
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+
+    fn http() -> Metrics {
+        Metrics {
+            statics: vec![
+                ("mode", "http".to_string()),
+                ("err_kinds", "status-426=2".to_string()),
+                ("url", "http://upstream:8000/1kb".to_string()),
+                ("conns", "64".to_string()),
+                ("budget", "15s".to_string()),
+                ("keepalive", "true".to_string()),
+            ],
+            nums: vec![("rps", 55257.5949), ("p99_ms", f64::NAN), ("errors", 0.0)],
+        }
+    }
+
+    #[test]
+    fn workload_is_typed_and_leaves_out_err_kinds() {
+        assert_eq!(
+            http().workload_json(),
+            r#"{"mode":"http","url":"http://upstream:8000/1kb","conns":64,"budget":"15s","keepalive":true}"#
+        );
+    }
+
+    #[test]
+    fn numbers_have_three_decimals_and_nan_is_null() {
+        assert_eq!(
+            http().nums_json(),
+            r#"{"rps":55257.595,"p99_ms":null,"errors":0.000}"#
+        );
+        assert_eq!(http().err_kinds(), Some("status-426=2"));
+    }
+
+    #[test]
+    fn strings_are_escaped() {
+        assert_eq!(json_str("a\"b\\c\nd"), r#""a\"b\\c\nd""#);
     }
 }

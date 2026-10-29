@@ -1,5 +1,6 @@
 //! bench-client: the load generator. Parses the CLI, runs warmup +
-//! measured rounds, prints machine-parsable `RESULT` lines.
+//! measured rounds, prints the measurements as one JSON document on stdout
+//! (a short human line per run goes to stderr; nothing parses it).
 
 mod connect;
 mod metrics;
@@ -7,7 +8,7 @@ mod modes;
 mod rt;
 
 use clap::{Parser, Subcommand};
-use metrics::median_metrics;
+use metrics::{json_num, json_str, median_metrics};
 
 /// Read /proc/self/statm resident field, in MB (Linux container target).
 fn rss_pages() -> f64 {
@@ -50,7 +51,7 @@ struct Cli {
     /// API key sent as Basic auth password (user is always "bench").
     #[arg(long, default_value = "secret1")]
     api_key: String,
-    /// Number of measured runs; the median RESULT is reported.
+    /// Number of measured runs; the median is reported.
     #[arg(long, default_value_t = 3)]
     repeat: u32,
     /// Disable the warmup run.
@@ -197,14 +198,16 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// ` tls_negotiated=<version>/<suite> tls_resumed=<share>` when the run used TLS
-/// towards the proxy (nothing otherwise).
-fn tls_tag(negotiated: &str, conns: u64, resumed: u64) -> String {
+/// `"tls":{...}` field of the result document: the version and suite
+/// negotiated and the share of resumed handshakes when the run used TLS
+/// towards the proxy, `null` otherwise.
+fn tls_json(negotiated: &str, conns: u64, resumed: u64) -> String {
     if conns == 0 {
-        return String::new();
+        return "null".to_string();
     }
     format!(
-        " tls_negotiated={negotiated} tls_resumed={:.2}",
+        "{{\"negotiated\":{},\"resumed\":{:.2}}}",
+        json_str(negotiated),
         resumed as f64 / conns as f64
     )
 }
@@ -240,13 +243,7 @@ async fn amain(cli: Cli) {
             tls_conns += st.conns;
             tls_resumed += st.resumed;
             negotiated = st.negotiated.clone();
-            println!(
-                "{}",
-                m.line(&format!(
-                    "run={k} own_rss_mb={own_rss_start:.1}{}",
-                    tls_tag(&st.negotiated, st.conns, st.resumed)
-                ))
-            );
+            eprintln!("{}", m.human(&format!("run={k}")));
             runs.push(m);
         }
         let gen_ticks1 = cpu_ticks();
@@ -255,13 +252,23 @@ async fn amain(cli: Cli) {
         // … and again after the runs: the retained footprint (tasks, buffers
         // kept by the allocator) is the load the client puts on the box.
         let own_rss_end = rss_pages();
+        let per_run: Vec<String> = runs.iter().map(|m| m.nums_json()).collect();
+        let median = median_metrics(runs);
+        eprintln!("{}", median.human("median"));
+        // One document: the workload, the medians, every run, the
+        // generator's own cost and the TLS footing. Rounded like the figures
+        // always were (three decimals), NaN as null.
         println!(
-            "{}",
-            median_metrics(runs).line(&format!(
-                "median own_rss_mb={own_rss_start:.1} own_rss_end={own_rss_end:.1} \
-                 gen_cpu_s_per_run={gen_cpu_per_run:.2}{}",
-                tls_tag(&negotiated, tls_conns, tls_resumed)
-            ))
+            "{{\"schema_version\":1,\"workload\":{},\"err_kinds\":{},\"median\":{},\"runs\":[{}],\
+             \"generator\":{{\"cpu_s_per_run\":{},\"own_rss_mb\":{},\"own_rss_end_mb\":{}}},\"tls\":{}}}",
+            median.workload_json(),
+            median.err_kinds().map_or("null".to_string(), json_str),
+            median.nums_json(),
+            per_run.join(","),
+            json_num(gen_cpu_per_run),
+            json_num(own_rss_start),
+            json_num(own_rss_end),
+            tls_json(&negotiated, tls_conns, tls_resumed)
         );
     }
 }
