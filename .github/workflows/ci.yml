@@ -31,6 +31,16 @@ jobs:
           crate="$(sed -n 's/^version = "\(.*\)"/\1/p' rustle/Cargo.toml | head -n1)"
           parse-changelog CHANGELOG.md "${crate}" > /dev/null
 
+  data:
+    name: website data
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: bench/data and docs/config.json are current and valid
+        run: python3 bench/tools/site-data.py --check
+
   lint:
     name: fmt + clippy (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

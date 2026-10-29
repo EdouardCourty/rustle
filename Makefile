@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-.PHONY: help build test e2e e2e-quick fmt check clippy images up down smoke bench bench-ws bench-all bench-publish bench-scaling charts latest latest-3proxy latest-off clean
+.PHONY: help build test e2e e2e-quick fmt check clippy images up down smoke bench bench-ws bench-all bench-publish bench-scaling charts data data-check latest latest-3proxy latest-off clean
 
 P ?= rustle
 A ?= on
@@ -18,10 +18,11 @@ test: ## unit tests
 fmt: ## format all the code
 	cargo fmt --all
 
-check: ## fmt + clippy (0 warnings) + tests + quick e2e — run before every commit
+check: ## fmt + clippy (0 warnings) + tests + site data + quick e2e — run before every commit
 	cargo fmt --all --check
 	cargo clippy --workspace --all-targets -- -D warnings
 	cargo test -p rustle
+	$(MAKE) data-check
 	$(MAKE) e2e-quick
 
 e2e: ## black-box functional tests, full suite (~2 min): make e2e [F="filter ..."]
@@ -57,6 +58,12 @@ bench: ## full matrix: make bench [P=rustle|3proxy|squid|gost|tinyproxy] [A=on|o
 
 charts: ## regenerate docs/benchmarks/*.svg from a campaign: make charts [C=bench/results/campaign[-ws]-<ts>.txt]
 	python3 bench/tools/charts.py $${C:-$$(ls -t bench/results/campaign-[0-9]*.txt | head -1)}
+
+data: ## regenerate bench/data/benchmarks.json from the published campaign (indexes in bench/data/campaign.json)
+	python3 bench/tools/site-data.py --write
+
+data-check: ## the website data files (bench/data/, docs/config.json) are up to date and valid
+	python3 bench/tools/site-data.py --check
 
 latest: ## show the latest result pass of the current proxy
 	cd bench && cat results/$(P)/auth-$(A)/$$(ls -t results/$(P)/auth-$(A) | head -1)/results.txt
