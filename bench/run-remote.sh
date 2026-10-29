@@ -4,7 +4,7 @@
 #
 #   GEN_HOST (load generator) --> PROXY_HOST (proxy under test) --> UP_HOST (origin + sink)
 #
-# Same matrix, seed, shuffle and RESULT lines as run-bench.sh (matrix.sh);
+# Same matrix, seed, shuffle and run.json results as run-bench.sh (matrix.sh);
 # only the plumbing differs: every host is driven over SSH, containers use
 # the host network. Setup, sizing and sysctls: REMOTE.md.
 #
@@ -42,7 +42,7 @@ WORKERS="${WORKERS:-1}"
 ACCESS_LOG="${ACCESS_LOG:-off}"
 KTLS="${KTLS:-false}"
 PROXY_TLS="${PROXY_TLS:-0}"; PROXY_H2="${PROXY_H2:-0}"
-ncpus=$(awk -F, '{ n=0; for (i=1;i<=NF;i++) { split($i,a,"-"); n += (a[2]==""?1:a[2]-a[1]+1) } print n }' <<<"$PROXY_CPUS")
+ncpus=$(python3 tools/record.py cpus "$PROXY_CPUS")
 [[ "$WORKERS" == "$ncpus" ]] || { echo "WORKERS=$WORKERS but PROXY_CPUS=$PROXY_CPUS is $ncpus core(s): set WORKERS=$ncpus" >&2; exit 2; }
 DRY_RUN="${DRY_RUN:-0}"
 export BENCH_SEED="${BENCH_SEED:-2004113323}"
@@ -111,57 +111,47 @@ start_proxy
 sleep 2
 
 out="results/${LABEL}/remote-auth-${AUTH}/$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$out"; : > "$out/results.txt"
-echo "# $PROXY remote auth=$AUTH tls=$PROXY_TLS h2=$PROXY_H2 repeat=$REPEAT workers=$WORKERS proxy_cpus=$PROXY_CPUS gen_threads=$GEN_THREADS up_threads=$UP_THREADS sink_threads=$SINK_THREADS gen=$GEN_HOST proxy=$PROXY_HOST up=$UP_HOST $(date)" | tee -a "$out/results.txt"
+raw="$out/.raw"   # raw counters of the test in progress (snapshots before and after, the generator's output)
+mkdir -p "$out" "$raw"
+if [[ "$PROXY_H2" == 1 ]]; then TRANSPORT=h2
+elif [[ "$PROXY_TLS" == 1 && "${TLS_RESUME:-1}" == 0 ]]; then TRANSPORT=tlsfull
+elif [[ "$PROXY_TLS" == 1 ]]; then TRANSPORT=tls
+else TRANSPORT=plain; fi
+python3 tools/record.py init "$out" --proxy "$PROXY" --transport "$TRANSPORT" --matrix "$([[ "${MATRIX:-}" == ws ]] && echo ws || echo http)" \
+    --host remote --auth "$AUTH" --repeat "$REPEAT" --workers "$WORKERS" \
+    --param "proxy_cpus=$PROXY_CPUS" --param "gen_threads=$GEN_THREADS" --param "up_threads=$UP_THREADS" \
+    --param "sink_threads=$SINK_THREADS" --param "gen=$GEN_HOST" --param "proxy=$PROXY_HOST" --param "up=$UP_HOST"
+echo "# $PROXY remote auth=$AUTH tls=$PROXY_TLS h2=$PROXY_H2 repeat=$REPEAT workers=$WORKERS proxy_cpus=$PROXY_CPUS gen_threads=$GEN_THREADS up_threads=$UP_THREADS sink_threads=$SINK_THREADS gen=$GEN_HOST proxy=$PROXY_HOST up=$UP_HOST $(date)"
 
-# --- Probes on the proxy host ----------------------------------------------
-# Whole container (cgroup v2): multi-process DUTs included. Unit: 1/100 s.
-cpu_ticks() { on "$PROXY_HOST" "docker exec proxy cat /sys/fs/cgroup/cpu.stat" | awk '/^usage_usec/{printf "%d", $2/10000}'; }
-_sum_status() { on "$PROXY_HOST" "docker exec proxy sh -c 'cat /proc/[0-9]*/status 2>/dev/null'" \
-    | awk -v k="$1:" '$1=="Name:"{n=$2} $1==k && n!="sh" && n!="cat"{s+=$2} END{printf "%.1f", s/1024}'; }
-sink_ticks() { on "$UP_HOST" "docker exec sink sh -c 'cat /proc/[0-9]*/stat 2>/dev/null | awk \"{s+=\\\$14+\\\$15} END{print s+0}\"'" ; }
-up_ticks() { on "$UP_HOST" "docker exec upstream sh -c 'cat /proc/[0-9]*/stat 2>/dev/null | awk \"{s+=\\\$14+\\\$15} END{print s+0}\"'" ; }
-# The proxy host's TCP counters (host network: the whole machine).
-tcp_counters() {
-    on "$PROXY_HOST" "cat /proc/net/snmp /proc/net/netstat" | awk '
-        /^(Tcp|TcpExt):/ { if (!(($1) in hdr)) { for (i=2;i<=NF;i++) k[$1,i]=$i; hdr[$1]=1 }
-                           else { for (i=2;i<=NF;i++) v[k[$1,i]]=$i } }
-        END { printf "%d %d %d %d %d %d", v["OutSegs"], v["ActiveOpens"], v["RetransSegs"],
-              v["DelayedACKs"], v["ListenOverflows"], v["ListenDrops"] }'
+# --- Raw snapshots on the machines --------------------------------------------
+# Taken before and after each test and read by tools/record.py: the proxy's whole
+# container (cgroup v2: multi-process DUTs included), the proxy host's network
+# counters (host network: the whole machine), the CPU of every process of the origin
+# and of the sink, and, after the run, the memory of the proxy's processes.
+snap() { # <directory>
+    mkdir -p "$1"
+    on "$PROXY_HOST" "docker exec proxy cat /sys/fs/cgroup/cpu.stat" > "$1/proxy.cpu_stat" || : > "$1/proxy.cpu_stat"
+    on "$PROXY_HOST" "cat /proc/net/snmp /proc/net/netstat" > "$1/proxy.net" || : > "$1/proxy.net"
+    on "$UP_HOST" "docker exec upstream sh -c 'cat /proc/[0-9]*/stat 2>/dev/null'" > "$1/up.stat" || : > "$1/up.stat"
+    on "$UP_HOST" "docker exec sink sh -c 'cat /proc/[0-9]*/stat 2>/dev/null'" > "$1/sink.stat" || : > "$1/sink.stat"
 }
-tcp_delta() {
-    awk -v a="$1" -v b="$2" -v n="$3" 'BEGIN { split(a,x," "); split(b,y," ");
-        printf "segs_out_per_run=%d active_opens_per_run=%d retrans_per_run=%d delayed_acks_per_run=%d listen_overflows=%d listen_drops=%d",
-            (y[1]-x[1])/n, (y[2]-x[2])/n, (y[3]-x[3])/n, (y[4]-x[4])/n, y[5]-x[5], y[6]-x[6] }'
+snap_status() { # <directory>
+    on "$PROXY_HOST" "docker exec proxy sh -c 'cat /proc/[0-9]*/status 2>/dev/null'" > "$1/proxy.status" || : > "$1/proxy.status"
 }
 
 gen() { on "$GEN_HOST" "docker run --rm --network host ${ULIMIT[*]} bench-client $*"; }
-
-# A generator at its limit measures itself, not the proxy: flag the run.
-check_generator() { # <RESULT line>
-    awk -v t="$GEN_THREADS" '{ for (i=1;i<=NF;i++) { split($i,a,"=");
-        if (a[1]=="gen_cpu_s_per_run") g=a[2]; if (a[1]=="elapsed_s") e=a[2] }
-        if (e>0 && g/(e*t) > 0.7) printf "gen_saturated=1 (generator at %.0f%% of its threads: raise GEN_THREADS or the host size)", 100*g/(e*t) }' <<<"$1"
-}
 
 run_test() {
     local name="$1"; shift
     echo; echo "### $name"
     start_proxy; sleep 1   # fresh state + fresh CPU counters
     gen --warmup-only "${GEN_ARGS[@]}" "$@" >/dev/null 2>&1 || true
-    local tick0 tick1 up0 up1 sk0 sk1 tcp0 tcp1 median
-    tick0=$(cpu_ticks); up0=$(up_ticks); sk0=$(sink_ticks); tcp0=$(tcp_counters)
-    gen --repeat "$REPEAT" --no-warmup "${GEN_ARGS[@]}" "$@" | tee /dev/stderr | grep '^RESULT median' > "$out/.median.txt" || true
-    tick1=$(cpu_ticks); up1=$(up_ticks); sk1=$(sink_ticks); tcp1=$(tcp_counters)
-    median=$(cat "$out/.median.txt")
-    if [[ -z "$median" ]]; then echo "!! no RESULT median line for $name" | tee -a "$out/results.txt"; return; fi
-    local cpu up_cpu sink_cpu
-    sink_cpu=$(awk -v a="$sk1" -v b="$sk0" -v n="$REPEAT" 'BEGIN{printf "%.2f", (a-b)/100/n}')
-    cpu=$(awk -v a="$tick1" -v b="$tick0" -v n="$REPEAT" 'BEGIN{printf "%.3f", (a-b)/100/n}')
-    up_cpu=$(awk -v a="$up1" -v b="$up0" -v n="$REPEAT" 'BEGIN{printf "%.2f", (a-b)/100/n}')
-    local line="$median cpu_s_per_run=$cpu up_cpu_s_per_run=$up_cpu rss_mb=$(_sum_status VmRSS) peak_rss_mb=$(_sum_status VmHWM) $(tcp_delta "$tcp0" "$tcp1" "$REPEAT") $(saturation_fields "$median" "$cpu" "$up_cpu" "$sink_cpu" "$ncpus" "$UP_THREADS" "$SINK_THREADS") $(check_generator "$median")"
-    echo "$line" | tee -a "$out/results.txt"
-    check_valid "$name" "$line"
+    snap "$raw/before"
+    gen --repeat "$REPEAT" --no-warmup "${GEN_ARGS[@]}" "$@" > "$raw/gen.json" || true  # no result: record.py reports it, the matrix goes on
+    snap "$raw/after"; snap_status "$raw/after"
+    # a generator at its limit measures itself, not the proxy: record.py flags the run (--gen-threads)
+    record_add --generator "$raw/gen.json" --repeat "$REPEAT" --proxy-cpus "$PROXY_CPUS" \
+        --up-threads "$UP_THREADS" --sink-threads "$SINK_THREADS" --gen-threads "$GEN_THREADS"
 }
 
 # A dedicated generator host has its own ephemeral ports: no replica split.
@@ -181,6 +171,6 @@ gen --repeat 1 --no-warmup "${GEN_ARGS[@]}" flood "$UP_SINK" --conns 8 --duratio
 matrix_select_and_shuffle
 for entry in "${shuffled[@]}"; do run_entry "$entry"; done
 
-echo; echo "==> results in $out/results.txt"
-[[ "${INVALID:-0}" == 1 ]] && { echo "!! this run is INVALID: see the INVALID lines in results.txt" >&2; exit 3; }
+echo; echo "==> run in $out"
+[[ "${INVALID:-0}" == 1 ]] && { echo "!! this run is INVALID: see the INVALID lines above (problems of each result are in $out/run.json)" >&2; exit 3; }
 exit 0

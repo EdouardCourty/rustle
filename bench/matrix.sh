@@ -4,7 +4,7 @@
 #
 # Inputs:  MATRIX (unset = HTTP/CONNECT matrix, `ws` = WebSocket matrix), UP_HTTP (origin host:port, default upstream:8000), UP_SINK (sink
 #          host:port, default sink:9000), BENCH_SEED, BENCH_ONLY.
-# Needs:   the caller defines run_test and run_hold.
+# Needs:   the caller defines run_test and run_hold, and $out (the run directory, see tools/record.py).
 # Output:  SEED (the seed used) and the `shuffled` array of commands to eval.
 
 UP_HTTP="${UP_HTTP:-upstream:8000}"
@@ -52,7 +52,8 @@ matrix_select_and_shuffle() {
         [[ ${#tests[@]} -gt 0 ]] || { echo "no test matches BENCH_ONLY=${BENCH_ONLY}" >&2; exit 2; }
     fi
     if [[ -n "${BENCH_SEED:-}" ]]; then SEED="$BENCH_SEED"; else SEED=$RANDOM$RANDOM; fi
-    echo "seed=$SEED" | tee -a "$out/results.txt"
+    echo "seed=$SEED"
+    python3 tools/record.py seed "$out" "$SEED"
     # Seeded Fisher-Yates: reproducible, and removes the order bias (the
     # network is not in the same state after hold-25k as after 1kb).
     shuffled=()
@@ -65,31 +66,12 @@ matrix_select_and_shuffle() {
     done
 }
 
-# A point is only publishable when the run was clean: no client-side error and,
-# for hold tests, every tunnel opened (a missing tunnel is a harness or kernel
-# limit, not a property of the proxy). Marks the run and returns non-zero at the
-# end of the script (INVALID=1).
-check_valid() { # <test name> <RESULT line>
-    local name="$1" line="$2"
-    if [[ "$line" =~ err_kinds=([^[:space:]]+) ]]; then
-        echo "!! INVALID $name: err_kinds=${BASH_REMATCH[1]}" | tee -a "$out/results.txt"
-        INVALID=1
-    fi
-    if [[ "$line" == *"mode=hold"* && "$line" =~ conns=([0-9]+) ]]; then
-        local want="${BASH_REMATCH[1]}"
-        if [[ "$line" =~ opened=([0-9]+) && "${BASH_REMATCH[1]}" -lt "$want" ]]; then
-            echo "!! INVALID $name: opened ${BASH_REMATCH[1]} of $want tunnels (check dmesg for OOM, vm.max_map_count, pids limit)" | tee -a "$out/results.txt"
-            INVALID=1
-        fi
-    fi
-}
-
 # --- Concurrency sweep -------------------------------------------------------
 # A fixed connection count measures the harness as much as the proxy: a
 # proxy that needs many connections to fill its core (3proxy: 19 % CPU at 64
 # connections, 99 % at 1024) is understated, one that degrades with
 # concurrency is flattered. Every load test therefore runs at several levels;
-# the table keeps the best valid level of each proxy (tools/campaign-table.py).
+# the tables keep the best valid level of each proxy (tools/aggregate.py).
 # NO_SWEEP=1 runs only the level written in the workload list.
 sweep_levels() { # <test name>
     # SWEEP_OVERRIDE="256 1024 4096": the connection levels to run for every load test (multi-core curve).
@@ -115,23 +97,18 @@ run_entry() { # <workload command>
     done
 }
 
-# --- Saturation: did this run reach the proxy's limit? ----------------------
-# The proxy is at its limit when its CPU is ~100 % of the cores it was given;
-# below that the harness (too few connections, a slow generator, origin or
-# sink) or a latency-bound proxy set the number. Origin and sink are flagged
-# above 90 % of their threads.
-saturation_fields() { # <RESULT line> <proxy cpu s> <origin cpu s> <sink cpu s> <proxy cores> <origin threads> <sink threads>
-    awk -v line="$1" -v p="$2" -v u="$3" -v k="$4" -v pc="$5" -v ut="$6" -v st="$7" 'BEGIN {
-        # flood prints its duration, the other modes their elapsed time
-        if (match(line, /elapsed_s=[0-9.]+/)) el = substr(line, RSTART + 10, RLENGTH - 10) + 0
-        else if (match(line, /duration=[0-9.]+/)) el = substr(line, RSTART + 9, RLENGTH - 9) + 0
-        else exit
-        mode = ""; if (match(line, /mode=[a-z]+/)) mode = substr(line, RSTART + 5, RLENGTH - 5)
-        if (el <= 0) exit
-        pu = p / (el * pc); ou = u / (el * ut); su = k / (el * st)
-        printf "proxy_util=%.2f origin_util=%.2f sink_util=%.2f", pu, ou, su
-        if (mode != "hold" && pu < 0.90) printf " proxy_unsaturated=1"
-        if (ou > 0.90) printf " origin_saturated=1"
-        if (su > 0.90) printf " sink_saturated=1"
-    }'
+# --- Recording ---------------------------------------------------------------
+# One result = the generator's JSON document + raw counter snapshots before and
+# after (taken by the caller's snap function into $raw/before and $raw/after);
+# tools/record.py computes everything else (CPU per run, memory, TCP counters,
+# saturation, validity) and appends the result to $out/run.json. Exit status of
+# record.py: 0 recorded, 3 recorded but INVALID, 4 nothing to record.
+record_add() { # <record.py add options after the run directory...>
+    local rc=0
+    python3 tools/record.py add "$out" --before "$raw/before" --after "$raw/after" "$@" || rc=$?
+    case $rc in
+        0|4) ;;
+        3) INVALID=1 ;;
+        *) echo "!! tools/record.py failed (status $rc)" >&2; INVALID=1 ;;
+    esac
 }

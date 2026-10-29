@@ -6,14 +6,14 @@ harness scripts take raw snapshots of the machines' counters (cgroup CPU, proces
 status, process stat, network counters) before and after it. This tool turns
 them into the result entry of the run's `run.json` (schema:
 bench/data/schema/run.schema.json), including the saturation and validity
-verdicts. Bash only passes paths and numbers; nothing here reads text back
-from a RESULT line.
+verdicts. Bash only passes paths and numbers; nothing reads a line of the generator back.
 
     record.py init <run dir> --proxy P --transport plain|tls|tlsfull|h2 --matrix http|ws
                    --host docker|remote --auth on|off --repeat N --workers N [--param key=value ...]
     record.py seed <run dir> <seed>
     record.py add  <run dir> --generator gen.json [--generator gen2.json ...] --before DIR --after DIR
-                   --repeat N --proxy-cores N --up-threads N --sink-threads N [--gen-threads N] [--conns N]
+                   --repeat N --proxy-cpus SPEC --up-threads N --sink-threads N [--gen-threads N] [--conns N]
+    record.py cpus <cpuset>          the number of CPUs of a cpuset such as 0, 0-3 or 0,2-3
     record.py manifest <file> --role main|ws|ktls|scaling|flood --proxy P --transport T --run <run dir> [--cores N]
 
 Snapshot directories hold the raw dumps, named after what they are:
@@ -90,6 +90,15 @@ def tcp_delta(before, after, repeat):
         d = after[out_name] - before[out_name]
         out[out_name] = d if out_name.startswith("listen_") else int(d / repeat)
     return out
+
+
+def cpuset_count(spec):
+    """Number of CPUs of a cpuset list such as `0`, `0-3` or `0,2-3`."""
+    n = 0
+    for part in spec.split(","):
+        lo, _, hi = part.partition("-")
+        n += int(hi) - int(lo) + 1 if hi else 1
+    return n
 
 
 def per_run(ticks_after, ticks_before, repeat, decimals):
@@ -293,7 +302,7 @@ def cmd_add(args):
     if not docs:
         print("!! no result document from the generator", file=sys.stderr)
         return 4
-    entry = build_entry(docs, snapshot(args.before), snapshot(args.after), args.repeat, args.proxy_cores,
+    entry = build_entry(docs, snapshot(args.before), snapshot(args.after), args.repeat, cpuset_count(args.proxy_cpus),
                         args.up_threads, args.sink_threads, args.gen_threads, args.conns)
     update_run(args.run_dir, lambda d: d["results"].append(entry))
     print(summary(entry), file=sys.stderr)
@@ -334,11 +343,13 @@ def main(argv=None):
     p.add_argument("--before", required=True)
     p.add_argument("--after", required=True)
     p.add_argument("--repeat", type=int, required=True)
-    p.add_argument("--proxy-cores", type=int, required=True)
+    p.add_argument("--proxy-cpus", required=True)
     p.add_argument("--up-threads", type=int, required=True)
     p.add_argument("--sink-threads", type=int, required=True)
     p.add_argument("--gen-threads", type=int)
     p.add_argument("--conns", type=int)
+    p = sub.add_parser("cpus")
+    p.add_argument("cpuset")
     p = sub.add_parser("manifest")
     p.add_argument("file")
     p.add_argument("--role", required=True, choices=["main", "ws", "ktls", "scaling", "flood"])
@@ -355,6 +366,8 @@ def main(argv=None):
         update_run(args.run_dir, lambda d: d.__setitem__("seed", args.seed))
     elif args.cmd == "add":
         return cmd_add(args)
+    elif args.cmd == "cpus":
+        print(cpuset_count(args.cpuset))
     else:
         cmd_manifest(args)
     return 0

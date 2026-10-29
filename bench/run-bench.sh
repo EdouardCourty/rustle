@@ -6,13 +6,14 @@
 #   REPEAT=5 ./run-bench.sh rustle on     # more repetitions
 #   ALLOCATOR="--features mimalloc" ./run-bench.sh rustle on   # allocator A/B
 #
-# Each client invocation does its own warmup + REPEAT measured runs and
-# prints one "RESULT median ..." line. This script additionally samples the
-# proxy container's CPU (utime+stime of PID 1) and RSS around each test and
-# appends: cpu_s_per_run=... rss_mb=...
+# Each client invocation does its own warmup + REPEAT measured runs and prints
+# one JSON document on stdout (its medians; a short human line per run goes to
+# stderr). This script additionally takes raw snapshots of the proxy container's
+# CPU, memory and network counters (and of the origin's and the sink's CPU) around
+# each test; tools/record.py turns the two into the test's result in run.json.
 #
 # Layout (2 cores): proxy pinned to core 0; generator/upstream/sink on core 1.
-# Results: bench/results/<proxy>/auth-<on|off>/<timestamp>/results.txt
+# Results: bench/results/<label>/auth-<on|off>/<timestamp>/run.json
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -80,52 +81,34 @@ trap 'docker compose down >/dev/null 2>&1' EXIT
 sleep 1
 
 out="results/${LABEL}/auth-${AUTH}/$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$out"
-: > "$out/results.txt"
-echo "# $PROXY auth=$AUTH tls=$PROXY_TLS h2=$PROXY_H2 repeat=$REPEAT workers=$WORKERS access_log=$ACCESS_LOG ktls=$KTLS seccomp=${SECCOMP:-default} proxy_cpu=$PROXY_CPU bench_cpu=$BENCH_CPU gen_threads=$GEN_THREADS up_threads=$UP_THREADS sink_threads=$SINK_THREADS $(date)" | tee -a "$out/results.txt"
+raw="$out/.raw"   # raw counters of the test in progress (snapshots before and after, the generator's output)
+mkdir -p "$out" "$raw"
+if [[ "$PROXY_H2" == 1 ]]; then TRANSPORT=h2
+elif [[ "$PROXY_TLS" == 1 && "${TLS_RESUME:-1}" == 0 ]]; then TRANSPORT=tlsfull
+elif [[ "$PROXY_TLS" == 1 ]]; then TRANSPORT=tls
+else TRANSPORT=plain; fi
+python3 tools/record.py init "$out" --proxy "$PROXY" --transport "$TRANSPORT" --matrix "$([[ "${MATRIX:-}" == ws ]] && echo ws || echo http)" \
+    --host docker --auth "$AUTH" --repeat "$REPEAT" --workers "$WORKERS" \
+    --param "access_log=$ACCESS_LOG" --param "ktls=$KTLS" --param "seccomp=${SECCOMP:-default}" --param "proxy_cpu=$PROXY_CPU" \
+    --param "bench_cpu=$BENCH_CPU" --param "gen_threads=$GEN_THREADS" --param "up_threads=$UP_THREADS" --param "sink_threads=$SINK_THREADS"
+echo "# $PROXY auth=$AUTH tls=$PROXY_TLS h2=$PROXY_H2 repeat=$REPEAT workers=$WORKERS proxy_cpu=$PROXY_CPU bench_cpu=$BENCH_CPU gen_threads=$GEN_THREADS $(date)"
 
-# CPU ticks and RSS (MB) of the proxy under test.
-# Whole container (cgroup v2), not PID 1: multi-process DUTs (Squid SMP
-# workers) would otherwise hide their workers' CPU. Unit: 1/100 s.
-cpu_ticks() { docker compose exec -T proxy cat /sys/fs/cgroup/cpu.stat | awk '/^usage_usec/{printf "%d", $2/10000}' || echo 0; }
-# Sum over the container's processes (same reason), minus the sh/cat of
-# this probe itself.
-_sum_status() { docker compose exec -T proxy sh -c "cat /proc/[0-9]*/status 2>/dev/null" | awk -v k="$1:" '$1=="Name:"{n=$2} $1==k && n!="sh" && n!="cat"{s+=$2} END{printf "%.1f", s/1024}' || echo 0; }
-rss_mb() { _sum_status VmRSS; }
-# Peak RSS of the test (VmHWM; the proxy restarts before each test). rss_mb
-# is sampled after the load ended = memory still held, not the live cost.
-peak_rss_mb() { _sum_status VmHWM; }
-# TCP counters of the proxy's network namespace (/proc/net/snmp, netstat):
-# segments sent, connections opened upstream (pool churn), retransmits,
-# delayed ACKs, accept-queue overflows/drops.
-tcp_counters() {
-    docker compose exec -T proxy cat /proc/net/snmp /proc/net/netstat 2>/dev/null | awk '
-        /^(Tcp|TcpExt):/ { if (!(($1) in hdr)) { for (i=2;i<=NF;i++) k[$1,i]=$i; hdr[$1]=1 }
-                           else { for (i=2;i<=NF;i++) v[k[$1,i]]=$i } }
-        END { printf "%d %d %d %d %d %d", v["OutSegs"], v["ActiveOpens"], v["RetransSegs"],
-              v["DelayedACKs"], v["ListenOverflows"], v["ListenDrops"] }' || echo "0 0 0 0 0 0"
+# Raw snapshots, taken before and after each test and read by tools/record.py:
+# the proxy's whole container (cgroup v2: multi-process DUTs such as Squid SMP
+# workers included), the network counters of the proxy's namespace, the CPU of
+# every process of the origin (nginx master + workers) and of the sink.
+snap() { # <directory>
+    mkdir -p "$1"
+    docker compose exec -T proxy cat /sys/fs/cgroup/cpu.stat > "$1/proxy.cpu_stat" || : > "$1/proxy.cpu_stat"
+    docker compose exec -T proxy cat /proc/net/snmp /proc/net/netstat > "$1/proxy.net" 2>/dev/null || : > "$1/proxy.net"
+    docker compose exec -T upstream sh -c 'cat /proc/[0-9]*/stat 2>/dev/null' > "$1/up.stat" || : > "$1/up.stat"
+    docker compose exec -T sink sh -c 'cat /proc/[0-9]*/stat 2>/dev/null' > "$1/sink.stat" || : > "$1/sink.stat"
 }
-# Per measured run (segments, opens, retrans, delayed ACKs); accept-queue
-# overflows/drops as totals (any > 0 explains SYN retransmits, p99 ~1/3/5 s).
-tcp_delta() { # <before> <after> <repeat>
-    awk -v a="$1" -v b="$2" -v n="$3" 'BEGIN { split(a,x," "); split(b,y," ");
-        printf "segs_out_per_run=%d active_opens_per_run=%d retrans_per_run=%d delayed_acks_per_run=%d listen_overflows=%d listen_drops=%d",
-            (y[1]-x[1])/n, (y[2]-x[2])/n, (y[3]-x[3])/n, (y[4]-x[4])/n, y[5]-x[5], y[6]-x[6] }'
+# Memory of the proxy's processes (VmRSS: held after the load ended; VmHWM: the
+# peak of the test, the proxy restarts before each test), after the run.
+snap_status() { # <directory>
+    docker compose exec -T proxy sh -c 'cat /proc/[0-9]*/status 2>/dev/null' > "$1/proxy.status" || : > "$1/proxy.status"
 }
-# Same, summed over all upstream processes (nginx master+workers): the
-# harness-side cost per test is the ceiling nobody sees.
-up_ticks() {
-    docker compose exec -T upstream sh -c \
-        'cat /proc/[0-9]*/stat 2>/dev/null | awk "{s+=\$14+\$15} END{print s+0}"'
-}
-
-# Same for the sink (flood and hold targets).
-sink_ticks() {
-    docker compose exec -T sink sh -c \
-        'cat /proc/[0-9]*/stat 2>/dev/null | awk "{s+=\$14+\$15} END{print s+0}"'
-}
-# Cores the proxy was given (PROXY_CPU like "0" or "0,1,2").
-proxy_cores=$(awk -F, '{ n=0; for (i=1;i<=NF;i++) { split($i,a,"-"); n += (a[2]==""?1:a[2]-a[1]+1) } print n }' <<<"$PROXY_CPU")
 
 run_test() {
     local name="$1"; shift
@@ -133,37 +116,18 @@ run_test() {
     echo "### $name"
     docker compose restart proxy >/dev/null  # fresh state + fresh CPU counters
     sleep 0.5
-    local tick0 tick1 median cpu_s_per_run up0 up1 up_cpu_s_per_run sk0 sk1 sink_cpu_s_per_run tcp0 tcp1
     # Warmup in its own generator run, before the counters are sampled:
     # the proxy's CPU then covers the measured runs only (a warmup inside
     # the measured runs would add ~6 % to every figure).
     docker compose --profile generator run --rm -T generator \
         --warmup-only "${GEN_ARGS[@]}" "$@" >/dev/null 2>&1 || true
-    tick0=$(cpu_ticks)
-    up0=$(up_ticks)
-    sk0=$(sink_ticks)
-    tcp0=$(tcp_counters)
+    snap "$raw/before"
     docker compose --profile generator run --rm -T generator \
-        --repeat "$REPEAT" --no-warmup "${GEN_ARGS[@]}" "$@" | tee /dev/stderr | grep '^RESULT median' > "$out/.median.txt" \
-        || true  # no RESULT (generator/proxy died): reported below, the matrix goes on
-    tick1=$(cpu_ticks)
-    up1=$(up_ticks)
-    sk1=$(sink_ticks)
-    tcp1=$(tcp_counters)
-    median=$(cat "$out/.median.txt")
-    if [ -z "$median" ]; then
-        echo "!! no RESULT median line for $name" | tee -a "$out/results.txt"
-        return
-    fi
-    # CPU seconds attributable to one measured run (warmup amortized over REPEAT).
-    cpu_s_per_run=$(awk -v a="$tick1" -v b="$tick0" -v n="$REPEAT" \
-        'BEGIN{printf "%.3f", (a-b)/100/n}')
-    up_cpu_s_per_run=$(awk -v a="$up1" -v b="$up0" -v n="$REPEAT" \
-        'BEGIN{printf "%.2f", (a-b)/100/n}')
-    sink_cpu_s_per_run=$(awk -v a="$sk1" -v b="$sk0" -v n="$REPEAT" 'BEGIN{printf "%.2f", (a-b)/100/n}')
-    line="$median cpu_s_per_run=$cpu_s_per_run up_cpu_s_per_run=$up_cpu_s_per_run rss_mb=$(rss_mb) peak_rss_mb=$(peak_rss_mb) $(tcp_delta "$tcp0" "$tcp1" "$REPEAT") $(saturation_fields "$median" "$cpu_s_per_run" "$up_cpu_s_per_run" "$sink_cpu_s_per_run" "$proxy_cores" "$UP_THREADS" "$SINK_THREADS")"
-    echo "$line" | tee -a "$out/results.txt"
-    check_valid "$name" "$line"
+        --repeat "$REPEAT" --no-warmup "${GEN_ARGS[@]}" "$@" > "$raw/gen.json" \
+        || true  # no result (generator/proxy died): record.py reports it, the matrix goes on
+    snap "$raw/after"; snap_status "$raw/after"
+    record_add --generator "$raw/gen.json" --repeat "$REPEAT" --proxy-cpus "$PROXY_CPU" \
+        --up-threads "$UP_THREADS" --sink-threads "$SINK_THREADS"
 }
 
 # Hold with optional 2-replica split (single client exhausts ephemeral ports).
@@ -178,34 +142,21 @@ run_hold() {
     echo "### hold-${conns} (2 replicas)"
     docker compose restart proxy >/dev/null
     sleep 0.5
-    local half=$(( (conns+1)/2 )) tick0 tick1
-    tick0=$(cpu_ticks)
+    local half=$(( (conns+1)/2 ))
+    snap "$raw/before"
     for i in 1 2; do
         docker compose --profile generator run -d --name "holdrep-$i" \
             generator --repeat 1 --no-warmup "${GEN_ARGS[@]}" hold sink:9000 \
             --conns "$half" --duration "$duration" --ramp 4096 >/dev/null
     done
     for i in 1 2; do docker wait "holdrep-$i" >/dev/null; done
-    tick1=$(cpu_ticks)
-    local opened=0 failed=0 maxelapsed=0
+    snap "$raw/after"; snap_status "$raw/after"
     for i in 1 2; do
-        local line o f e
-        line=$(docker logs "holdrep-$i" 2>/dev/null | grep '^RESULT' | tail -1) || true
+        docker logs "holdrep-$i" 2>/dev/null > "$raw/gen$i.json" || : > "$raw/gen$i.json"
         docker rm -f "holdrep-$i" >/dev/null 2>&1 || true
-        [ -n "$line" ] || continue
-        o=$(sed -n 's/.* opened=\([0-9.]*\).*/\1/p' <<<"$line")
-        f=$(sed -n 's/.* failed=\([0-9.]*\).*/\1/p' <<<"$line")
-        e=$(sed -n 's/.* elapsed_s=\([0-9.]*\).*/\1/p' <<<"$line")
-        opened=$(( opened + ${o%.*} ))
-        failed=$(( failed + ${f%.*} ))
-        maxelapsed=$(awk -v a="$maxelapsed" -v b="$e" 'BEGIN{print (a>b)?a:b}')
     done
-    local rate cpu_s_per_run
-    rate=$(awk -v o="$opened" -v e="$maxelapsed" 'BEGIN{printf "%.0f", o/e}')
-    cpu_s_per_run=$(awk -v a="$tick1" -v b="$tick0" 'BEGIN{printf "%.3f", (a-b)/100}')
-    line="RESULT median mode=hold conns=$conns replicas=2 opened=$opened failed=$failed rate=$rate elapsed_s=$maxelapsed cpu_s_per_run=$cpu_s_per_run rss_mb=$(rss_mb) peak_rss_mb=$(peak_rss_mb)"
-    echo "$line" | tee -a "$out/results.txt"
-    check_valid "hold-${conns}" "$line"
+    record_add --generator "$raw/gen1.json" --generator "$raw/gen2.json" --conns "$conns" --repeat 1 \
+        --proxy-cpus "$PROXY_CPU" --up-threads "$UP_THREADS" --sink-threads "$SINK_THREADS"
 }
 
 # --- Network warmup (before any measurement): conntrack growth, DNS/kernel
@@ -226,6 +177,6 @@ for entry in "${shuffled[@]}"; do
 done
 
 echo
-echo "==> results in $out/results.txt"
-[[ "${INVALID:-0}" == 1 ]] && { echo "!! this run is INVALID: see the INVALID lines in results.txt" >&2; exit 3; }
+echo "==> run in $out"
+[[ "${INVALID:-0}" == 1 ]] && { echo "!! this run is INVALID: see the INVALID lines above (problems of each result are in $out/run.json)" >&2; exit 3; }
 exit 0

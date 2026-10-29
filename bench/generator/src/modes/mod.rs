@@ -1,4 +1,4 @@
-//! Load modes. Each mode owns its workload and its RESULT line; the CLI
+//! Load modes. Each mode owns its workload and its measurements; the CLI
 //! dispatches here.
 
 pub mod flood;

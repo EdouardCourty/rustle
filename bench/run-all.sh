@@ -2,74 +2,57 @@
 # One command from a clean machine to the published artifacts:
 #
 #   HTTP/CONNECT campaign (5 proxies x plain/TLS/h2)  ->  WebSocket campaign (plain, TLS)
-#   -> Markdown report -> validity check -> SVG charts (docs/benchmarks/) -> README table
-#   -> site data (data/<campaign>/benchmarks.json, read by the website)
+#   -> aggregation of the raw runs into data/<campaign>/benchmarks.json (the website's data)
+#   -> validity listing -> SVG charts (docs/benchmarks/), README table and numbers, RESULTS.md tables
 #
 # Single host (Docker, Linux):      ./run-all.sh
 # Three machines (bench/REMOTE.md): REMOTE=1 GEN_HOST=... PROXY_HOST=... UP_HOST=... PROXY_CPUS=0 ./run-all.sh
 #
-#   REPORT_ONLY=1  no campaign: rebuild report, charts and README table from the newest indexes
+#   REPORT_ONLY=1  no campaign: aggregate and render from the newest manifests of results/
 #   SKIP_WS=1      only the HTTP/CONNECT campaign
-#   FLOOD_FROM=<index>  take the tunnel throughput row and chart from another campaign
-#                  (run on one big host over loopback: the three-machine link caps tunnels)
-#   NO_README=1    do not touch README.md (charts and report only)
-#   NO_DATA=1      do not touch data/<campaign>/benchmarks.json
+#   FLOOD_FROM=<manifest>  take the tunnel throughput row and chart from another campaign (a manifest
+#                  written with ROLE=flood, run on one big host over loopback: the three-machine
+#                  link caps tunnels)
 #   CAMPAIGN=<id>  campaign folder under data/ (default: `latest` of data/index.json); a new campaign
 #                  needs its folder with campaign.json and proxies.json first (data/README.md)
 #   AUTH=on|off, PROXIES="...", BENCH_SEED, REPEAT: as run-campaign.sh
 #
-# Nothing is published blindly: tools/validity.py runs before the charts and
-# the README table, prints every point that is invalid, unsaturated or missing,
-# and the script exits non-zero (the artifacts are still written, for a look).
+# The numbers are never typed: the raw runs (results/**/run.json) are listed in manifests
+# (results/campaign-<ts>.json), tools/aggregate.py turns them into benchmarks.json with the rules of
+# the benchmark (best clean level of the sweep, validity), tools/render.py writes everything else
+# from benchmarks.json. The hardware, network, limits and the kTLS / multi-core runs come from the
+# campaign's campaign.json: update it, and point its `sources` at the refreshed published/ copy,
+# before committing.
+#
+# Nothing is published blindly: aggregate.py --report lists every point that is invalid,
+# unsaturated or missing, and the script exits non-zero (the artifacts are still written, for a look).
 set -uo pipefail
 cd "$(dirname "$0")"
 
 ts=$(date +%Y%m%d-%H%M%S)
-report="results/report-$ts.md"
 mkdir -p results
-last_index() { ls -t "results/$1"-[0-9]*.txt 2>/dev/null | head -1; }
+last() { ls -t "results/$1"-[0-9]*.json 2>/dev/null | head -1; }
 
 if [[ "${REPORT_ONLY:-0}" != 1 ]]; then
-    ./run-campaign.sh || echo "!! run-campaign.sh reported a failure; continuing with what exists" >&2
+    MANIFEST="results/campaign-$ts.json" ./run-campaign.sh || echo "!! run-campaign.sh reported a failure; continuing with what exists" >&2
 fi
-http_idx=$(last_index campaign)
-[[ -n "$http_idx" ]] || { echo "no campaign index produced" >&2; exit 2; }
+main=$(last campaign)
+[[ -n "$main" ]] || { echo "no campaign manifest produced" >&2; exit 2; }
+sources=(--sources "$main")
 
-ws_idx=""
 if [[ "${SKIP_WS:-0}" != 1 ]]; then
-    [[ "${REPORT_ONLY:-0}" == 1 ]] || MATRIX=ws ./run-campaign.sh || echo "!! WebSocket campaign reported a failure; continuing" >&2
-    ws_idx=$(last_index campaign-ws)
+    [[ "${REPORT_ONLY:-0}" == 1 ]] || MATRIX=ws MANIFEST="results/campaign-ws-$ts.json" ./run-campaign.sh || echo "!! WebSocket campaign reported a failure; continuing" >&2
+    ws=$(last campaign-ws)
+    [[ -z "$ws" ]] || sources+=(--sources "$ws")
 fi
-
-{
-    echo "# Benchmark report $ts"
-    echo
-    echo "HTTP/CONNECT campaign: \`$http_idx\`${ws_idx:+, WebSocket campaign: \`$ws_idx\`}"
-    echo
-    ./tools/campaign-table.py "$http_idx"
-    [[ -n "$ws_idx" ]] && ./tools/campaign-table.py "$ws_idx"
-} > "$report"
-echo "==> report: $report"
+[[ -z "${FLOOD_FROM:-}" ]] || sources+=(--sources "$FLOOD_FROM")
+campaign=(${CAMPAIGN:+--campaign "$CAMPAIGN"})
 
 status=0
-./tools/validity.py "$http_idx" ${ws_idx:+"$ws_idx"} | tee -a "$report" || status=1
-
-if [[ -n "${FLOOD_FROM:-}" ]]; then
-    # the link of the three machines caps tunnel throughput: its chart comes from FLOOD_FROM
-    python3 tools/charts.py "$http_idx" --except plain-flood.svg >/dev/null
-    python3 tools/charts.py "$FLOOD_FROM" --only plain-flood.svg >/dev/null
-    echo "==> charts: docs/benchmarks/ (tunnel chart from $FLOOD_FROM)"
-else
-    python3 tools/charts.py "$http_idx" >/dev/null && echo "==> charts: docs/benchmarks/ (HTTP/CONNECT)"
-fi
-[[ -n "$ws_idx" ]] && python3 tools/charts.py "$ws_idx" >/dev/null && echo "==> charts: docs/benchmarks/ (WebSocket)"
-if [[ "${NO_README:-0}" != 1 ]]; then
-    ./tools/readme-table.py "$http_idx" ${ws_idx:+"$ws_idx"} ${FLOOD_FROM:+--flood-from "$FLOOD_FROM"} --write ../README.md || status=1
-fi
-if [[ "${NO_DATA:-0}" != 1 ]]; then
-    # hardware, network, limits and the kTLS / multi-core indexes come from the campaign's campaign.json:
-    # update it (and point it at the refreshed published/ copy) before committing
-    python3 tools/site-data.py --main "$http_idx" ${ws_idx:+--ws "$ws_idx"} ${FLOOD_FROM:+--flood-from "$FLOOD_FROM"} ${CAMPAIGN:+--campaign "$CAMPAIGN"} --write || status=1
-fi
+report="results/report-$ts.txt"
+python3 tools/aggregate.py ${campaign[@]+"${campaign[@]}"} "${sources[@]}" --report | tee "$report" || status=1
+echo "==> report: $report"
+python3 tools/aggregate.py ${campaign[@]+"${campaign[@]}"} "${sources[@]}" --write || status=1
+python3 tools/render.py ${campaign[@]+"${campaign[@]}"} --write || status=1
 ((status == 0)) && echo "==> done, nothing to review" || echo "==> done: review the points above before committing" >&2
 exit $status

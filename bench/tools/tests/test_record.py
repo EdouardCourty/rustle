@@ -58,6 +58,11 @@ class RawCounters(unittest.TestCase):
                                                      "listen_overflows": 2, "listen_drops": 1})
 
 
+class Cpuset(unittest.TestCase):
+    def test_counts(self):
+        self.assertEqual([record.cpuset_count(s) for s in ("0", "0-3", "0,2-3", "4-7,10")], [1, 4, 3, 5])
+
+
 class Entry(unittest.TestCase):
     def build(self, gen=GEN_HTTP, **kw):
         before, after = snaps(**kw)
@@ -144,7 +149,7 @@ class Files(unittest.TestCase):
             gen = os.path.join(d, "gen.json")
             json.dump(GEN_HTTP, open(gen, "w"))
             argv = ["add", run, "--generator", gen, "--before", os.path.join(d, "before"), "--after", os.path.join(d, "after"),
-                    "--repeat", "3", "--proxy-cores", "1", "--up-threads", "8", "--sink-threads", "8"]
+                    "--repeat", "3", "--proxy-cpus", "0", "--up-threads", "8", "--sink-threads", "8"]
             self.assertEqual(record.main(argv), 0)
             self.assertEqual(record.main(argv), 0)
             self.assertEqual(record.main(["add", run, "--generator", os.path.join(d, "missing.json")] + argv[4:]), 4)
