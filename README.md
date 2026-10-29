@@ -290,7 +290,7 @@ Contributing
 ------------
 
 ```sh
-make check      # fmt + clippy (-D warnings) + tests + quick e2e: before every commit
+make check      # fmt + clippy (-D warnings) + tests + website data + quick e2e: before every commit
 make e2e        # full black-box suite, ~530 scenarios (~2 min)
 make help       # all targets
 ```
