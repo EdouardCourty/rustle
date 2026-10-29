@@ -59,10 +59,6 @@
      "listen_drops": 0
     }
    },
-   "harness": {
-    "up_cpu_s_per_run": 1.36,
-    "sink_cpu_s_per_run": null
-   },
    "saturation": {
     "proxy_util": 0.07,
     "origin_util": 0.01,
@@ -112,10 +108,6 @@
      "listen_overflows": 0,
      "listen_drops": 0
     }
-   },
-   "harness": {
-    "up_cpu_s_per_run": 4.87,
-    "sink_cpu_s_per_run": null
    },
    "saturation": {
     "proxy_util": 0.29,
@@ -167,10 +159,6 @@
      "listen_drops": 0
     }
    },
-   "harness": {
-    "up_cpu_s_per_run": 13.06,
-    "sink_cpu_s_per_run": null
-   },
    "saturation": {
     "proxy_util": 1.0,
     "origin_util": 0.11,
@@ -218,10 +206,6 @@
      "listen_overflows": 0,
      "listen_drops": 0
     }
-   },
-   "harness": {
-    "up_cpu_s_per_run": 12.67,
-    "sink_cpu_s_per_run": null
    },
    "saturation": {
     "proxy_util": 0.99,

@@ -1,6 +1,6 @@
 """Unit tests of record.py, on fixtures built from the real 2026-10-28 campaign: the raw counters
 are chosen so that the derived figures are the published ones (rustle, plain, http-1kb, 64
-connections: cpu_s_per_run 15.000, up_cpu_s_per_run 10.24, proxy_util 1.00, origin_util 0.09)."""
+connections: cpu_s_per_run 15.000, proxy_util 1.00, origin_util 0.09)."""
 import json, os, sys, tempfile, unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -12,7 +12,6 @@ GEN_HTTP = {
     "err_kinds": "",
     "median": {"rps": 55257.595, "mbps": 56.584, "elapsed_s": 15.001, "p50_ms": 1.139, "p95_ms": 1.286,
                "p99_ms": 1.368, "errors": 0.0, "reconnects": 0.0},
-    "runs": [],
     "generator": {"cpu_s_per_run": 11.62, "own_rss_mb": 3.8, "own_rss_end_mb": 7.8},
     "tls": None,
 }
@@ -72,7 +71,6 @@ class Entry(unittest.TestCase):
         e = self.build()
         self.assertEqual(e["test"], "http-1kb")
         self.assertEqual(e["proxy"]["cpu_s_per_run"], 15.0)
-        self.assertEqual(e["harness"]["up_cpu_s_per_run"], 10.24)
         self.assertEqual((e["proxy"]["rss_mb"], e["proxy"]["peak_rss_mb"]), (7.1, 7.1))
         self.assertEqual(e["proxy"]["tcp"]["segs_out_per_run"], 1658935)
         self.assertEqual(e["proxy"]["tcp"]["delayed_acks_per_run"], 452)

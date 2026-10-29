@@ -252,19 +252,16 @@ async fn amain(cli: Cli) {
         // … and again after the runs: the retained footprint (tasks, buffers
         // kept by the allocator) is the load the client puts on the box.
         let own_rss_end = rss_pages();
-        let per_run: Vec<String> = runs.iter().map(|m| m.nums_json()).collect();
         let median = median_metrics(runs);
         eprintln!("{}", median.human("median"));
-        // One document: the workload, the medians, every run, the
-        // generator's own cost and the TLS footing. Rounded like the figures
-        // always were (three decimals), NaN as null.
+        // One document: the workload, the medians, the generator's own cost and
+        // the TLS footing. Rounded to three decimals, NaN as null.
         println!(
-            "{{\"schema_version\":1,\"workload\":{},\"err_kinds\":{},\"median\":{},\"runs\":[{}],\
+            "{{\"schema_version\":1,\"workload\":{},\"err_kinds\":{},\"median\":{},\
              \"generator\":{{\"cpu_s_per_run\":{},\"own_rss_mb\":{},\"own_rss_end_mb\":{}}},\"tls\":{}}}",
             median.workload_json(),
             median.err_kinds().map_or("null".to_string(), json_str),
             median.nums_json(),
-            per_run.join(","),
             json_num(gen_cpu_per_run),
             json_num(own_rss_start),
             json_num(own_rss_end),

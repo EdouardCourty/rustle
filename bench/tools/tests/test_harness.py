@@ -9,7 +9,7 @@ GEN = {"schema_version": 1,
        "workload": {"mode": "http", "url": "http://c:8000/1kb", "conns": 64, "budget": "15s", "keepalive": True},
        "err_kinds": "", "median": {"rps": 55257.595, "mbps": 56.584, "elapsed_s": 15.001, "p50_ms": 1.139, "p95_ms": 1.286,
                                    "p99_ms": 1.368, "errors": 0.0, "reconnects": 0.0},
-       "runs": [], "generator": {"cpu_s_per_run": 11.62, "own_rss_mb": 3.8, "own_rss_end_mb": 7.8}, "tls": None}
+       "generator": {"cpu_s_per_run": 11.62, "own_rss_mb": 3.8, "own_rss_end_mb": 7.8}, "tls": None}
 
 FAKE_SSH = r"""#!/usr/bin/env bash
 cmd="${@: -1}"; n_file="$FAKE_STATE/calls"

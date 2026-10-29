@@ -143,7 +143,6 @@
         "measured",
         "generator",
         "proxy",
-        "harness",
         "saturation",
         "valid",
         "problems"
@@ -212,24 +211,6 @@
                 "type": "null"
               }
             ]
-          }
-        },
-        "runs": {
-          "title": "Runs",
-          "description": "The same measurements for each measured run, in order (absent in the oldest campaigns).",
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            }
           }
         },
         "generator": {
@@ -393,42 +374,6 @@
                       "type": "integer"
                     }
                   }
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            }
-          }
-        },
-        "harness": {
-          "title": "Harness",
-          "description": "The other half of the benchmark.",
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "up_cpu_s_per_run",
-            "sink_cpu_s_per_run"
-          ],
-          "properties": {
-            "up_cpu_s_per_run": {
-              "title": "Origin CPU",
-              "description": "CPU seconds of the origin per measured run.",
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "sink_cpu_s_per_run": {
-              "title": "Sink CPU",
-              "description": "CPU seconds of the sink per measured run (absent from the oldest campaigns).",
-              "anyOf": [
-                {
-                  "type": "number"
                 },
                 {
                   "type": "null"

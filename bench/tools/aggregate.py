@@ -11,7 +11,7 @@
     tools/aggregate.py --report             list the points that are not clean (invalid, unsaturated,
                                             missing, TLS footing that differs); exit 1 if any
 
-Rules applied to the raw runs (they were the rules of the text tools before): for each test the
+Rules applied to the raw runs: for each test the
 best clean sweep level of a proxy (a point with a client error, or with fewer tunnels than asked,
 is never kept while a clean one exists); a proxy that cannot do a test is `unsupported`, one that
 was not run `not_measured`, never a zero. Nothing is ever taken from two campaigns: a run dated
@@ -425,7 +425,7 @@ def report(runs):
 
 
 def generate(cid, sources=None):
-    """benchmarks.json of a campaign, as text."""
+    """The text of benchmarks.json for a campaign."""
     meta_path = os.path.join(campaign_dir(cid), "campaign.json")
     if not os.path.isfile(meta_path):
         die(f"{meta_path} does not exist: a new campaign starts with its folder, campaign.json and proxies.json "

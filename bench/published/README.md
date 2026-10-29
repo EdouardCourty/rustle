@@ -8,8 +8,6 @@ Three Scaleway Elastic Metal servers (generator and proxy EM-I320E, origin and s
 
 The manifest of the runs is the `sources` of [`../data/2026-10-28/campaign.json`](../data/2026-10-28/campaign.json).
 
-The runs of the 2026-10-28 campaign were originally recorded as text (`results.txt` per run and `campaign-*.txt` indexes). They were converted once to `run.json` and the text files were then removed; the originals remain in git history at commit `c563bd9` (`git show c563bd9:bench/published/2026-10-28/runs/<path>`). The conversion was verified: aggregating the converted runs reproduced the committed `benchmarks.json`, the 13 SVGs and the README table byte for byte.
-
 Each run is a directory `runs/<proxy>[-tls|-tlsfull|-h2][-ws]/remote-auth-on/<timestamp>/` with `run.json`: the raw result of every test and connection level (measurements, proxy CPU, memory, TCP counters, saturation flags, validity; schema `../data/schema/run.schema.json`). Only the runs the manifest points to are kept.
 
 Rebuild `benchmarks.json` and everything written from it, and list the points that are not clean, from the repository root:

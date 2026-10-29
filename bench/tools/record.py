@@ -173,15 +173,13 @@ def load_json(path):
 
 
 def entry_from_generator(doc):
-    """The part of a result entry the generator says: workload, err_kinds, measured, runs, generator."""
+    """The part of a result entry the generator says: workload, err_kinds, measured, generator."""
     workload = dict(doc["workload"])
     mode = workload.pop("mode")
     entry = {"test": test_id(mode, doc["workload"]), "mode": mode, "workload": workload}
     if doc.get("err_kinds") is not None:
         entry["err_kinds"] = doc["err_kinds"]
     entry["measured"] = doc["median"]
-    if doc.get("runs"):
-        entry["runs"] = doc["runs"]
     gen = dict(doc["generator"])
     gen["tls"] = doc.get("tls")
     entry["generator"] = gen
@@ -210,18 +208,16 @@ def build_entry(docs, before, after, repeat, proxy_cores, up_threads, sink_threa
                         1 if replicas else repeat, 3)
     proxy = {"cpu_s_per_run": proxy_cpu, "rss_mb": status_mb(after["proxy.status"], "VmRSS"),
              "peak_rss_mb": status_mb(after["proxy.status"], "VmHWM"), "tcp": None}
-    harness = {"up_cpu_s_per_run": None, "sink_cpu_s_per_run": None}
     sat = None
     if not replicas:
         proxy["tcp"] = tcp_delta(tcp_counters(before["proxy.net"]), tcp_counters(after["proxy.net"]), repeat)
         up = per_run(process_ticks(after["up.stat"]), process_ticks(before["up.stat"]), repeat, 2)
         sink = per_run(process_ticks(after["sink.stat"]), process_ticks(before["sink.stat"]), repeat, 2)
-        harness = {"up_cpu_s_per_run": up, "sink_cpu_s_per_run": sink}
         elapsed = entry["measured"].get("elapsed_s") or entry["workload"].get("duration")
         sat = saturation(elapsed, proxy_cpu, up, sink, proxy_cores, up_threads, sink_threads, mode)
         if sat is not None and gen_threads and generator_flag(entry["generator"]["cpu_s_per_run"], elapsed, gen_threads):
             sat["flags"].append("generator_saturated")
-    entry["proxy"], entry["harness"], entry["saturation"] = proxy, harness, sat
+    entry["proxy"], entry["saturation"] = proxy, sat
     problems = problems_of(mode, entry["workload"], entry["measured"], entry.get("err_kinds"))
     entry["valid"], entry["problems"] = not problems, problems
     return entry

@@ -10,7 +10,6 @@ def result(test="http-1kb", conns=64, rps=55257.595, valid=True, flags=(), cpu=1
             "err_kinds": "" if valid else "status-426=2", "measured": {"rps": rps, "elapsed_s": 15.001},
             "generator": {"cpu_s_per_run": 1.0, "own_rss_mb": 1.0, "own_rss_end_mb": 2.0, "tls": None},
             "proxy": {"cpu_s_per_run": cpu, "rss_mb": 7.1, "peak_rss_mb": 7.1, "tcp": None},
-            "harness": {"up_cpu_s_per_run": 1.0, "sink_cpu_s_per_run": None},
             "saturation": {"proxy_util": util, "origin_util": 0.09, "sink_util": 0.0, "flags": list(flags)},
             "valid": valid, "problems": [] if valid else ["err_kinds=status-426=2"]}
 
