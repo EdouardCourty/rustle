@@ -40,7 +40,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install check-jsonschema (version pinned in the Makefile)
         run: make install-schema-tool
-      - name: bench/data and docs/config.json match their JSON Schemas, are consistent and current
+      - name: Unit tests of the bench tools, syntax of the bench scripts
+        run: |
+          make test-tools
+          for f in bench/*.sh; do bash -n "$f"; done
+      - name: The published data match their JSON Schemas, are consistent, and are what the raw runs give
         run: make data-check
 
   lint:
@@ -80,7 +84,7 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo modprobe tls || echo "kTLS module unavailable, kTLS scenarios skip"
       - name: Unit + in-process end-to-end tests
-        run: cargo test -p rustle
+        run: cargo test -p rustle -p bench-client
       - name: Build the proxy (release)
         run: cargo build --release -p rustle
       - name: e2e (${{ matrix.e2e }})

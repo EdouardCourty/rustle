@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-.PHONY: help build test e2e e2e-quick fmt check clippy images up down smoke bench bench-ws bench-all bench-publish bench-scaling charts data data-check schema-check install-schema-tool latest latest-3proxy latest-off clean
+.PHONY: help build test e2e e2e-quick fmt check clippy images up down smoke bench bench-ws bench-all bench-publish bench-scaling data data-check schema-check test-tools install-schema-tool latest latest-3proxy latest-off clean
 
 P ?= rustle
 A ?= on
@@ -21,7 +21,8 @@ fmt: ## format all the code
 check: ## fmt + clippy (0 warnings) + tests + site data + quick e2e — run before every commit
 	cargo fmt --all --check
 	cargo clippy --workspace --all-targets -- -D warnings
-	cargo test -p rustle
+	cargo test -p rustle -p bench-client
+	$(MAKE) test-tools
 	$(MAKE) data-check
 	$(MAKE) e2e-quick
 
@@ -56,17 +57,18 @@ smoke: ## quick test through the stack (http 1kb)
 bench: ## full matrix: make bench [P=rustle|3proxy|squid|gost|tinyproxy] [A=on|off] [R=3]
 	cd bench && REPEAT=$(R) ./run-bench.sh $(P) $(A)
 
-charts: ## regenerate docs/benchmarks/*.svg from a campaign: make charts [C=bench/results/campaign[-ws]-<ts>.txt]
-	python3 bench/tools/charts.py $${C:-$$(ls -t bench/results/campaign-[0-9]*.txt | head -1)}
+data: ## regenerate everything published from the raw runs: benchmarks.json, charts, README and RESULTS.md numbers (make data [CAMPAIGN=2026-10-28], default: latest)
+	python3 bench/tools/aggregate.py --write $(if $(CAMPAIGN),--campaign $(CAMPAIGN))
+	python3 bench/tools/render.py --write $(if $(CAMPAIGN),--campaign $(CAMPAIGN))
 
-data: ## regenerate bench/data/<campaign>/benchmarks.json from the published runs: make data [CAMPAIGN=2026-10-28] (default: latest)
-	python3 bench/tools/site-data.py --write $(if $(CAMPAIGN),--campaign $(CAMPAIGN))
+test-tools: ## unit tests of the bench tools (record.py, aggregation)
+	python3 -m unittest discover -s bench/tools/tests
 
 # The schemas are checked with check-jsonschema, pinned here (CI installs it with `make install-schema-tool`).
 CHECK_JSONSCHEMA_VERSION := 0.39.0
 
-data-check: schema-check ## the website data (bench/data/, docs/config.json): valid against the JSON Schemas, consistent, up to date
-	python3 bench/tools/site-data.py --check
+data-check: schema-check ## the published data: valid against the JSON Schemas, consistent, and regenerated from the raw runs identical to the committed files
+	python3 bench/tools/check.py
 
 schema-check: ## validate the data files against their JSON Schemas (check-jsonschema, or uvx / pipx run)
 	@if command -v check-jsonschema >/dev/null; then run="check-jsonschema"; \
@@ -79,18 +81,19 @@ schema-check: ## validate the data files against their JSON Schemas (check-jsons
 	$$run --schemafile bench/data/schema/campaign.schema.json bench/data/*/campaign.json; \
 	$$run --schemafile bench/data/schema/proxies.schema.json bench/data/*/proxies.json; \
 	$$run --schemafile bench/data/schema/benchmarks.schema.json bench/data/*/benchmarks.json; \
+	$$run --schemafile bench/data/schema/run.schema.json bench/published/*/runs/*/*/*/run.json; \
 	$$run --schemafile docs/config.schema.json docs/config.json
 
 install-schema-tool: ## install the pinned check-jsonschema (what CI uses)
 	pipx install check-jsonschema==$(CHECK_JSONSCHEMA_VERSION)
 
 latest: ## show the latest result pass of the current proxy
-	cd bench && cat results/$(P)/auth-$(A)/$$(ls -t results/$(P)/auth-$(A) | head -1)/results.txt
+	cd bench && cat results/$(P)/auth-$(A)/$$(ls -t results/$(P)/auth-$(A) | head -1)/run.json
 
 latest-3proxy: latest P=3proxy
 latest-off: latest A=off
 
-bench-publish: ## everything: campaigns, report, validity check, SVG charts, README table (see bench/run-all.sh)
+bench-publish: ## everything: campaigns, raw runs -> benchmarks.json, validity report, charts, README and RESULTS.md numbers (see bench/run-all.sh)
 	cd bench && ./run-all.sh
 
 bench-ws: ## WebSocket matrix: make bench-ws [P=rustle|squid|gost|…] [A=on|off] [R=3]
@@ -98,7 +101,7 @@ bench-ws: ## WebSocket matrix: make bench-ws [P=rustle|squid|gost|…] [A=on|off
 
 bench-all: ## full campaign: 5 proxies × plain/TLS/h2 (~2-3 h), then tables
 	cd bench && AUTH=$(A) ./run-campaign.sh
-	cd bench && ./tools/campaign-table.py $$(ls -t results/campaign-[0-9]*.txt | head -1)
+	cd bench && python3 tools/aggregate.py --report --sources $$(ls -t results/campaign-[0-9]*.json | head -1)
 
 bench-scaling: ## multi-core curve (needs a many-core proxy host): PROXIES="..." NCPUS="1 2 4 8" make bench-scaling
 	cd bench && AUTH=$(A) ./run-scaling.sh
