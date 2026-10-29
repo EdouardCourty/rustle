@@ -18,24 +18,25 @@ in campaign.json (the committed published runs); a fresh campaign overrides them
 
     --main <index> --ws <index> [--flood-from <index>] [--meta <campaign.json>]
 
---check, for every campaign of index.json: the files exist and match the
-schemas in bench/data/schema/ (and their `$schema` pointer), ids agree between
-the folder, index.json and the files, benchmarks.json is what the indexes
-generate. For the latest campaign it also checks proxies.json against
-FAIRNESS.md (versions) and dut/*/Dockerfile (TLS and HTTP/2 support), and that
-each chart file exists. docs/config.json is checked against its schema.
+--check, for every campaign of index.json, what a JSON Schema cannot say (the
+files themselves are validated by `make schema-check`, check-jsonschema): ids
+agree between the folder, index.json and the files, the by-proxy maps hold
+exactly the campaign's proxies, `$schema` pointers are exact, project URLs are
+https, benchmarks.json is what the indexes generate. For the latest campaign it
+also checks proxies.json against FAIRNESS.md (versions) and dut/*/Dockerfile
+(TLS and HTTP/2 support), that each chart file exists and that the README
+benchmark table is the one benchmarks.json gives.
 Nothing is ever taken from two campaigns: a run dated more than a day from
 campaign.json's date is an error."""
 import datetime, json, os, re, sys
+from urllib.parse import urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from benchlib import index_entries, load_index, run_header  # noqa: E402
-from schemalite import lint, validate  # noqa: E402
 
 BENCH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT = os.path.dirname(BENCH)
 DATA = os.path.join(BENCH, "data")
-SCHEMAS = os.path.join(DATA, "schema")
 SCHEMA_VERSION = 1
 
 # transport -> (key in the index, how the proxy is reached)
@@ -321,32 +322,8 @@ def generate(args, cid):
     return json.dumps(out, indent=2, ensure_ascii=False) + "\n"
 
 
-def schema_for(name):
-    return load_json(os.path.join(SCHEMAS, f"{name}.schema.json"))
-
-
-def check_schemas(problems):
-    """Every schema is well formed, has a stable $id and a const schema_version."""
-    for name in ("index", "campaign", "benchmarks", "proxies"):
-        path = os.path.join(SCHEMAS, f"{name}.schema.json")
-        try:
-            sc = load_json(path)
-        except (OSError, ValueError) as e:
-            problems.append(f"{path}: {e}")
-            continue
-        rel = os.path.relpath(path, ROOT)
-        for p in lint(sc):
-            problems.append(f"{rel}: {p}")
-        if sc.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
-            problems.append(f"{rel}: $schema must be the 2020-12 dialect")
-        if not str(sc.get("$id", "")).endswith(f"/bench/data/schema/{name}.schema.json"):
-            problems.append(f"{rel}: $id must end with /bench/data/schema/{name}.schema.json")
-        if sc.get("properties", {}).get("schema_version", {}).get("const") != SCHEMA_VERSION:
-            problems.append(f"{rel}: schema_version must be const {SCHEMA_VERSION}")
-
-
-def check_file(problems, path, schema_name, pointer):
-    """The file is valid JSON, points at its schema and satisfies it. Returns the document."""
+def check_file(problems, path, pointer):
+    """The file is valid JSON and points at its schema with the exact relative path. Returns the document."""
     rel = os.path.relpath(path, ROOT)
     try:
         doc = load_json(path)
@@ -355,13 +332,6 @@ def check_file(problems, path, schema_name, pointer):
         return None
     if doc.get("$schema") != pointer or not os.path.isfile(os.path.normpath(os.path.join(os.path.dirname(path), pointer))):
         problems.append(f"{rel}: $schema must be {pointer!r} and point at an existing schema")
-    try:
-        schema = load_json(os.path.join(SCHEMAS, f"{schema_name}.schema.json")) if schema_name != "config" \
-            else load_json(os.path.join(ROOT, "docs", "config.schema.json"))
-        for e in validate(doc, schema):
-            problems.append(f"{rel}: {e}")
-    except (OSError, ValueError) as e:
-        problems.append(f"{rel}: cannot validate: {e}")
     return doc
 
 
@@ -383,6 +353,66 @@ def check_proxies_latest(problems, doc):
                 problems.append(f"proxies.json: {pid}: protocols.{proto} disagrees with dut/{pid}/Dockerfile bench-ports")
 
 
+def fmt_ram(mb):
+    return f"{mb / 1024:.1f} GB" if mb >= 1024 else f"{mb:.0f} MB"
+
+
+# README table rows: (label, test id, formatter)
+README_ROWS = [
+    ("1 KB, req/s", "plain-1kb", lambda v: f"{v:,.0f}"),
+    ("1 MB, req/s", "plain-1mb", lambda v: f"{v:,.0f}"),
+    ("10 MB, req/s", "plain-10mb", lambda v: f"{v:,.0f}"),
+    ("Short connections, req/s", "plain-short", lambda v: f"{v:,.0f}"),
+    ("Tunnels, Gbit/s", "plain-flood", lambda v: f"{v:.1f}"),
+    ("25,000 tunnels, RAM", "plain-ram-25000", fmt_ram),
+    ("HTTPS, new connection, resumed, req/s", "tls-short", lambda v: f"{v:,.0f}"),
+    ("HTTPS, new connection, full handshake, req/s", "tls-short-full", lambda v: f"{v:,.0f}"),
+    ("WebSocket 64 B, msg/s", "ws-64b-rps", lambda v: f"{v:,.0f}"),
+    ("WebSocket 64 KB, Gbit/s", "ws-64kb-gbps", lambda v: f"{v:.1f}"),
+    ("WebSocket handshakes/s", "ws-short", lambda v: f"{v:,.0f}"),
+]
+
+
+def readme_table(bench, proxies):
+    """The summary table of README.md as benchmarks.json gives it (same layout and bolding as readme-table.py)."""
+    tests = {t["id"]: t for t in bench["tests"]}
+    ids = [p["id"] for p in proxies["proxies"]]
+    names = {p["id"]: p["name"] for p in proxies["proxies"]}
+    lines = ["| 1 core | " + " | ".join(names[i] for i in ids) + " |", "|---|" + "---|" * len(ids)]
+    for label, tid, fmt in README_ROWS:
+        t = tests.get(tid)
+        if t is None or all(v is None for v in t["values"].values()):
+            continue
+        if "loopback" in t["conditions"]:
+            label += " (single host, loopback)"
+        present = [v for v in t["values"].values() if v is not None]
+        best = max(present) if t["direction"] == "higher" else min(present)
+        cells = ["—" if t["values"][i] is None else (f"**{fmt(t['values'][i])}**" if t["values"][i] == best else fmt(t["values"][i])) for i in ids]
+        lines.append(f"| {label} | " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
+def check_readme_table(problems, bench, proxies):
+    text = open(os.path.join(ROOT, "README.md")).read()
+    a, b = "<!-- bench:table:start -->", "<!-- bench:table:end -->"
+    if a not in text or b not in text:
+        problems.append("README.md: bench:table markers not found")
+        return
+    current = text[text.index(a) + len(a):text.index(b)].strip()
+    if current != readme_table(bench, proxies):
+        problems.append("README.md: the benchmark table is not the one bench/data/<latest>/benchmarks.json gives: "
+                        "run `make bench-publish` (README table) or `tools/readme-table.py`, or `make data`")
+
+
+def check_urls(problems, proxies):
+    for p in proxies["proxies"]:
+        for field in ("repository", "website"):
+            if field in p:
+                u = urlsplit(p[field])
+                if u.scheme != "https" or not u.netloc or any(c.isspace() for c in p[field]):
+                    problems.append(f"proxies.json: {p['id']}.{field} {p[field]!r} is not a well-formed https URL")
+
+
 def check_campaign(problems, entry, latest):
     cid, cdir = entry["id"], os.path.join(DATA, entry["path"])
     if os.path.basename(cdir.rstrip("/")) != cid:
@@ -390,9 +420,9 @@ def check_campaign(problems, entry, latest):
     if not os.path.isdir(cdir):
         problems.append(f"index.json: campaign {cid}: {entry['path']} does not exist")
         return
-    camp = check_file(problems, os.path.join(cdir, "campaign.json"), "campaign", "../schema/campaign.schema.json")
-    prox = check_file(problems, os.path.join(cdir, "proxies.json"), "proxies", "../schema/proxies.schema.json")
-    bench = check_file(problems, os.path.join(cdir, "benchmarks.json"), "benchmarks", "../schema/benchmarks.schema.json")
+    camp = check_file(problems, os.path.join(cdir, "campaign.json"), "../schema/campaign.schema.json")
+    prox = check_file(problems, os.path.join(cdir, "proxies.json"), "../schema/proxies.schema.json")
+    bench = check_file(problems, os.path.join(cdir, "benchmarks.json"), "../schema/benchmarks.schema.json")
     for name, doc, key in (("campaign.json", camp, "id"), ("proxies.json", prox, "campaign"), ("benchmarks.json", bench, "campaign")):
         if doc is not None and doc.get(key) != cid:
             problems.append(f"{cid}/{name}: {key} is {doc.get(key)!r}, expected {cid!r}")
@@ -404,6 +434,7 @@ def check_campaign(problems, entry, latest):
     if prox is not None:
         if ids != entry["proxies"]:
             problems.append(f"index.json: campaign {cid}: proxies {entry['proxies']} differ from proxies.json's {ids}")
+        check_urls(problems, prox)
         if latest:
             check_proxies_latest(problems, prox)
     if bench is not None and ids is not None:
@@ -413,6 +444,8 @@ def check_campaign(problems, entry, latest):
                 if sorted(t[field]) != sorted(ids):
                     problems.append(f"{cid}/benchmarks.json: {t.get('id', t.get('cores'))}: {field} keys are not the campaign's proxies")
         if latest:
+            if prox is not None:
+                check_readme_table(problems, bench, prox)
             for t in bench["tests"]:
                 if t["chart"] and not os.path.isfile(os.path.join(ROOT, "docs", "benchmarks", t["chart"])):
                     problems.append(f"{cid}/benchmarks.json: test {t['id']}: chart docs/benchmarks/{t['chart']} does not exist")
@@ -429,8 +462,18 @@ def check_campaign(problems, entry, latest):
 
 def check(args):
     problems = []
-    check_schemas(problems)
-    index = check_file(problems, index_file(), "index", "./schema/index.schema.json")
+    try:
+        check_all(problems)
+    except (KeyError, TypeError, IndexError) as e:
+        problems.append(f"unexpected structure ({e!r}): run `make schema-check` first, it reports the exact file and path")
+    if problems:
+        print("\n".join(f"site-data: {p}" for p in problems), file=sys.stderr)
+        sys.exit(1)
+    print("site data up to date")
+
+
+def check_all(problems):
+    index = check_file(problems, index_file(), "./schema/index.schema.json")
     if index is not None:
         ids = [c["id"] for c in index["campaigns"]]
         if len(set(ids)) != len(ids):
@@ -443,17 +486,7 @@ def check(args):
         if on_disk != sorted(ids):
             problems.append(f"bench/data: folders {on_disk} differ from the campaigns of index.json {sorted(ids)}")
     cfg = os.path.join(ROOT, "docs", "config.json")
-    check_file(problems, cfg, "config", "./config.schema.json")
-    try:
-        sc = load_json(os.path.join(ROOT, "docs", "config.schema.json"))
-        for p in lint(sc):
-            problems.append(f"docs/config.schema.json: {p}")
-    except (OSError, ValueError) as e:
-        problems.append(f"docs/config.schema.json: {e}")
-    if problems:
-        print("\n".join(f"site-data: {p}" for p in problems), file=sys.stderr)
-        sys.exit(1)
-    print("site data up to date")
+    check_file(problems, cfg, "./config.schema.json")
 
 
 def main(argv):

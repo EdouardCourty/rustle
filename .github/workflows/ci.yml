@@ -38,8 +38,10 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - name: bench/data and docs/config.json are current and valid
-        run: python3 bench/tools/site-data.py --check
+      - name: Install check-jsonschema (version pinned in the Makefile)
+        run: make install-schema-tool
+      - name: bench/data and docs/config.json match their JSON Schemas, are consistent and current
+        run: make data-check
 
   lint:
     name: fmt + clippy (${{ matrix.os }})

@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-.PHONY: help build test e2e e2e-quick fmt check clippy images up down smoke bench bench-ws bench-all bench-publish bench-scaling charts data data-check latest latest-3proxy latest-off clean
+.PHONY: help build test e2e e2e-quick fmt check clippy images up down smoke bench bench-ws bench-all bench-publish bench-scaling charts data data-check schema-check install-schema-tool latest latest-3proxy latest-off clean
 
 P ?= rustle
 A ?= on
@@ -62,8 +62,27 @@ charts: ## regenerate docs/benchmarks/*.svg from a campaign: make charts [C=benc
 data: ## regenerate bench/data/<campaign>/benchmarks.json from the published runs: make data [CAMPAIGN=2026-10-28] (default: latest)
 	python3 bench/tools/site-data.py --write $(if $(CAMPAIGN),--campaign $(CAMPAIGN))
 
-data-check: ## the website data files (bench/data/, docs/config.json) are up to date and match their JSON Schemas
+# The schemas are checked with check-jsonschema, pinned here (CI installs it with `make install-schema-tool`).
+CHECK_JSONSCHEMA_VERSION := 0.39.0
+
+data-check: schema-check ## the website data (bench/data/, docs/config.json): valid against the JSON Schemas, consistent, up to date
 	python3 bench/tools/site-data.py --check
+
+schema-check: ## validate the data files against their JSON Schemas (check-jsonschema, or uvx / pipx run)
+	@if command -v check-jsonschema >/dev/null; then run="check-jsonschema"; \
+	elif command -v uvx >/dev/null; then run="uvx check-jsonschema==$(CHECK_JSONSCHEMA_VERSION)"; \
+	elif command -v pipx >/dev/null; then run="pipx run --spec check-jsonschema==$(CHECK_JSONSCHEMA_VERSION) check-jsonschema"; \
+	else echo "check-jsonschema not found: pipx install check-jsonschema==$(CHECK_JSONSCHEMA_VERSION)" >&2; exit 1; fi; \
+	set -e; \
+	$$run --check-metaschema bench/data/schema/*.schema.json docs/config.schema.json; \
+	$$run --schemafile bench/data/schema/index.schema.json bench/data/index.json; \
+	$$run --schemafile bench/data/schema/campaign.schema.json bench/data/*/campaign.json; \
+	$$run --schemafile bench/data/schema/proxies.schema.json bench/data/*/proxies.json; \
+	$$run --schemafile bench/data/schema/benchmarks.schema.json bench/data/*/benchmarks.json; \
+	$$run --schemafile docs/config.schema.json docs/config.json
+
+install-schema-tool: ## install the pinned check-jsonschema (what CI uses)
+	pipx install check-jsonschema==$(CHECK_JSONSCHEMA_VERSION)
 
 latest: ## show the latest result pass of the current proxy
 	cd bench && cat results/$(P)/auth-$(A)/$$(ls -t results/$(P)/auth-$(A) | head -1)/results.txt
