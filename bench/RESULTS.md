@@ -22,7 +22,7 @@ Three bare-metal machines (<!--n c hardware.provider-->Scaleway Elastic Metal, P
 * Protocol: auth on, <!--n c proxy_cores-->1<!--/n--> proxy core and <!--n c proxy_cores-->1<!--/n--> worker for every proxy (rustle with `socket_buffer_bytes = 1048576` set in its bench config; its shipped default is kernel autotuning), seed `<!--n c seed-->2004113323<!--/n-->` (shuffled test order, proxy restarted before each test), warmup run apart, median of <!--n c repeats-->3<!--/n--> measured runs of <!--n c run_seconds-->15<!--/n--> s, concurrency sweep per test (best clean level kept, `@conns`). Competitor versions and settings: [`FAIRNESS.md`](FAIRNESS.md).
 * Date: <!--n c date-->2026-10-28<!--/n-->.
 * Units: memory is the peak RSS of the proxy (`VmHWM`) in MiB, written MB below; "ms/GB" is proxy CPU milliseconds per 10^9 bytes moved, GB being the decimal unit of the Gbit/s. `<90 % CPU` marks a point where the proxy used less than 90 % of its core at its best level: the link, the harness or a latency-bound proxy set the number.
-* Raw data: every run behind the tables is committed in [`published/2026-10-28/`](published/2026-10-28/) (`run.json` of each run, with the original `results.txt` it was converted from, and the preflight); the manifest of the runs is the `sources` of [`campaign.json`](data/2026-10-28/campaign.json).
+* Raw data: every run behind the tables is committed in [`published/2026-10-28/`](published/2026-10-28/) (`run.json` of each run, and the preflight; the campaign was first recorded as text, kept in git history, see [`published/README.md`](published/README.md)); the manifest of the runs is the `sources` of [`campaign.json`](data/2026-10-28/campaign.json).
 
 ## Chapter 1: plain HTTP proxy, 1 core
 

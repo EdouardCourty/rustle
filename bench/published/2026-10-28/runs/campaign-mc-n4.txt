@@ -1,5 +1,0 @@
-# multi-core curve n=4 proxy cores, http-1kb, plain, seed 2004113323
-rustle plain runs/rustle/remote-auth-on/20261028-224743/results.txt
-3proxy plain runs/3proxy/remote-auth-on/20261028-225205/results.txt
-squid plain runs/squid/remote-auth-on/20261028-225626/results.txt
-gost plain runs/gost/remote-auth-on/20261028-230048/results.txt

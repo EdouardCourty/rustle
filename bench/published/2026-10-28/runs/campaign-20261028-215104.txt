@@ -1,3 +1,0 @@
-# campaign proxies=[rustle] auth=on seed=2004113323 Wed Oct 28 21:51:04 CET 2026
-==> rustle tls
-rustle tls runs/rustle-tls/remote-auth-on/20261028-215112/results.txt
