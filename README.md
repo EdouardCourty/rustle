@@ -261,7 +261,7 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
   -days 365 -subj /CN=proxy.example.org -keyout key.pem -out cert.pem
 ```
 
-The certificate is read at startup: restart after a renewal.
+The certificate and the key are read at startup and again by `rustle reload` (or `SIGHUP`): after a renewal, reload, no restart needed. Connections already open keep the old certificate until they close; if the new files are unreadable or do not match, the reload fails and the running one stays.
 
 Reloading
 ---------

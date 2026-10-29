@@ -83,6 +83,8 @@ allow_websocket = true
 # Needs cert and key below. Browsers use it via PAC "HTTPS host:port";
 # curl via --proxy https://host:port (add --proxy-http2 for HTTP/2).
 listen = ""
+# cert and key are read at startup and by `rustle reload` (a renewed
+# certificate needs no restart; a bad pair keeps the running one).
 cert = "/etc/rustle/cert.pem"
 key = "/etc/rustle/key.pem"
 handshake_timeout = "10s"
