@@ -2,8 +2,17 @@ rustle
 ======
 
 [![CI](https://github.com/EdouardCourty/rustle/actions/workflows/ci.yml/badge.svg)](https://github.com/EdouardCourty/rustle/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/EdouardCourty/rustle)](https://github.com/EdouardCourty/rustle/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A high-performance forward proxy written in Rust. One binary serves HTTP/1.1 and HTTPS (`CONNECT`), an HTTPS proxy with HTTP/2, WebSocket upgrades and SOCKS5 (TCP and UDP). Each CPU core runs its own event loop, connection pool and sockets, so it scales with cores while staying light on memory, and it is safe by default.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/EdouardCourty/rustle/main/install.sh | sh
+rustle init && rustle run
+```
+
+Linux and macOS, no `sudo`. [Benchmarks](#benchmarks) · [Installation](#installation) · [Quick Start](#quick-start) · [Configuration](#configuration)
 
 Table of Contents
 -----------------
@@ -94,14 +103,14 @@ Features
 
 *   **Protocols**: plain HTTP/1.1 (WebSocket upgrades included) and `CONNECT`, HTTP/1.1 over TLS, HTTP/2 over TLS (ALPN `h2`), SOCKS5 (`CONNECT` + `UDP ASSOCIATE` for QUIC/HTTP3 and DNS).
 *   **Fast**: one shard per core, allocation-free hot path, zero-copy `splice()` relay on Linux. See [Benchmarks](#benchmarks).
-*   **Light**: ~80 MB for 25,000 open tunnels.
+*   **Light**: ~95 MB for 25,000 open tunnels.
 *   **Safe by default**: API key auth, client IP allowlist, bans after repeated wrong keys, private and internal destinations refused (DNS rebinding included), allowed ports, anti-slowloris, anti request smuggling.
 *   **Operable**: single static config file, access log that never blocks the proxy, `/health` endpoint, graceful shutdown, systemd/launchd service management, self-update.
 
 Requirements
 ------------
 
-*   Linux (x86_64, aarch64), glibc ≥ 2.35 (Debian 12, Ubuntu 22.04, RHEL 9 or newer). This is the reference platform, with all the fast paths.
+*   Linux (x86_64, aarch64), glibc ≥ 2.35 (Debian 12, Ubuntu 22.04 or newer). This is the reference platform, with all the fast paths.
 *   macOS (Apple Silicon, Intel): fully functional, without the Linux-only fast paths (`splice`, kTLS, core pinning). Linux is the reference platform.
 
 Installation
