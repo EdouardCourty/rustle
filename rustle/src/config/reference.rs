@@ -8,6 +8,10 @@
 //! UPDATE_CONFIG_DOCS=1 cargo test -p rustle config_reference
 //! ```
 //!
+//! The same test keeps `docs/config.schema.json` (the JSON Schema of
+//! `config.json`, from `config.schema.in.json` with the table names and key
+//! paths filled in) current.
+//!
 //! Whether a key is applied by `rustle reload` or needs a restart is not
 //! written here: the test in `server/tests/config_reference.rs` derives it
 //! from `restart_required()` and `effective()`.
@@ -224,6 +228,28 @@ pub(crate) fn with_changed(path: &str) -> Config {
         .unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
+/// Schema of `docs/config.json` (`docs/config.schema.json`): the template with
+/// the table names and key paths of the structs filled in, so that a key
+/// added to the structs shows up in the schema.
+pub(crate) fn render_schema() -> String {
+    let list = |items: Vec<&str>| {
+        items
+            .iter()
+            .map(|i| format!("{i:?}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    include_str!("config.schema.in.json")
+        .replace(
+            "\"__TABLE_NAMES__\"",
+            &list(TABLES.iter().map(|t| t.0).collect()),
+        )
+        .replace(
+            "\"__KEY_PATHS__\"",
+            &list(KEYS.iter().map(|k| k.0).collect()),
+        )
+}
+
 /// `docs/config.json`; `restart_only` says whether a change to `path` needs a restart.
 pub(crate) fn render(restart_only: &dyn Fn(&str) -> bool) -> String {
     let def = defaults();
@@ -269,6 +295,7 @@ pub(crate) fn render(restart_only: &dyn Fn(&str) -> bool) -> String {
         })
         .collect();
     let doc = Json::Obj(vec![
+        ("$schema", Json::s("./config.schema.json")),
         ("schema_version", Json::Int(SCHEMA_VERSION as i64)),
         ("version", Json::s(env!("CARGO_PKG_VERSION"))),
         ("tables", Json::List(tables)),

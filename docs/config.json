@@ -1,4 +1,5 @@
 {
+  "$schema": "./config.schema.json",
   "schema_version": 1,
   "version": "1.0.0",
   "tables": [

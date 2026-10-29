@@ -9,7 +9,7 @@
 use std::path::Path;
 
 use super::live::{effective, restart_required};
-use crate::config::reference::{render, with_changed, KEYS};
+use crate::config::reference::{render, render_schema, with_changed, KEYS};
 use crate::config::Config;
 
 /// Does a change to `path` need a restart? Derived from the reload code:
@@ -41,10 +41,12 @@ fn every_key_has_a_reload_rule() {
     assert!(KEYS.iter().any(|k| !restart_only(k.0)));
 }
 
-#[test]
-fn config_reference_is_current() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/config.json");
-    let fresh = render(&restart_only);
+/// Compares a generated file with the committed one, or rewrites it when
+/// `UPDATE_CONFIG_DOCS` is set.
+fn current(file: &str, fresh: String) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../docs")
+        .join(file);
     if std::env::var_os("UPDATE_CONFIG_DOCS").is_some() {
         std::fs::write(&path, &fresh).unwrap();
         return;
@@ -52,6 +54,16 @@ fn config_reference_is_current() {
     let committed = std::fs::read_to_string(&path).unwrap_or_default();
     assert!(
         committed == fresh,
-        "docs/config.json is stale: run `UPDATE_CONFIG_DOCS=1 cargo test -p rustle config_reference` and commit it"
+        "docs/{file} is stale: run `UPDATE_CONFIG_DOCS=1 cargo test -p rustle config_reference` and commit it"
     );
+}
+
+#[test]
+fn config_reference_is_current() {
+    current("config.json", render(&restart_only));
+}
+
+#[test]
+fn config_schema_is_current() {
+    current("config.schema.json", render_schema());
 }
