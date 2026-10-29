@@ -98,12 +98,12 @@ check_glibc() {
         # No glibc: musl (Alpine) or something exotic.
         fail "this system does not use glibc (Alpine / musl?). The Linux release needs glibc >= ${MIN_GLIBC}.
        Options: run it in a Debian/Ubuntu container, or build from source:
-       https://github.com/${REPO}#build-from-source"
+       https://github.com/${REPO}#installation"
     fi
     if ! version_ge "$v" "$MIN_GLIBC"; then
-        fail "glibc $v is too old: the Linux release needs glibc >= ${MIN_GLIBC} (Debian 12, Ubuntu 22.04, RHEL 9 or newer).
+        fail "glibc $v is too old: the Linux release needs glibc >= ${MIN_GLIBC} (Debian 12, Ubuntu 22.04 or newer).
        Options: upgrade the distribution, or build from source:
-       https://github.com/${REPO}#build-from-source"
+       https://github.com/${REPO}#installation"
     fi
 }
 
