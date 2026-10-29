@@ -45,6 +45,7 @@ rustle/              the proxy
     dns.rs            positive cache, TTL (outside the lock), Mutex<HashMap>
     upstream.rs       per-origin keep-alive pool (LIFO)
 docs/benchmarks/      SVG charts embedded in the README (generated, committed)
+CHANGELOG.md          Keep a Changelog format, checked in CI (`parse-changelog`); the section of the tagged version becomes the release notes
 install.sh            curl|sh installer (POSIX sh): detects target, glibc gate, SHA-256 check, no sudo; tested by `.github/scripts/test-installer.sh` (CI `installer` job)
 .github/workflows/    ci.yml (lint, tests+e2e on Linux/macOS, installer), release.yml (tag vX.Y.Z → 4 targets → SHA256SUMS + VERSION + attestation → smoke install)
 e2e/                  black-box functional tests (see e2e/README.md): the release binary started per scenario (generated config, ports read from the `rustle listening` line), programmable local origins/targets, HTTP/1.1, TLS, h2, SOCKS5, curl clients
@@ -167,6 +168,7 @@ WebSocket matrix (`MATRIX=ws`, `make bench-ws P=<proxy>`, opt-in so the default 
 
 ## Conventions
 
+- Changelog: every user-visible change gets a line under `## [Unreleased]` in the same PR; a release moves it under `## [X.Y.Z] - date` (CI fails without a section for the version in `rustle/Cargo.toml`, the release workflow without one for the tag).
 - Commits: see [Commits](#commits). Every performance claim is gated by a fixed-seed matrix.
 - Test layout (Rust standard): unit tests stay inline at the bottom of the file (`#[cfg(test)] mod tests { use super::*; … }`) so they see private items. When that block passes ~300 lines, move it to `<module>/tests.rs` (or `<module>/tests/` split by feature, shared helpers in `tests/mod.rs`) and keep `#[cfg(test)] mod tests;` in the parent, as `server/` does. No crate-level `tests/` directory (the crate is a binary, no `[lib]`): black-box tests live in `e2e/`.
 - Tests: `make check` (quick e2e included) before every commit, full `make e2e` before every release and after any proxy change (relay, pipeline, policy, TLS). New feature = new scenario in `e2e/src/suites/<feature>.rs` (and in the matrix when it depends on a config).

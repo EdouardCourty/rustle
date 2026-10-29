@@ -12,7 +12,22 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  changelog:
+    name: changelog
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2
+        with:
+          tool: parse-changelog
+      - name: The version has a changelog section
+        run: parse-changelog CHANGELOG.md "${GITHUB_REF_NAME#v}" > /dev/null
+        if: startsWith(github.ref, 'refs/tags/v')
+
   build:
+    needs: changelog
     name: build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -77,6 +92,8 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -99,8 +116,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # The tagged version's section, without its heading and the link definitions below it.
+          awk -v v="${GITHUB_REF_NAME#v}" '
+            /^## \[/ { p = (index($0, "## [" v "]") == 1); next }
+            /^\[[^]]*\]: / { p = 0 }
+            p
+          ' CHANGELOG.md > notes.md
+          [ -s notes.md ] || { echo "no changelog section for ${GITHUB_REF_NAME}" >&2; exit 1; }
           gh release create "${GITHUB_REF_NAME}" dist/rustle-*.tar.gz dist/SHA256SUMS dist/VERSION \
-            --repo "${GITHUB_REPOSITORY}" --title "${GITHUB_REF_NAME}" --generate-notes
+            --repo "${GITHUB_REPOSITORY}" --title "${GITHUB_REF_NAME}" --notes-file notes.md
 
   smoke:
     name: install from the release (${{ matrix.os }})
