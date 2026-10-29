@@ -1,0 +1,365 @@
+{
+  "schema_version": 1,
+  "version": "1.0.0",
+  "tables": [
+    {
+      "name": "server",
+      "description": "Listeners, shards, health endpoint and control socket.",
+      "keys": [
+        {
+          "key": "listen",
+          "path": "server.listen",
+          "type": "string",
+          "default": "0.0.0.0:8080",
+          "description": "Plain port (HTTP + CONNECT), literal IP address.",
+          "reload": "restart"
+        },
+        {
+          "key": "workers",
+          "path": "server.workers",
+          "type": "integer",
+          "default": 1,
+          "description": "Number of shards (one thread each); `0` = one per CPU.",
+          "reload": "restart"
+        },
+        {
+          "key": "pin_cores",
+          "path": "server.pin_cores",
+          "type": "boolean",
+          "default": false,
+          "description": "Pin shard i to CPU i and steer each connection to the shard of the CPU that received it (Linux).",
+          "reload": "restart"
+        },
+        {
+          "key": "admin_listen",
+          "path": "server.admin_listen",
+          "type": "string",
+          "default": "127.0.0.1:8181",
+          "description": "`GET /health`, no auth; `\"\"` disables it.",
+          "reload": "restart"
+        },
+        {
+          "key": "control_socket",
+          "path": "server.control_socket",
+          "type": "string",
+          "default": "auto",
+          "description": "Unix socket (mode 0600) for `rustle reload`: `/run/rustle/rustle.sock` as root, else `$XDG_RUNTIME_DIR/rustle.sock`, else next to the user config; `\"\"` disables it.",
+          "reload": "restart"
+        },
+        {
+          "key": "socket_buffer_bytes",
+          "path": "server.socket_buffer_bytes",
+          "type": "integer",
+          "default": 0,
+          "description": "`SO_SNDBUF`/`SO_RCVBUF` of relayed sockets; `0` = kernel autotuning. A fixed size (e.g. `1048576`) caps a 100 ms RTT link at ~80 Mbit/s and, on the loopback, can stall bulk flows for seconds.",
+          "reload": "restart"
+        }
+      ]
+    },
+    {
+      "name": "auth",
+      "description": "API keys, client allowlist and bans after wrong keys.",
+      "keys": [
+        {
+          "key": "api_keys",
+          "path": "auth.api_keys",
+          "type": "string list",
+          "default": [],
+          "description": "Accepted keys; empty = no authentication (open relay).",
+          "reload": "live"
+        },
+        {
+          "key": "allow_clients",
+          "path": "auth.allow_clients",
+          "type": "string list",
+          "default": [],
+          "description": "IPs/CIDRs allowed to connect; empty = everyone. Others are closed at accept.",
+          "reload": "live"
+        },
+        {
+          "key": "max_failures",
+          "path": "auth.max_failures",
+          "type": "integer",
+          "default": 5,
+          "description": "Wrong keys tolerated per IP within the window; `0` = no ban. A request without credentials does not count.",
+          "reload": "live"
+        },
+        {
+          "key": "failure_window",
+          "path": "auth.failure_window",
+          "type": "duration",
+          "default": "1m",
+          "description": "Counting window.",
+          "reload": "live"
+        },
+        {
+          "key": "ban_duration",
+          "path": "auth.ban_duration",
+          "type": "duration",
+          "default": "15m",
+          "description": "Ban duration.",
+          "reload": "live"
+        }
+      ]
+    },
+    {
+      "name": "limits",
+      "description": "Connection and request-head limits.",
+      "keys": [
+        {
+          "key": "max_connections",
+          "path": "limits.max_connections",
+          "type": "integer",
+          "default": 10000,
+          "description": "Concurrent client connections (all shards); beyond: 503.",
+          "reload": "live"
+        },
+        {
+          "key": "max_header_bytes",
+          "path": "limits.max_header_bytes",
+          "type": "integer",
+          "default": 65536,
+          "description": "Max request head size (431).",
+          "reload": "live"
+        }
+      ]
+    },
+    {
+      "name": "timeouts",
+      "description": "Connect, idle and request-head timeouts.",
+      "keys": [
+        {
+          "key": "connect",
+          "path": "timeouts.connect",
+          "type": "duration",
+          "default": "5s",
+          "description": "Connection to the origin (504).",
+          "reload": "live"
+        },
+        {
+          "key": "idle",
+          "path": "timeouts.idle",
+          "type": "duration",
+          "default": "1m",
+          "description": "Inactivity on a connection or tunnel.",
+          "reload": "live"
+        },
+        {
+          "key": "request_head",
+          "path": "timeouts.request_head",
+          "type": "duration",
+          "default": "10s",
+          "description": "Total time to receive a request head or SOCKS5 handshake.",
+          "reload": "live"
+        }
+      ]
+    },
+    {
+      "name": "http",
+      "description": "Upstream connection pool, body limits and WebSocket upgrades.",
+      "keys": [
+        {
+          "key": "upstream_keepalive",
+          "path": "http.upstream_keepalive",
+          "type": "boolean",
+          "default": true,
+          "description": "Reuse connections to origins.",
+          "reload": "restart"
+        },
+        {
+          "key": "max_idle_per_origin",
+          "path": "http.max_idle_per_origin",
+          "type": "integer",
+          "default": 1024,
+          "description": "Idle connections kept per origin and per shard (16× that across all origins); a connection idle for over 15 s is closed instead of reused.",
+          "reload": "restart"
+        },
+        {
+          "key": "max_request_body_bytes",
+          "path": "http.max_request_body_bytes",
+          "type": "integer",
+          "default": 0,
+          "description": "Max request body (413); `0` = unlimited.",
+          "reload": "live"
+        },
+        {
+          "key": "max_response_body_bytes",
+          "path": "http.max_response_body_bytes",
+          "type": "integer",
+          "default": 0,
+          "description": "Max response body (502 when declared, cut otherwise); `0` = unlimited.",
+          "reload": "live"
+        },
+        {
+          "key": "allow_websocket",
+          "path": "http.allow_websocket",
+          "type": "boolean",
+          "default": true,
+          "description": "Let `Upgrade: websocket` requests on the plain-HTTP path through (the connection becomes a tunnel once the origin answers 101); `false` refuses them with 403. `CONNECT` tunnels (`wss://`) are opaque and not affected: limit them with `[filter] allowed_ports`.",
+          "reload": "live"
+        }
+      ]
+    },
+    {
+      "name": "dns",
+      "description": "Cache of resolved addresses.",
+      "keys": [
+        {
+          "key": "ttl",
+          "path": "dns.ttl",
+          "type": "duration",
+          "default": "1m",
+          "description": "Lifetime of cached resolutions; `\"0s\"` disables the cache.",
+          "reload": "live"
+        },
+        {
+          "key": "max_entries",
+          "path": "dns.max_entries",
+          "type": "integer",
+          "default": 4096,
+          "description": "Cache size.",
+          "reload": "live"
+        }
+      ]
+    },
+    {
+      "name": "tls",
+      "description": "HTTPS proxy and HTTP/2.",
+      "keys": [
+        {
+          "key": "listen",
+          "path": "tls.listen",
+          "type": "string",
+          "default": "",
+          "description": "`\"IP:port\"` of the HTTPS port, e.g. `\"0.0.0.0:8443\"`; empty = disabled. Needs `cert` and `key`.",
+          "reload": "restart"
+        },
+        {
+          "key": "cert",
+          "path": "tls.cert",
+          "type": "string",
+          "default": "",
+          "description": "PEM certificate chain.",
+          "reload": "live"
+        },
+        {
+          "key": "key",
+          "path": "tls.key",
+          "type": "string",
+          "default": "",
+          "description": "PEM private key.",
+          "reload": "live"
+        },
+        {
+          "key": "handshake_timeout",
+          "path": "tls.handshake_timeout",
+          "type": "duration",
+          "default": "10s",
+          "description": "Max duration of a TLS handshake.",
+          "reload": "live"
+        },
+        {
+          "key": "http2",
+          "path": "tls.http2",
+          "type": "boolean",
+          "default": true,
+          "description": "Offer HTTP/2 through ALPN.",
+          "reload": "live"
+        },
+        {
+          "key": "ktls",
+          "path": "tls.ktls",
+          "type": "boolean",
+          "default": false,
+          "description": "Kernel TLS (Linux, `tls` module). Saves some memory, slower than rustls on throughput without NIC TLS offload.",
+          "reload": "restart"
+        }
+      ]
+    },
+    {
+      "name": "filter",
+      "description": "Destination policy.",
+      "keys": [
+        {
+          "key": "block_private",
+          "path": "filter.block_private",
+          "type": "boolean",
+          "default": true,
+          "description": "Refuse loopback, private, link-local, CGNAT, multicast and ULA destinations (403). Set `false` to reach your LAN.",
+          "reload": "live"
+        },
+        {
+          "key": "deny",
+          "path": "filter.deny",
+          "type": "string list",
+          "default": [],
+          "description": "Extra refused networks (CIDR).",
+          "reload": "live"
+        },
+        {
+          "key": "allowed_ports",
+          "path": "filter.allowed_ports",
+          "type": "integer list",
+          "default": [],
+          "description": "Allowed destination ports, e.g. `[80, 443]`; empty = all.",
+          "reload": "live"
+        }
+      ]
+    },
+    {
+      "name": "socks5",
+      "description": "SOCKS5 listener (TCP CONNECT and UDP ASSOCIATE).",
+      "keys": [
+        {
+          "key": "listen",
+          "path": "socks5.listen",
+          "type": "string",
+          "default": "",
+          "description": "`\"IP:port\"` of the SOCKS5 port, e.g. `\"127.0.0.1:1080\"`; empty = disabled. The password is one of the `api_keys`.",
+          "reload": "restart"
+        }
+      ]
+    },
+    {
+      "name": "log",
+      "description": "Access log.",
+      "keys": [
+        {
+          "key": "access",
+          "path": "log.access",
+          "type": "enum",
+          "values": ["off", "errors", "all"],
+          "default": "errors",
+          "description": "`off`, `errors` (refusals and failures) or `all` (one line per request and tunnel).",
+          "reload": "restart"
+        },
+        {
+          "key": "output",
+          "path": "log.output",
+          "type": "enum",
+          "values": ["file", "stdout"],
+          "default": "file",
+          "description": "`file` or `stdout`.",
+          "reload": "restart"
+        },
+        {
+          "key": "file",
+          "path": "log.file",
+          "type": "string",
+          "default": "",
+          "description": "Path when `output = \"file\"`; empty = no access log.",
+          "reload": "restart"
+        },
+        {
+          "key": "target",
+          "path": "log.target",
+          "type": "enum",
+          "values": ["host", "url"],
+          "default": "host",
+          "description": "Log `host:port` or the full URL (`url`) of `http://` requests.",
+          "reload": "restart"
+        }
+      ]
+    }
+  ]
+}
