@@ -240,7 +240,7 @@
     },
     "flagList": {
       "title": "Flags",
-      "description": "proxy_unsaturated: the proxy used under 90 % of its core at that point (the harness or the link set the number). harness_saturated: the origin or the sink was above 90 %.",
+      "description": "proxy_unsaturated: the proxy used under 90 % of its core at that point (the harness or the test network set the number). harness_saturated: the origin or the sink was above 90 %.",
       "type": "array",
       "items": {
         "enum": [

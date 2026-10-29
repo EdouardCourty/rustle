@@ -318,11 +318,11 @@
     },
     {
       "id": "closed-loop",
-      "text": "Latency is closed-loop at each concurrency level (no open-loop rate); CPU per request is measured at saturation, not at an equal offered load."
+      "text": "Latency is closed-loop at each concurrency level (no open-loop rate); CPU per request is measured with the proxy fully loaded, not at the same request rate for every proxy."
     },
     {
       "id": "link-bound",
-      "text": "The 25 Gbit/s link (23.5 measured) is a ceiling: a proxy that reaches it (rustle at 1 MB, 10 MB and in plain tunnels) shows the link, not its own limit, and its figure is a lower bound."
+      "text": "The test network can carry about 23.5 Gbit/s (25 nominal). Where rustle gets close to it (1 MB and 10 MB responses, plain tunnels), the network sets the number, not rustle: rustle's real figure, and its real lead, are higher than the one shown."
     },
     {
       "id": "tls-no-splice",
@@ -346,9 +346,9 @@
     }
   ],
   "test_notes": {
-    "plain-1mb": "rustle is at 95 % of its core, near the link ceiling: its lead is a lower bound.",
-    "plain-10mb": "rustle is at 83 % of its core, at the link ceiling (about 22 of 23.5 Gbit/s): its figure is a lower bound.",
-    "plain-flood": "rustle is at 70 % of its core, at the link ceiling (about 22 of 23.5 Gbit/s): its figure is a lower bound.",
+    "plain-1mb": "rustle uses 95 % of its core and gets about 22 of the 23.5 Gbit/s the test network can carry: the network starts to limit it here, so its real lead is somewhat higher than shown.",
+    "plain-10mb": "rustle uses 83 % of its core and gets about 22 of the 23.5 Gbit/s the test network can carry: the network is the limit here, so rustle can go faster.",
+    "plain-flood": "rustle uses 70 % of its core and gets about 22 of the 23.5 Gbit/s the test network can carry: the network is the limit here, so rustle can go faster.",
     "tls-short-full": "Session resumption is off: every connection is a full handshake with the certificate signature.",
     "ws-short": "Tinyproxy removes the Upgrade header (answered 426): it does not support WebSocket and is listed as unsupported, not as zero."
   }

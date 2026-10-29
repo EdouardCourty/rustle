@@ -303,7 +303,7 @@ def build(meta, order, runs):
         flood_note = ""
         if s["id"] == "plain-flood" and data_flood is not None:
             data = data_flood
-            flood_note = " Measured on one host over loopback (the three-machine link caps tunnels)."
+            flood_note = " Measured on one host over loopback (the network between the three machines limits tunnels)."
         values, at_conns, flags, status = {}, {}, {}, {}
         for p in order:
             v, at, fl, st = cell(data, support, unsupported, tr, p, s["test"], s["key"])

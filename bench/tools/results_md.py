@@ -234,7 +234,7 @@ def d_at(t, p, first):
 
 
 def d_at_cpu(t, p, first):
-    """@conns, flagged when the proxy was under 90 % of its core (the link or the harness set the number)."""
+    """@conns, flagged when the proxy was under 90 % of its core (the test network or the harness set the number)."""
     return at(t, p) + (", <90 % CPU" if "proxy_unsaturated" in t["flags"][p] else "")
 
 
