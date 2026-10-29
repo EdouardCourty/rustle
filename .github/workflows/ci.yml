@@ -18,9 +18,11 @@ jobs:
   changelog:
     name: changelog
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2
         with:
           tool: parse-changelog
       - name: Format, and a section for the current version
