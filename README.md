@@ -273,7 +273,7 @@ rustle reload      # re-read the config file the proxy was started with
 The file is validated first; if anything is wrong (syntax, a CIDR, a missing certificate, a key that does not match) the running config is kept and the error is printed. `SIGHUP` does the same (and reopens the access log), so `systemctl reload rustle` works.
 
 *   **Applied to new connections**: `api_keys`, `allow_clients`, the ban settings, `[filter]`, `[limits]`, `[timeouts]`, `[dns]`, `http.max_*_body_bytes`, `http.allow_websocket`, `tls.cert` / `key` / `http2` / `handshake_timeout`. A renewed certificate is picked up without dropping anyone.
-*   **Restart required**: `listen` addresses, `workers`, `pin_cores`, `socket_buffer_bytes`, `tls.listen` / `ktls`, `socks5.listen`, `admin_listen`, the upstream pool and `[log]`. `rustle reload` lists the ones you changed and keeps their running value.
+*   **Restart required**: `listen` addresses, `workers`, `pin_cores`, `socket_buffer_bytes`, `control_socket`, `tls.listen` / `ktls`, `socks5.listen`, `admin_listen`, the upstream pool and `[log]`. `rustle reload` lists the ones you changed and keeps their running value.
 *   Connections already open keep the config they were accepted under until they close, so a revoked key stays valid on an existing keep-alive connection until it ends (at most `timeouts.idle` once idle).
 
 Limitations

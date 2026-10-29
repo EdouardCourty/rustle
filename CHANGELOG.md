@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reload: a changed `server.control_socket` is now reported as needing a restart (it was silently ignored: the socket is bound at startup).
 - Installer: the error shown for a glibc that is too old no longer lists RHEL 9 (glibc 2.34, below the 2.35 requirement), and its source-build link points to the right README section.
 
 ## [1.0.0] - 2026-10-29
