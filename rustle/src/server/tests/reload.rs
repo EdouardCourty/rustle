@@ -48,6 +48,15 @@ async fn reload_swaps_keys_and_keeps_the_old_config_on_error() {
     let r = srv.reload().unwrap();
     assert_eq!(r.restart_required, ["server.admin_listen"]);
 
+    // The control socket is bound at startup: a new path is reported too.
+    std::fs::write(
+        &path,
+        reload_toml("new", "").replace("control_socket = \"\"", "control_socket = \"auto\""),
+    )
+    .unwrap();
+    let r = srv.reload().unwrap();
+    assert_eq!(r.restart_required, ["server.control_socket"]);
+
     // A broken file is refused whole: the running config stays.
     std::fs::write(
         &path,

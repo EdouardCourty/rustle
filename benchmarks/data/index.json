@@ -1,0 +1,14 @@
+{
+  "$schema": "./schema/index.schema.json",
+  "schema_version": 1,
+  "latest": "2026-10-28",
+  "campaigns": [
+    {
+      "id": "2026-10-28",
+      "date": "2026-10-28",
+      "rustle_version": "1.0.0",
+      "proxies": ["rustle", "3proxy", "squid", "gost", "tinyproxy"],
+      "path": "2026-10-28/"
+    }
+  ]
+}

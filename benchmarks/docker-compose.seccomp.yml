@@ -1,0 +1,7 @@
+# Overlay (SECCOMP=unconfined in run-bench.sh): lifts Docker's default
+# seccomp profile on the proxy — io_uring syscalls are blocked by it. Apply
+# to every proxy of a comparison: the filter itself costs per syscall.
+services:
+  proxy:
+    security_opt:
+      - seccomp=unconfined

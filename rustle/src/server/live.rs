@@ -81,6 +81,7 @@ fn restart_required(old: &Config, new: &Config) -> Vec<&'static str> {
         server.pin_cores,
         server.admin_listen,
         server.socket_buffer_bytes,
+        server.control_socket,
         tls.listen,
         tls.ktls,
         socks5.listen,

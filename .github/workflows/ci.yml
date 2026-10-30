@@ -31,6 +31,22 @@ jobs:
           crate="$(sed -n 's/^version = "\(.*\)"/\1/p' rustle/Cargo.toml | head -n1)"
           parse-changelog CHANGELOG.md "${crate}" > /dev/null
 
+  data:
+    name: website data
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install check-jsonschema (version pinned in the Makefile)
+        run: make install-schema-tool
+      - name: Unit tests of the bench tools, syntax of the bench scripts
+        run: |
+          make test-tools
+          for f in benchmarks/scripts/*.sh benchmarks/scripts/remote/*.sh; do bash -n "$f"; done
+      - name: The published data match their JSON Schemas, are consistent, and are what the raw runs give
+        run: make data-check
+
   lint:
     name: fmt + clippy (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -68,7 +84,7 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo modprobe tls || echo "kTLS module unavailable, kTLS scenarios skip"
       - name: Unit + in-process end-to-end tests
-        run: cargo test -p rustle
+        run: cargo test -p rustle -p bench-client
       - name: Build the proxy (release)
         run: cargo build --release -p rustle
       - name: e2e (${{ matrix.e2e }})

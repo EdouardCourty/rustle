@@ -89,9 +89,8 @@ pub struct TlsConfig {
     /// Offer HTTP/2 through ALPN (clients that do not ask keep HTTP/1.1).
     pub http2: bool,
     /// Kernel TLS after the handshake (when the kernel supports it, probed
-    /// at startup). Off by default: measured faster for CONNECT tunnels
-    /// and lighter in memory, slower for HTTP bulk and per connection
-    /// (bench/RESULTS.md, M17).
+    /// at startup). Off by default: it saves memory, but is slower than
+    /// rustls on throughput without NIC TLS offload; see benchmarks/documentation/RESULTS.md.
     pub ktls: bool,
 }
 
@@ -303,8 +302,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
         for p in [
             "config.toml.example",
-            "../bench/dut/rustle/rustle-on.toml",
-            "../bench/dut/rustle/rustle-off.toml",
+            "../benchmarks/proxies/rustle/rustle-on.toml",
+            "../benchmarks/proxies/rustle/rustle-off.toml",
         ] {
             Config::load(&root.join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
         }

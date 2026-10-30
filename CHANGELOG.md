@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Docs: `tls.ktls` is documented as saving memory but being slower than rustls on throughput, tunnels included (the example config said the opposite for tunnels). The README no longer lists 1 MB socket buffers as a default (the default is kernel autotuning).
+- Docs: the README no longer says a renewed TLS certificate needs a restart; `rustle reload` picks it up (as the reload section and the code already did).
+- Reload: a changed `server.control_socket` is now reported as needing a restart (it was silently ignored: the socket is bound at startup).
 - Installer: the error shown for a glibc that is too old no longer lists RHEL 9 (glibc 2.34, below the 2.35 requirement), and its source-build link points to the right README section.
 
 ## [1.0.0] - 2026-10-29
@@ -30,7 +33,7 @@ Initial release.
 - Runtime configuration reload (`rustle reload` or `SIGHUP`) and a `/health` endpoint.
 - `rustle` command line: `init`, `check`, `status`, `reload`, `service` (systemd and launchd), `update`, `uninstall`.
 - `curl | sh` installer with SHA-256 verification; Linux (x86_64, aarch64) and macOS (Apple Silicon, Intel) builds.
-- Black-box end-to-end test suite and a reproducible benchmark harness; results are in `bench/RESULTS.md`.
+- Black-box end-to-end test suite and a reproducible benchmark harness; results are in `benchmarks/documentation/RESULTS.md`.
 
 [Unreleased]: https://github.com/EdouardCourty/rustle/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/EdouardCourty/rustle/releases/tag/v1.0.0

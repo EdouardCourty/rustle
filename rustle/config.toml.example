@@ -83,16 +83,18 @@ allow_websocket = true
 # Needs cert and key below. Browsers use it via PAC "HTTPS host:port";
 # curl via --proxy https://host:port (add --proxy-http2 for HTTP/2).
 listen = ""
+# cert and key are read at startup and by `rustle reload` (a renewed
+# certificate needs no restart; a bad pair keeps the running one).
 cert = "/etc/rustle/cert.pem"
 key = "/etc/rustle/key.pem"
 handshake_timeout = "10s"
 # Offer HTTP/2 through ALPN (CONNECT and plain requests as h2 streams).
 http2 = true
-# Kernel TLS: after the rustls handshake, the session keys go to the kernel
-# (module `tls`, probed at startup; userspace TLS otherwise). Measured: CONNECT
-# tunnels +13 % throughput and -30 % memory at 25k tunnels, but HTTP bulk
-# -37 % (1 MB) and +15 % CPU per new connection. Worth it for a mostly-HTTPS
-# (CONNECT) workload with many tunnels.
+# Kernel TLS (Linux, opt-in, off by default). After the rustls handshake, the
+# session keys go to the kernel (module `tls`, probed at startup; userspace TLS
+# otherwise). Software kernel TLS saves memory but is slower than rustls on
+# throughput, tunnels included (see benchmarks/documentation/RESULTS.md). Leave it off unless
+# memory matters more than throughput.
 ktls = false
 
 [filter]

@@ -1,0 +1,2156 @@
+{
+  "$schema": "../schema/benchmarks.schema.json",
+  "schema_version": 1,
+  "campaign": "2026-10-28",
+  "tests": [
+    {
+      "id": "plain-1kb",
+      "transport": "plain",
+      "label": "HTTP, 1 KB responses",
+      "unit": "req/s",
+      "direction": "higher",
+      "conditions": "1 KB responses, keep-alive. Plain HTTP proxy port.",
+      "chart": "plain-1kb.svg",
+      "values": {
+        "rustle": 55257.595,
+        "3proxy": 21032.03,
+        "squid": 15139.599,
+        "gost": 4754.706,
+        "tinyproxy": 7580.23
+      },
+      "at_conns": {
+        "rustle": 64,
+        "3proxy": 256,
+        "squid": 64,
+        "gost": 64,
+        "tinyproxy": 64
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "ok",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "ok"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 18.096,
+        "3proxy": 47.569,
+        "squid": 66.048,
+        "gost": 210.01,
+        "tinyproxy": 129.391
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": 1.0,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": 0.98
+      }
+    },
+    {
+      "id": "plain-10kb",
+      "transport": "plain",
+      "label": "HTTP, 10 KB responses",
+      "unit": "req/s",
+      "direction": "higher",
+      "conditions": "10 KB responses, keep-alive. Plain HTTP proxy port.",
+      "chart": null,
+      "values": {
+        "rustle": 40782.877,
+        "3proxy": 19169.111,
+        "squid": 10814.248,
+        "gost": 4436.468,
+        "tinyproxy": 5669.191
+      },
+      "at_conns": {
+        "rustle": 64,
+        "3proxy": 256,
+        "squid": 64,
+        "gost": 64,
+        "tinyproxy": 64
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "ok",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "ok"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 24.528,
+        "3proxy": 52.199,
+        "squid": 92.489,
+        "gost": 225.194,
+        "tinyproxy": 174.159
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": 1.0,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": 0.99
+      }
+    },
+    {
+      "id": "plain-short",
+      "transport": "plain",
+      "label": "HTTP, 1 KB responses, a new connection per request",
+      "unit": "req/s",
+      "direction": "higher",
+      "conditions": "1 KB responses, no keep-alive. Plain HTTP proxy port.",
+      "chart": null,
+      "values": {
+        "rustle": 27826.851,
+        "3proxy": 5131.65,
+        "squid": 7803.782,
+        "gost": 4779.963,
+        "tinyproxy": 7584.217
+      },
+      "at_conns": {
+        "rustle": 256,
+        "3proxy": 256,
+        "squid": 64,
+        "gost": 64,
+        "tinyproxy": 64
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "ok",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "ok"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 35.738,
+        "3proxy": 192.084,
+        "squid": 128.075,
+        "gost": 208.872,
+        "tinyproxy": 129.419
+      },
+      "proxy_util": {
+        "rustle": 0.99,
+        "3proxy": 0.99,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": 0.98
+      }
+    },
+    {
+      "id": "plain-1mb",
+      "transport": "plain",
+      "label": "HTTP, 1 MB responses",
+      "unit": "req/s",
+      "direction": "higher",
+      "conditions": "1 MB responses, keep-alive. Plain HTTP proxy port.",
+      "chart": "plain-1mb.svg",
+      "values": {
+        "rustle": 2624.351,
+        "3proxy": 1783.881,
+        "squid": 352.843,
+        "gost": 1045.84,
+        "tinyproxy": 198.802
+      },
+      "at_conns": {
+        "rustle": 16,
+        "3proxy": 64,
+        "squid": 16,
+        "gost": 64,
+        "tinyproxy": 256
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "ok",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "ok"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 363.727,
+        "3proxy": 560.836,
+        "squid": 2835.255,
+        "gost": 956.36,
+        "tinyproxy": 5010.862
+      },
+      "proxy_util": {
+        "rustle": 0.95,
+        "3proxy": 1.0,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": 1.0
+      }
+    },
+    {
+      "id": "plain-10mb",
+      "transport": "plain",
+      "label": "HTTP, 10 MB responses",
+      "unit": "req/s",
+      "direction": "higher",
+      "conditions": "10 MB responses, keep-alive. Plain HTTP proxy port.",
+      "chart": null,
+      "values": {
+        "rustle": 268.202,
+        "3proxy": 191.143,
+        "squid": 32.998,
+        "gost": 144.937,
+        "tinyproxy": 20.655
+      },
+      "at_conns": {
+        "rustle": 32,
+        "3proxy": 8,
+        "squid": 8,
+        "gost": 32,
+        "tinyproxy": 32
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "ok",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "ok"
+      },
+      "flags": {
+        "rustle": [
+          "proxy_unsaturated"
+        ],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 3077.735,
+        "3proxy": 5227.507,
+        "squid": 30342.996,
+        "gost": 6900.004,
+        "tinyproxy": 48411.318
+      },
+      "proxy_util": {
+        "rustle": 0.83,
+        "3proxy": 1.0,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": 1.0
+      }
+    },
+    {
+      "id": "plain-flood",
+      "transport": "plain",
+      "label": "CONNECT tunnels, bulk transfer",
+      "unit": "Gbit/s",
+      "direction": "higher",
+      "conditions": "Bulk upload through CONNECT tunnels. Plain HTTP proxy port.",
+      "chart": "plain-flood.svg",
+      "values": {
+        "rustle": 22.029,
+        "3proxy": 15.68,
+        "squid": 13.569,
+        "gost": 13.225,
+        "tinyproxy": 1.767
+      },
+      "at_conns": {
+        "rustle": 8,
+        "3proxy": 8,
+        "squid": 8,
+        "gost": 32,
+        "tinyproxy": 32
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "ok",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "ok"
+      },
+      "flags": {
+        "rustle": [
+          "proxy_unsaturated"
+        ],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_ms_per_gb": {
+        "rustle": 253.125,
+        "3proxy": 511.373,
+        "squid": 590.569,
+        "gost": 608.743,
+        "tinyproxy": 4573.915
+      },
+      "proxy_util": {
+        "rustle": 0.7,
+        "3proxy": 1.0,
+        "squid": 1.0,
+        "gost": 1.01,
+        "tinyproxy": 1.01
+      }
+    },
+    {
+      "id": "plain-cpu",
+      "transport": "plain",
+      "label": "CPU cost per request (1 KB)",
+      "unit": "µs/req",
+      "direction": "lower",
+      "conditions": "Proxy CPU per request, 1 KB responses, keep-alive. Plain HTTP proxy port.",
+      "chart": "plain-cpu.svg",
+      "values": {
+        "rustle": 18.096,
+        "3proxy": 47.569,
+        "squid": 66.048,
+        "gost": 210.01,
+        "tinyproxy": 129.391
+      },
+      "at_conns": {
+        "rustle": 64,
+        "3proxy": 256,
+        "squid": 64,
+        "gost": 64,
+        "tinyproxy": 64
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "ok",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "ok"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      }
+    },
+    {
+      "id": "plain-ram-1000",
+      "transport": "plain",
+      "label": "Memory with 1,000 open tunnels",
+      "unit": "MB",
+      "direction": "lower",
+      "conditions": "1,000 idle CONNECT tunnels held open, peak RSS of the proxy. Plain HTTP proxy port.",
+      "chart": null,
+      "values": {
+        "rustle": 14.0,
+        "3proxy": 104.1,
+        "squid": 150.0,
+        "gost": 161.4,
+        "tinyproxy": 18.4
+      },
+      "at_conns": {
+        "rustle": null,
+        "3proxy": null,
+        "squid": null,
+        "gost": null,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "ok",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "ok"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      }
+    },
+    {
+      "id": "plain-ram-5000",
+      "transport": "plain",
+      "label": "Memory with 5,000 open tunnels",
+      "unit": "MB",
+      "direction": "lower",
+      "conditions": "5,000 idle CONNECT tunnels held open, peak RSS of the proxy. Plain HTTP proxy port.",
+      "chart": null,
+      "values": {
+        "rustle": 40.4,
+        "3proxy": 498.7,
+        "squid": 275.3,
+        "gost": 653.4,
+        "tinyproxy": 61.4
+      },
+      "at_conns": {
+        "rustle": null,
+        "3proxy": null,
+        "squid": null,
+        "gost": null,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "ok",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "ok"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      }
+    },
+    {
+      "id": "plain-ram-10000",
+      "transport": "plain",
+      "label": "Memory with 10,000 open tunnels",
+      "unit": "MB",
+      "direction": "lower",
+      "conditions": "10,000 idle CONNECT tunnels held open, peak RSS of the proxy. Plain HTTP proxy port.",
+      "chart": null,
+      "values": {
+        "rustle": 54.2,
+        "3proxy": 992.1,
+        "squid": 432.1,
+        "gost": 1242.7,
+        "tinyproxy": 114.8
+      },
+      "at_conns": {
+        "rustle": null,
+        "3proxy": null,
+        "squid": null,
+        "gost": null,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "ok",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "ok"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      }
+    },
+    {
+      "id": "plain-ram-25000",
+      "transport": "plain",
+      "label": "Memory with 25,000 open tunnels",
+      "unit": "MB",
+      "direction": "lower",
+      "conditions": "25,000 idle CONNECT tunnels held open, peak RSS of the proxy. Plain HTTP proxy port.",
+      "chart": "plain-ram.svg",
+      "values": {
+        "rustle": 94.8,
+        "3proxy": 2461.1,
+        "squid": 912.3,
+        "gost": 3228.4,
+        "tinyproxy": 273.6
+      },
+      "at_conns": {
+        "rustle": null,
+        "3proxy": null,
+        "squid": null,
+        "gost": null,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "ok",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "ok"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      }
+    },
+    {
+      "id": "tls-1kb",
+      "transport": "tls",
+      "label": "HTTP, 1 KB responses",
+      "unit": "req/s",
+      "direction": "higher",
+      "conditions": "1 KB responses, keep-alive. HTTPS proxy (TLS 1.3, AES-128-GCM, session resumption on).",
+      "chart": "tls-1kb.svg",
+      "values": {
+        "rustle": 49460.971,
+        "3proxy": null,
+        "squid": 13508.525,
+        "gost": 2527.827,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 64,
+        "3proxy": null,
+        "squid": 64,
+        "gost": 64,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 20.225,
+        "3proxy": null,
+        "squid": 74.017,
+        "gost": 395.491,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
+      }
+    },
+    {
+      "id": "tls-10kb",
+      "transport": "tls",
+      "label": "HTTP, 10 KB responses",
+      "unit": "req/s",
+      "direction": "higher",
+      "conditions": "10 KB responses, keep-alive. HTTPS proxy (TLS 1.3, AES-128-GCM, session resumption on).",
+      "chart": null,
+      "values": {
+        "rustle": 35459.861,
+        "3proxy": null,
+        "squid": 9341.467,
+        "gost": 2433.313,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 64,
+        "3proxy": null,
+        "squid": 64,
+        "gost": 64,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 28.197,
+        "3proxy": null,
+        "squid": 107.078,
+        "gost": 410.908,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
+      }
+    },
+    {
+      "id": "tls-short",
+      "transport": "tls",
+      "label": "HTTP, 1 KB responses, a new connection per request",
+      "unit": "req/s",
+      "direction": "higher",
+      "conditions": "1 KB responses, no keep-alive. HTTPS proxy (TLS 1.3, AES-128-GCM, session resumption on).",
+      "chart": "tls-short.svg",
+      "values": {
+        "rustle": 6118.791,
+        "3proxy": null,
+        "squid": 2047.394,
+        "gost": 2515.609,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 64,
+        "3proxy": null,
+        "squid": 64,
+        "gost": 64,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 163.333,
+        "3proxy": null,
+        "squid": 488.556,
+        "gost": 397.412,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
+      }
+    },
+    {
+      "id": "tls-1mb",
+      "transport": "tls",
+      "label": "HTTP, 1 MB responses",
+      "unit": "req/s",
+      "direction": "higher",
+      "conditions": "1 MB responses, keep-alive. HTTPS proxy (TLS 1.3, AES-128-GCM, session resumption on).",
+      "chart": null,
+      "values": {
+        "rustle": 1296.641,
+        "3proxy": null,
+        "squid": 276.821,
+        "gost": 615.035,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 16,
+        "3proxy": null,
+        "squid": 16,
+        "gost": 64,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 771.326,
+        "3proxy": null,
+        "squid": 3613.163,
+        "gost": 1626.895,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
+      }
+    },
+    {
+      "id": "tls-10mb",
+      "transport": "tls",
+      "label": "HTTP, 10 MB responses",
+      "unit": "req/s",
+      "direction": "higher",
+      "conditions": "10 MB responses, keep-alive. HTTPS proxy (TLS 1.3, AES-128-GCM, session resumption on).",
+      "chart": null,
+      "values": {
+        "rustle": 141.633,
+        "3proxy": null,
+        "squid": 27.148,
+        "gost": 82.782,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 32,
+        "3proxy": null,
+        "squid": 8,
+        "gost": 128,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 7063.297,
+        "3proxy": null,
+        "squid": 36896.091,
+        "gost": 12081.402,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
+      }
+    },
+    {
+      "id": "tls-short-full",
+      "transport": "tls-full-handshake",
+      "label": "HTTP, 1 KB responses, a new connection per request, full handshake",
+      "unit": "req/s",
+      "direction": "higher",
+      "conditions": "1 KB responses, no keep-alive. HTTPS proxy (TLS 1.3, AES-128-GCM), a full handshake on every connection.",
+      "chart": "tls-short-full.svg",
+      "values": {
+        "rustle": 5458.284,
+        "3proxy": null,
+        "squid": 1921.966,
+        "gost": 2245.596,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 64,
+        "3proxy": null,
+        "squid": 64,
+        "gost": 64,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 183.122,
+        "3proxy": null,
+        "squid": 520.508,
+        "gost": 445.227,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
+      }
+    },
+    {
+      "id": "tls-flood",
+      "transport": "tls",
+      "label": "CONNECT tunnels, bulk transfer",
+      "unit": "Gbit/s",
+      "direction": "higher",
+      "conditions": "Bulk upload through CONNECT tunnels. HTTPS proxy (TLS 1.3, AES-128-GCM, session resumption on).",
+      "chart": null,
+      "values": {
+        "rustle": 12.024,
+        "3proxy": null,
+        "squid": 4.867,
+        "gost": 7.095,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 32,
+        "3proxy": null,
+        "squid": 8,
+        "gost": 32,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_ms_per_gb": {
+        "rustle": 672.164,
+        "3proxy": null,
+        "squid": 1648.749,
+        "gost": 1144.544,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.01,
+        "3proxy": null,
+        "squid": 1.0,
+        "gost": 1.02,
+        "tinyproxy": null
+      }
+    },
+    {
+      "id": "tls-ram-1000",
+      "transport": "tls",
+      "label": "Memory with 1,000 open tunnels",
+      "unit": "MB",
+      "direction": "lower",
+      "conditions": "1,000 idle CONNECT tunnels held open, peak RSS of the proxy. HTTPS proxy (TLS 1.3, AES-128-GCM, session resumption on).",
+      "chart": null,
+      "values": {
+        "rustle": 57.3,
+        "3proxy": null,
+        "squid": 181.4,
+        "gost": 239.9,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": null,
+        "3proxy": null,
+        "squid": null,
+        "gost": null,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      }
+    },
+    {
+      "id": "tls-ram-5000",
+      "transport": "tls",
+      "label": "Memory with 5,000 open tunnels",
+      "unit": "MB",
+      "direction": "lower",
+      "conditions": "5,000 idle CONNECT tunnels held open, peak RSS of the proxy. HTTPS proxy (TLS 1.3, AES-128-GCM, session resumption on).",
+      "chart": null,
+      "values": {
+        "rustle": 253.0,
+        "3proxy": null,
+        "squid": 431.6,
+        "gost": 902.6,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": null,
+        "3proxy": null,
+        "squid": null,
+        "gost": null,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      }
+    },
+    {
+      "id": "tls-ram-10000",
+      "transport": "tls",
+      "label": "Memory with 10,000 open tunnels",
+      "unit": "MB",
+      "direction": "lower",
+      "conditions": "10,000 idle CONNECT tunnels held open, peak RSS of the proxy. HTTPS proxy (TLS 1.3, AES-128-GCM, session resumption on).",
+      "chart": null,
+      "values": {
+        "rustle": 465.9,
+        "3proxy": null,
+        "squid": 759.9,
+        "gost": 2110.1,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": null,
+        "3proxy": null,
+        "squid": null,
+        "gost": null,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      }
+    },
+    {
+      "id": "tls-ram-25000",
+      "transport": "tls",
+      "label": "Memory with 25,000 open tunnels",
+      "unit": "MB",
+      "direction": "lower",
+      "conditions": "25,000 idle CONNECT tunnels held open, peak RSS of the proxy. HTTPS proxy (TLS 1.3, AES-128-GCM, session resumption on).",
+      "chart": null,
+      "values": {
+        "rustle": 809.7,
+        "3proxy": null,
+        "squid": 2584.0,
+        "gost": 4093.9,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": null,
+        "3proxy": null,
+        "squid": null,
+        "gost": null,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      }
+    },
+    {
+      "id": "h2-1kb",
+      "transport": "h2",
+      "label": "HTTP, 1 KB responses",
+      "unit": "req/s",
+      "direction": "higher",
+      "conditions": "1 KB responses, keep-alive. HTTP/2 to the proxy over TLS (ALPN h2), one HTTP/2 connection per client connection, sequential requests.",
+      "chart": "h2-1kb.svg",
+      "values": {
+        "rustle": 33450.63,
+        "3proxy": null,
+        "squid": null,
+        "gost": 5230.911,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 64,
+        "3proxy": null,
+        "squid": null,
+        "gost": 64,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "unsupported",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 29.889,
+        "3proxy": null,
+        "squid": null,
+        "gost": 191.12,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": null,
+        "gost": 1.0,
+        "tinyproxy": null
+      }
+    },
+    {
+      "id": "h2-10kb",
+      "transport": "h2",
+      "label": "HTTP, 10 KB responses",
+      "unit": "req/s",
+      "direction": "higher",
+      "conditions": "10 KB responses, keep-alive. HTTP/2 to the proxy over TLS (ALPN h2), one HTTP/2 connection per client connection, sequential requests.",
+      "chart": null,
+      "values": {
+        "rustle": 24788.625,
+        "3proxy": null,
+        "squid": null,
+        "gost": 4731.876,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 64,
+        "3proxy": null,
+        "squid": null,
+        "gost": 64,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "unsupported",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 40.349,
+        "3proxy": null,
+        "squid": null,
+        "gost": 211.361,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": null,
+        "gost": 1.0,
+        "tinyproxy": null
+      }
+    },
+    {
+      "id": "h2-short",
+      "transport": "h2",
+      "label": "HTTP, 1 KB responses, a new connection per request",
+      "unit": "req/s",
+      "direction": "higher",
+      "conditions": "1 KB responses, no keep-alive. HTTP/2 to the proxy over TLS (ALPN h2), one HTTP/2 connection per client connection, sequential requests.",
+      "chart": null,
+      "values": {
+        "rustle": 4973.964,
+        "3proxy": null,
+        "squid": null,
+        "gost": 2187.227,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 64,
+        "3proxy": null,
+        "squid": null,
+        "gost": 64,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "unsupported",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 200.993,
+        "3proxy": null,
+        "squid": null,
+        "gost": 457.23,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": null,
+        "gost": 1.0,
+        "tinyproxy": null
+      }
+    },
+    {
+      "id": "h2-1mb",
+      "transport": "h2",
+      "label": "HTTP, 1 MB responses",
+      "unit": "req/s",
+      "direction": "higher",
+      "conditions": "1 MB responses, keep-alive. HTTP/2 to the proxy over TLS (ALPN h2), one HTTP/2 connection per client connection, sequential requests.",
+      "chart": null,
+      "values": {
+        "rustle": 860.23,
+        "3proxy": null,
+        "squid": null,
+        "gost": 446.772,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 16,
+        "3proxy": null,
+        "squid": null,
+        "gost": 16,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "unsupported",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 1162.635,
+        "3proxy": null,
+        "squid": null,
+        "gost": 2238.576,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": null,
+        "gost": 1.0,
+        "tinyproxy": null
+      }
+    },
+    {
+      "id": "h2-10mb",
+      "transport": "h2",
+      "label": "HTTP, 10 MB responses",
+      "unit": "req/s",
+      "direction": "higher",
+      "conditions": "10 MB responses, keep-alive. HTTP/2 to the proxy over TLS (ALPN h2), one HTTP/2 connection per client connection, sequential requests.",
+      "chart": null,
+      "values": {
+        "rustle": 88.067,
+        "3proxy": null,
+        "squid": null,
+        "gost": 50.485,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 8,
+        "3proxy": null,
+        "squid": null,
+        "gost": 8,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "unsupported",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 11356.5,
+        "3proxy": null,
+        "squid": null,
+        "gost": 19815.738,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": null,
+        "gost": 1.0,
+        "tinyproxy": null
+      }
+    },
+    {
+      "id": "h2-flood",
+      "transport": "h2",
+      "label": "CONNECT tunnels, bulk transfer",
+      "unit": "Gbit/s",
+      "direction": "higher",
+      "conditions": "Bulk upload through CONNECT tunnels. HTTP/2 to the proxy over TLS (ALPN h2), one HTTP/2 connection per client connection, sequential requests.",
+      "chart": null,
+      "values": {
+        "rustle": 8.801,
+        "3proxy": null,
+        "squid": null,
+        "gost": 7.837,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 8,
+        "3proxy": null,
+        "squid": null,
+        "gost": 8,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "unsupported",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_ms_per_gb": {
+        "rustle": 911.054,
+        "3proxy": null,
+        "squid": null,
+        "gost": 1021.785,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": null,
+        "gost": 1.0,
+        "tinyproxy": null
+      }
+    },
+    {
+      "id": "h2-ram-1000",
+      "transport": "h2",
+      "label": "Memory with 1,000 open tunnels",
+      "unit": "MB",
+      "direction": "lower",
+      "conditions": "1,000 idle CONNECT tunnels held open, peak RSS of the proxy. HTTP/2 to the proxy over TLS (ALPN h2), one HTTP/2 connection per client connection, sequential requests.",
+      "chart": null,
+      "values": {
+        "rustle": 70.1,
+        "3proxy": null,
+        "squid": null,
+        "gost": 225.4,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": null,
+        "3proxy": null,
+        "squid": null,
+        "gost": null,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "unsupported",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      }
+    },
+    {
+      "id": "h2-ram-5000",
+      "transport": "h2",
+      "label": "Memory with 5,000 open tunnels",
+      "unit": "MB",
+      "direction": "lower",
+      "conditions": "5,000 idle CONNECT tunnels held open, peak RSS of the proxy. HTTP/2 to the proxy over TLS (ALPN h2), one HTTP/2 connection per client connection, sequential requests.",
+      "chart": null,
+      "values": {
+        "rustle": 329.6,
+        "3proxy": null,
+        "squid": null,
+        "gost": 1244.9,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": null,
+        "3proxy": null,
+        "squid": null,
+        "gost": null,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "unsupported",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      }
+    },
+    {
+      "id": "h2-ram-10000",
+      "transport": "h2",
+      "label": "Memory with 10,000 open tunnels",
+      "unit": "MB",
+      "direction": "lower",
+      "conditions": "10,000 idle CONNECT tunnels held open, peak RSS of the proxy. HTTP/2 to the proxy over TLS (ALPN h2), one HTTP/2 connection per client connection, sequential requests.",
+      "chart": null,
+      "values": {
+        "rustle": 704.6,
+        "3proxy": null,
+        "squid": null,
+        "gost": 2638.9,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": null,
+        "3proxy": null,
+        "squid": null,
+        "gost": null,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "unsupported",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      }
+    },
+    {
+      "id": "h2-ram-25000",
+      "transport": "h2",
+      "label": "Memory with 25,000 open tunnels",
+      "unit": "MB",
+      "direction": "lower",
+      "conditions": "25,000 idle CONNECT tunnels held open, peak RSS of the proxy. HTTP/2 to the proxy over TLS (ALPN h2), one HTTP/2 connection per client connection, sequential requests.",
+      "chart": null,
+      "values": {
+        "rustle": 1262.8,
+        "3proxy": null,
+        "squid": null,
+        "gost": 5883.5,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": null,
+        "3proxy": null,
+        "squid": null,
+        "gost": null,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "unsupported",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      }
+    },
+    {
+      "id": "ws-64b-rps",
+      "transport": "ws",
+      "label": "WebSocket, 64-byte messages",
+      "unit": "msg/s",
+      "direction": "higher",
+      "conditions": "64-byte messages, 64 connections, ping-pong. WebSocket upgrade on the plain HTTP proxy port.",
+      "chart": "ws-64b-rps.svg",
+      "values": {
+        "rustle": 58506.259,
+        "3proxy": 33135.809,
+        "squid": 43710.238,
+        "gost": 46808.464,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 64,
+        "3proxy": 64,
+        "squid": 64,
+        "gost": 64,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "ok",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 17.094,
+        "3proxy": 30.195,
+        "squid": 22.884,
+        "gost": 21.368,
+        "tinyproxy": null
+      },
+      "p99_ms": {
+        "rustle": 1.286,
+        "3proxy": 3.162,
+        "squid": 1.491,
+        "gost": 2.572,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": 1.0,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
+      }
+    },
+    {
+      "id": "ws-64b-latency",
+      "transport": "ws",
+      "label": "WebSocket round trip, 64-byte messages (p99)",
+      "unit": "ms",
+      "direction": "lower",
+      "conditions": "64-byte messages, 64 connections, ping-pong, p99 latency. WebSocket upgrade on the plain HTTP proxy port.",
+      "chart": "ws-64b-latency.svg",
+      "values": {
+        "rustle": 1.286,
+        "3proxy": 3.162,
+        "squid": 1.491,
+        "gost": 2.572,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 64,
+        "3proxy": 64,
+        "squid": 64,
+        "gost": 64,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "ok",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      }
+    },
+    {
+      "id": "ws-cpu",
+      "transport": "ws",
+      "label": "CPU cost per WebSocket message",
+      "unit": "µs/msg",
+      "direction": "lower",
+      "conditions": "Proxy CPU per 64-byte message. WebSocket upgrade on the plain HTTP proxy port.",
+      "chart": "ws-cpu.svg",
+      "values": {
+        "rustle": 17.094,
+        "3proxy": 30.195,
+        "squid": 22.884,
+        "gost": 21.368,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 64,
+        "3proxy": 64,
+        "squid": 64,
+        "gost": 64,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "ok",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      }
+    },
+    {
+      "id": "ws-64kb-gbps",
+      "transport": "ws",
+      "label": "WebSocket, 64 KB messages",
+      "unit": "Gbit/s",
+      "direction": "higher",
+      "conditions": "64 KB frames, 8 connections, 8 frames in flight. WebSocket upgrade on the plain HTTP proxy port.",
+      "chart": "ws-64kb-gbps.svg",
+      "values": {
+        "rustle": 11.587,
+        "3proxy": 7.945,
+        "squid": 6.607,
+        "gost": 6.932,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 8,
+        "3proxy": 8,
+        "squid": 8,
+        "gost": 8,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "ok",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_ms_per_gb": {
+        "rustle": 650.454,
+        "3proxy": 1007.296,
+        "squid": 1211.001,
+        "gost": 1154.36,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 0.94,
+        "3proxy": 1.0,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
+      }
+    },
+    {
+      "id": "ws-short",
+      "transport": "ws",
+      "label": "WebSocket, one connection per exchange",
+      "unit": "msg/s",
+      "direction": "higher",
+      "conditions": "One connection per exchange. WebSocket upgrade on the plain HTTP proxy port.",
+      "chart": null,
+      "values": {
+        "rustle": 10740.216,
+        "3proxy": 251.473,
+        "squid": 4878.924,
+        "gost": 3725.528,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 64,
+        "3proxy": 64,
+        "squid": 64,
+        "gost": 64,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "ok",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 92.81,
+        "3proxy": 3971.827,
+        "squid": 204.758,
+        "gost": 268.186,
+        "tinyproxy": null
+      },
+      "p99_ms": {
+        "rustle": 6.717,
+        "3proxy": 402.653,
+        "squid": 13.238,
+        "gost": 29.098,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": 1.0,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
+      }
+    },
+    {
+      "id": "ws-tls-64b-rps",
+      "transport": "ws-tls",
+      "label": "WebSocket, 64-byte messages",
+      "unit": "msg/s",
+      "direction": "higher",
+      "conditions": "64-byte messages, 64 connections, ping-pong. WebSocket upgrade through the HTTPS proxy (TLS 1.3, AES-128-GCM).",
+      "chart": null,
+      "values": {
+        "rustle": 56954.67,
+        "3proxy": null,
+        "squid": 36785.631,
+        "gost": 44425.873,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 64,
+        "3proxy": null,
+        "squid": 64,
+        "gost": 64,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 17.565,
+        "3proxy": null,
+        "squid": 27.195,
+        "gost": 22.514,
+        "tinyproxy": null
+      },
+      "p99_ms": {
+        "rustle": 1.311,
+        "3proxy": null,
+        "squid": 1.769,
+        "gost": 2.703,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
+      }
+    },
+    {
+      "id": "ws-tls-64b-latency",
+      "transport": "ws-tls",
+      "label": "WebSocket round trip, 64-byte messages (p99)",
+      "unit": "ms",
+      "direction": "lower",
+      "conditions": "64-byte messages, 64 connections, ping-pong, p99 latency. WebSocket upgrade through the HTTPS proxy (TLS 1.3, AES-128-GCM).",
+      "chart": null,
+      "values": {
+        "rustle": 1.311,
+        "3proxy": null,
+        "squid": 1.769,
+        "gost": 2.703,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 64,
+        "3proxy": null,
+        "squid": 64,
+        "gost": 64,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      }
+    },
+    {
+      "id": "ws-tls-64kb-gbps",
+      "transport": "ws-tls",
+      "label": "WebSocket, 64 KB messages",
+      "unit": "Gbit/s",
+      "direction": "higher",
+      "conditions": "64 KB frames, 8 connections, 8 frames in flight. WebSocket upgrade through the HTTPS proxy (TLS 1.3, AES-128-GCM).",
+      "chart": null,
+      "values": {
+        "rustle": 5.807,
+        "3proxy": null,
+        "squid": 2.371,
+        "gost": 3.792,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 8,
+        "3proxy": null,
+        "squid": 8,
+        "gost": 8,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_ms_per_gb": {
+        "rustle": 1377.818,
+        "3proxy": null,
+        "squid": 3376.628,
+        "gost": 2110.104,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
+      }
+    },
+    {
+      "id": "ws-tls-short",
+      "transport": "ws-tls",
+      "label": "WebSocket, one connection per exchange",
+      "unit": "msg/s",
+      "direction": "higher",
+      "conditions": "One connection per exchange. WebSocket upgrade through the HTTPS proxy (TLS 1.3, AES-128-GCM).",
+      "chart": null,
+      "values": {
+        "rustle": 4462.138,
+        "3proxy": null,
+        "squid": 1754.853,
+        "gost": 2190.117,
+        "tinyproxy": null
+      },
+      "at_conns": {
+        "rustle": 64,
+        "3proxy": null,
+        "squid": 64,
+        "gost": 64,
+        "tinyproxy": null
+      },
+      "status": {
+        "rustle": "ok",
+        "3proxy": "unsupported",
+        "squid": "ok",
+        "gost": "ok",
+        "tinyproxy": "unsupported"
+      },
+      "flags": {
+        "rustle": [],
+        "3proxy": [],
+        "squid": [],
+        "gost": [],
+        "tinyproxy": []
+      },
+      "cpu_us": {
+        "rustle": 223.899,
+        "3proxy": null,
+        "squid": 570.038,
+        "gost": 456.536,
+        "tinyproxy": null
+      },
+      "p99_ms": {
+        "rustle": 15.073,
+        "3proxy": null,
+        "squid": 36.962,
+        "gost": 44.04,
+        "tinyproxy": null
+      },
+      "proxy_util": {
+        "rustle": 1.0,
+        "3proxy": null,
+        "squid": 1.0,
+        "gost": 1.0,
+        "tinyproxy": null
+      }
+    }
+  ],
+  "scaling": [
+    {
+      "id": "scaling-plain-1kb",
+      "label": "Plain HTTP, 1 KB responses, 1 to 8 proxy cores",
+      "unit": "req/s",
+      "direction": "higher",
+      "conditions": "Same hosts, seed and protocol as the single-core matrix, one test (http-1kb), connection levels 64, 256, 1,024 and 4,096, best clean level kept. The proxy gets n physical cores and n workers.",
+      "not_measured": [
+        "tinyproxy"
+      ],
+      "points": [
+        {
+          "cores": 1,
+          "values": {
+            "rustle": 55275.005,
+            "3proxy": 21106.251,
+            "squid": 15093.68,
+            "gost": 4785.279,
+            "tinyproxy": null
+          },
+          "at_conns": {
+            "rustle": 64,
+            "3proxy": 256,
+            "squid": 64,
+            "gost": 64,
+            "tinyproxy": null
+          },
+          "flags": {
+            "rustle": [],
+            "3proxy": [],
+            "squid": [],
+            "gost": [],
+            "tinyproxy": []
+          },
+          "proxy_util": {
+            "rustle": 1.0,
+            "3proxy": 1.0,
+            "squid": 1.0,
+            "gost": 1.0,
+            "tinyproxy": null
+          },
+          "origin_util": {
+            "rustle": 0.09,
+            "3proxy": 0.03,
+            "squid": 0.02,
+            "gost": 0.03,
+            "tinyproxy": null
+          }
+        },
+        {
+          "cores": 2,
+          "values": {
+            "rustle": 111587.401,
+            "3proxy": 34381.416,
+            "squid": 29567.62,
+            "gost": 9177.636,
+            "tinyproxy": null
+          },
+          "at_conns": {
+            "rustle": 64,
+            "3proxy": 1024,
+            "squid": 64,
+            "gost": 64,
+            "tinyproxy": null
+          },
+          "flags": {
+            "rustle": [],
+            "3proxy": [],
+            "squid": [],
+            "gost": [],
+            "tinyproxy": []
+          },
+          "proxy_util": {
+            "rustle": 1.0,
+            "3proxy": 1.0,
+            "squid": 1.0,
+            "gost": 0.98,
+            "tinyproxy": null
+          },
+          "origin_util": {
+            "rustle": 0.17,
+            "3proxy": 0.06,
+            "squid": 0.05,
+            "gost": 0.05,
+            "tinyproxy": null
+          }
+        },
+        {
+          "cores": 4,
+          "values": {
+            "rustle": 218921.972,
+            "3proxy": 67390.18,
+            "squid": 59417.626,
+            "gost": 17676.744,
+            "tinyproxy": null
+          },
+          "at_conns": {
+            "rustle": 64,
+            "3proxy": 1024,
+            "squid": 256,
+            "gost": 256,
+            "tinyproxy": null
+          },
+          "flags": {
+            "rustle": [],
+            "3proxy": [],
+            "squid": [],
+            "gost": [],
+            "tinyproxy": []
+          },
+          "proxy_util": {
+            "rustle": 1.0,
+            "3proxy": 1.0,
+            "squid": 1.0,
+            "gost": 0.99,
+            "tinyproxy": null
+          },
+          "origin_util": {
+            "rustle": 0.35,
+            "3proxy": 0.11,
+            "squid": 0.1,
+            "gost": 0.1,
+            "tinyproxy": null
+          }
+        },
+        {
+          "cores": 8,
+          "values": {
+            "rustle": 439740.527,
+            "3proxy": 114736.359,
+            "squid": 116833.528,
+            "gost": 31011.333,
+            "tinyproxy": null
+          },
+          "at_conns": {
+            "rustle": 256,
+            "3proxy": 4096,
+            "squid": 256,
+            "gost": 256,
+            "tinyproxy": null
+          },
+          "flags": {
+            "rustle": [],
+            "3proxy": [],
+            "squid": [],
+            "gost": [],
+            "tinyproxy": []
+          },
+          "proxy_util": {
+            "rustle": 1.0,
+            "3proxy": 0.99,
+            "squid": 1.0,
+            "gost": 0.98,
+            "tinyproxy": null
+          },
+          "origin_util": {
+            "rustle": 0.72,
+            "3proxy": 0.2,
+            "squid": 0.18,
+            "gost": 0.18,
+            "tinyproxy": null
+          }
+        }
+      ]
+    }
+  ],
+  "ktls": [
+    {
+      "id": "tls-1kb",
+      "label": "HTTP, 1 KB responses",
+      "unit": "req/s",
+      "direction": "higher",
+      "user_space": 49460.971,
+      "ktls": 43421.514
+    },
+    {
+      "id": "tls-10kb",
+      "label": "HTTP, 10 KB responses",
+      "unit": "req/s",
+      "direction": "higher",
+      "user_space": 35459.861,
+      "ktls": 31153.879
+    },
+    {
+      "id": "tls-short",
+      "label": "HTTP, 1 KB responses, a new connection per request",
+      "unit": "req/s",
+      "direction": "higher",
+      "user_space": 6118.791,
+      "ktls": 5157.863
+    },
+    {
+      "id": "tls-1mb",
+      "label": "HTTP, 1 MB responses",
+      "unit": "req/s",
+      "direction": "higher",
+      "user_space": 1296.641,
+      "ktls": 896.06
+    },
+    {
+      "id": "tls-10mb",
+      "label": "HTTP, 10 MB responses",
+      "unit": "req/s",
+      "direction": "higher",
+      "user_space": 141.633,
+      "ktls": 89.082
+    },
+    {
+      "id": "tls-flood",
+      "label": "CONNECT tunnels, bulk transfer",
+      "unit": "Gbit/s",
+      "direction": "higher",
+      "user_space": 12.024,
+      "ktls": 6.857,
+      "user_space_cpu_ms_per_gb": 672.164,
+      "ktls_cpu_ms_per_gb": 1155.08
+    },
+    {
+      "id": "tls-ram-1000",
+      "label": "Memory with 1,000 open tunnels",
+      "unit": "MB",
+      "direction": "lower",
+      "user_space": 57.3,
+      "ktls": 54.3
+    },
+    {
+      "id": "tls-ram-5000",
+      "label": "Memory with 5,000 open tunnels",
+      "unit": "MB",
+      "direction": "lower",
+      "user_space": 253.0,
+      "ktls": 227.9
+    },
+    {
+      "id": "tls-ram-10000",
+      "label": "Memory with 10,000 open tunnels",
+      "unit": "MB",
+      "direction": "lower",
+      "user_space": 465.9,
+      "ktls": 371.5
+    },
+    {
+      "id": "tls-ram-25000",
+      "label": "Memory with 25,000 open tunnels",
+      "unit": "MB",
+      "direction": "lower",
+      "user_space": 809.7,
+      "ktls": 753.0
+    }
+  ]
+}
