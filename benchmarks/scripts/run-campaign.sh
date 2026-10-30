@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Full campaign: every DUT on every transport it supports (plain, then TLS
-# and HTTP/2 for the DUTs whose Dockerfile declares them in its
+# Full campaign: every proxy on every transport it supports (plain, then TLS
+# and HTTP/2 for the proxies whose Dockerfile declares them in its
 # "# bench-ports:" line), same seed, one core for the proxy.
 #
 # Usage:
-#   benchmarks/scripts/run-campaign.sh                      # auth on, all DUTs
+#   benchmarks/scripts/run-campaign.sh                      # auth on, all proxies
 #   AUTH=off PROXIES="rustle squid" benchmarks/scripts/run-campaign.sh
 #
 # REMOTE=1: the same campaign on three machines (run-remote.sh; GEN_HOST, PROXY_HOST,
@@ -17,7 +17,7 @@
 # Numbers: tools/aggregate.py --sources <manifest>, then tools/render.py (make bench-publish).
 set -uo pipefail
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPTS/.."   # the benchmark root: dut/, results/, tools/ and the Docker contexts are relative to it
+cd "$SCRIPTS/.."   # the benchmark root: proxies/, results/, tools/ and the Docker contexts are relative to it
 
 PROXIES="${PROXIES:-rustle 3proxy squid gost tinyproxy}"
 AUTH="${AUTH:-on}"
@@ -53,20 +53,20 @@ if want plain; then
 fi
 if want tls; then
     for p in $PROXIES; do
-        grep -q '^# bench-ports:.*tls=' "dut/$p/Dockerfile" && run "$p" tls PROXY_TLS=1
+        grep -q '^# bench-ports:.*tls=' "proxies/$p/Dockerfile" && run "$p" tls PROXY_TLS=1
     done
 fi
 # Same short TLS connections without session resumption (a client with no
 # session cache pays the full handshake, certificate signature included).
 if want tlsfull && [[ "${MATRIX:-}" != ws ]]; then
     for p in $PROXIES; do
-        grep -q '^# bench-ports:.*tls=' "dut/$p/Dockerfile" \
+        grep -q '^# bench-ports:.*tls=' "proxies/$p/Dockerfile" \
             && run "$p" tlsfull PROXY_TLS=1 TLS_RESUME=0 BENCH_ONLY=http-1kb-short
     done
 fi
 if want h2 && [[ "${MATRIX:-}" != ws ]]; then
     for p in $PROXIES; do
-        grep -q '^# bench-ports:.*h2=' "dut/$p/Dockerfile" && run "$p" h2 PROXY_H2=1
+        grep -q '^# bench-ports:.*h2=' "proxies/$p/Dockerfile" && run "$p" h2 PROXY_H2=1
     done
 fi
 echo "==> done: $manifest"

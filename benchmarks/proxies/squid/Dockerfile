@@ -1,4 +1,4 @@
-# Bench TLS certificate: same type for every DUT (ECDSA P-256,
+# Bench TLS certificate: same type for every proxy (ECDSA P-256,
 # self-signed) so handshake costs compare. The generator does not verify it.
 FROM alpine:3.20 AS cert
 RUN apk add --no-cache openssl && openssl req -x509 -newkey ec \
@@ -31,8 +31,8 @@ RUN mkdir -p /etc/squid && printf 'bench:%s\n' "$(openssl passwd -1 secret1)" > 
 # /var/run/squid: SMP workers receive the listening socket from the
 # coordinator over Unix sockets there — without it nobody listens.
 COPY --from=cert /cert.pem /key.pem /etc/squid/
-COPY benchmarks/dut/squid/squid-on.conf /etc/squid/on.conf
-COPY benchmarks/dut/squid/squid-off.conf /etc/squid/off.conf
+COPY benchmarks/proxies/squid/squid-on.conf /etc/squid/on.conf
+COPY benchmarks/proxies/squid/squid-off.conf /etc/squid/off.conf
 ENV AUTH=on WORKERS=1
 # bench-ports: tls=8443 (no HTTP/2 towards clients)
 EXPOSE 8080 8443

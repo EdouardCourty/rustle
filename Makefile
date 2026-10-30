@@ -41,7 +41,7 @@ images: ## build every Docker image (serialized — rustc peaks at ~1-2 GB)
 	cd benchmarks && docker compose build generator
 	cd benchmarks && docker compose build upstream
 	cd benchmarks && for p in rustle 3proxy squid gost tinyproxy; do \
-		docker build -q -t $$p:bench -f dut/$$p/Dockerfile .. >/dev/null && echo "$$p:bench"; done
+		docker build -q -t $$p:bench -f proxies/$$p/Dockerfile .. >/dev/null && echo "$$p:bench"; done
 
 up: ## start the stack (upstream + sink + proxy)
 	cd benchmarks && . ./scripts/env.sh && docker compose up -d upstream sink proxy && sleep 1 && docker ps --format '{{.Names}}\t{{.Status}}' | grep proxybench

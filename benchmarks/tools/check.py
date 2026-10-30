@@ -10,7 +10,7 @@ compared with the committed files, and the files are consistent with each other.
   benchmarks.json gives (render.py): none of them can drift or be typed by hand;
 * ids agree between the folder, index.json and the files, the by-proxy maps hold exactly the
   campaign's proxies, `$schema` pointers are exact, project URLs are https;
-* for the latest campaign: proxies.json against FAIRNESS.md (versions) and dut/*/Dockerfile (TLS and
+* for the latest campaign: proxies.json against FAIRNESS.md (versions) and proxies/*/Dockerfile (TLS and
   HTTP/2 support), each chart file exists;
 * the kTLS saving and cost quoted by the README and AGENTS.md are the ones of benchmarks.json."""
 import json, os, sys
@@ -51,7 +51,7 @@ def check_proxies_latest(problems, doc):
         s = support.get(pid, {"tls": False, "h2": False})
         for proto in ("tls", "h2"):
             if bool(p["protocols"].get(proto)) != s[proto]:
-                problems.append(f"proxies.json: {pid}: protocols.{proto} disagrees with dut/{pid}/Dockerfile bench-ports")
+                problems.append(f"proxies.json: {pid}: protocols.{proto} disagrees with proxies/{pid}/Dockerfile bench-ports")
 
 
 def check_urls(problems, proxies):

@@ -13,7 +13,7 @@
 # Machines are prepared once with scripts/remote/bootstrap.sh.
 set -euo pipefail
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPTS/.."   # the benchmark root: dut/, results/, tools/ and the Docker contexts are relative to it
+cd "$SCRIPTS/.."   # the benchmark root: proxies/, results/, tools/ and the Docker contexts are relative to it
 : "${GEN_HOST:?}" "${PROXY_HOST:?}" "${UP_HOST:?}" "${PROXY_CPUS:?set PROXY_CPUS, e.g. 0 or 0-3}"
 GEN_ADDR="${GEN_ADDR:-$GEN_HOST}"; PROXY_ADDR="${PROXY_ADDR:-$PROXY_HOST}"; UP_ADDR="${UP_ADDR:-$UP_HOST}"
 REMOTE_DIR="${REMOTE_DIR:-~/rustle}"; MIN_GBIT="${MIN_GBIT:-8}"; DRY_RUN="${DRY_RUN:-0}"

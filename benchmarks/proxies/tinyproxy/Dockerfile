@@ -11,7 +11,7 @@ RUN curl -fsSL "https://github.com/tinyproxy/tinyproxy/releases/download/${TINYP
 
 FROM debian:bookworm-slim
 COPY --from=build /out/usr /usr
-COPY benchmarks/dut/tinyproxy/tinyproxy.conf /etc/tinyproxy/base.conf
+COPY benchmarks/proxies/tinyproxy/tinyproxy.conf /etc/tinyproxy/base.conf
 ENV AUTH=on
 EXPOSE 8080
 ENTRYPOINT ["sh", "-c", "cp /etc/tinyproxy/base.conf /tmp/t.conf && if [ \"${AUTH:-on}\" = on ]; then echo 'BasicAuth bench secret1' >> /tmp/t.conf; fi && exec tinyproxy -d -c /tmp/t.conf"]

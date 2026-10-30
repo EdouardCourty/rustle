@@ -1,4 +1,4 @@
-# Bench TLS certificate: same type for every DUT (ECDSA P-256,
+# Bench TLS certificate: same type for every proxy (ECDSA P-256,
 # self-signed) so handshake costs compare. The generator does not verify it.
 FROM alpine:3.20 AS cert
 RUN apk add --no-cache openssl && openssl req -x509 -newkey ec \
@@ -35,8 +35,8 @@ RUN find rustle/src benchmarks/generator/src -type f -exec touch {} + && \
 FROM debian:bookworm-slim
 COPY --from=build /build/target/release/rustle /usr/local/bin/rustle
 COPY --from=cert /cert.pem /key.pem /etc/rustle/
-COPY benchmarks/dut/rustle/rustle-on.toml /etc/rustle/on.toml
-COPY benchmarks/dut/rustle/rustle-off.toml /etc/rustle/off.toml
+COPY benchmarks/proxies/rustle/rustle-on.toml /etc/rustle/on.toml
+COPY benchmarks/proxies/rustle/rustle-off.toml /etc/rustle/off.toml
 ENV AUTH=on WORKERS=1 ACCESS_LOG=off KTLS=false SOCK_BUF=1048576
 # bench-ports: tls=8443 h2=8443 (HTTP/2 via ALPN on the HTTPS listener)
 EXPOSE 8080 8443

@@ -16,20 +16,20 @@
 # Results: benchmarks/results/<label>/auth-<on|off>/<timestamp>/run.json
 set -euo pipefail
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPTS/.."   # the benchmark root: dut/, results/, tools/ and the Docker contexts are relative to it
+cd "$SCRIPTS/.."   # the benchmark root: proxies/, results/, tools/ and the Docker contexts are relative to it
 
 PROXY="${1:-rustle}"
 AUTH="${2:-on}"
 REPEAT="${REPEAT:-3}"
-# Multi-core: WORKERS = shards/workers of the proxy (DUTs that support it),
+# Multi-core: WORKERS = shards/workers of the proxy (proxies that support it),
 # PROXY_NCPU = CPUs given to the proxy (env.sh), GEN_THREADS = generator
 # runtime threads (size to BENCH_CPU or the generator saturates first).
 export WORKERS="${WORKERS:-1}"
 export ACCESS_LOG="${ACCESS_LOG:-off}"   # rustle: off | errors | all
 export KTLS="${KTLS:-false}"               # rustle TLS listener: kernel TLS on/off
-export SOCK_BUF="${SOCK_BUF:-1048576}"      # rustle socket buffers (0 = kernel autotuning, like the other DUTs)
+export SOCK_BUF="${SOCK_BUF:-1048576}"      # rustle socket buffers (0 = kernel autotuning, like the other proxies)
 # SECCOMP=unconfined: proxy container without Docker's seccomp profile
-# (needed by io_uring DUTs; use it for every DUT of such a comparison).
+# (needed by io_uring proxies; use it for every proxy of such a comparison).
 if [[ "${SECCOMP:-default}" == unconfined ]]; then
     export COMPOSE_FILE=docker-compose.yml:docker-compose.seccomp.yml
 fi
@@ -37,13 +37,13 @@ GEN_THREADS="${GEN_THREADS:-2}"
 # Origin and sink threads (compose reads them): size to the CPUs they share.
 export UP_THREADS="${UP_THREADS:-1}" SINK_THREADS="${SINK_THREADS:-1}"
 # PROXY_TLS=1: HTTPS proxy benchmark (client -> proxy over TLS).
-# PROXY_H2=1: HTTP/2 over TLS (ALPN h2). Ports come from the DUT's
-# "# bench-ports: tls=<p> h2=<p>" line; a DUT without one lacks the mode.
+# PROXY_H2=1: HTTP/2 over TLS (ALPN h2). Ports come from the proxy's
+# "# bench-ports: tls=<p> h2=<p>" line; a proxy without one lacks the mode.
 PROXY_TLS="${PROXY_TLS:-0}"
 PROXY_H2="${PROXY_H2:-0}"
 GEN_ARGS=(--threads "$GEN_THREADS")
 LABEL="$PROXY"
-_port() { sed -n "s/^# bench-ports:.*$1=\([0-9]*\).*/\1/p" "dut/$PROXY/Dockerfile"; }
+_port() { sed -n "s/^# bench-ports:.*$1=\([0-9]*\).*/\1/p" "proxies/$PROXY/Dockerfile"; }
 if [[ "$PROXY_H2" == 1 ]]; then
     p=$(_port h2)
     [[ -n "$p" ]] || { echo "$PROXY has no HTTP/2 proxy listener (PROXY_H2=1)" >&2; exit 2; }
@@ -74,7 +74,7 @@ echo "==> cpu pinning: proxy=$PROXY_CPU generator/upstream/sink=$BENCH_CPU (avai
 echo "==> building images (serialized: rustc peaks ~1-2 GB transiently)"
 docker compose build generator >/dev/null
 docker compose build upstream >/dev/null
-docker build -q -t "$PROXY_IMAGE" ${ALLOCATOR:+--build-arg ALLOCATOR="$ALLOCATOR"} -f "dut/$PROXY/Dockerfile" .. >/dev/null
+docker build -q -t "$PROXY_IMAGE" ${ALLOCATOR:+--build-arg ALLOCATOR="$ALLOCATOR"} -f "proxies/$PROXY/Dockerfile" .. >/dev/null
 
 echo "==> starting stack (proxy=$PROXY auth=$AUTH repeat=$REPEAT)"
 docker compose up -d upstream sink proxy >/dev/null
@@ -95,7 +95,7 @@ python3 tools/record.py init "$out" --proxy "$PROXY" --transport "$TRANSPORT" --
 echo "# $PROXY auth=$AUTH tls=$PROXY_TLS h2=$PROXY_H2 repeat=$REPEAT workers=$WORKERS proxy_cpu=$PROXY_CPU bench_cpu=$BENCH_CPU gen_threads=$GEN_THREADS $(date)"
 
 # Raw snapshots, taken before and after each test and read by tools/record.py:
-# the proxy's whole container (cgroup v2: multi-process DUTs such as Squid SMP
+# the proxy's whole container (cgroup v2: multi-process proxies such as Squid SMP
 # workers included), the network counters of the proxy's namespace, the CPU of
 # every process of the origin (nginx master + workers) and of the sink.
 snap() { # <directory>

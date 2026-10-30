@@ -18,7 +18,7 @@
 # results/scaling-<ts>.json, to paste into the `sources` of campaign.json.
 set -euo pipefail
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPTS/.."   # the benchmark root: dut/, results/, tools/ and the Docker contexts are relative to it
+cd "$SCRIPTS/.."   # the benchmark root: proxies/, results/, tools/ and the Docker contexts are relative to it
 
 PROXIES="${PROXIES:-rustle 3proxy squid gost tinyproxy}"
 # The transport of the points (the same for all of them), as the manifest names it.
@@ -67,10 +67,10 @@ for n in $NCPUS; do
         continue
     fi
     for p in $PROXIES; do
-        if [[ "${PROXY_H2:-0}" == 1 ]] && ! grep -q '^# bench-ports:.*h2=' "dut/$p/Dockerfile"; then
+        if [[ "${PROXY_H2:-0}" == 1 ]] && ! grep -q '^# bench-ports:.*h2=' "proxies/$p/Dockerfile"; then
             echo "skip $p: no HTTP/2 proxy listener"
             continue
-        elif [[ "${PROXY_TLS:-0}" == 1 ]] && ! grep -q '^# bench-ports:.*tls=' "dut/$p/Dockerfile"; then
+        elif [[ "${PROXY_TLS:-0}" == 1 ]] && ! grep -q '^# bench-ports:.*tls=' "proxies/$p/Dockerfile"; then
             echo "skip $p: no HTTPS proxy listener"
             continue
         fi

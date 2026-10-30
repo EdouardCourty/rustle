@@ -28,7 +28,7 @@
 # unsaturated or missing, and the script exits non-zero (the artifacts are still written, for a look).
 set -uo pipefail
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPTS/.."   # the benchmark root: dut/, results/, tools/ and the Docker contexts are relative to it
+cd "$SCRIPTS/.."   # the benchmark root: proxies/, results/, tools/ and the Docker contexts are relative to it
 
 ts=$(date +%Y%m%d-%H%M%S)
 mkdir -p results

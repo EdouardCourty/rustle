@@ -34,7 +34,7 @@ TRANSPORTS = {
     "ws": ("plain", "WebSocket upgrade on the plain HTTP proxy port"),
     "ws-tls": ("tls", "WebSocket upgrade through the HTTPS proxy (TLS 1.3, AES-128-GCM)"),
 }
-# needs a TLS / HTTP/2 listener on the proxy (dut/<proxy>/Dockerfile bench-ports)
+# needs a TLS / HTTP/2 listener on the proxy (proxies/<proxy>/Dockerfile bench-ports)
 NEEDS = {"tls": "tls", "tls-full-handshake": "tls", "h2": "h2", "ws-tls": "tls"}
 
 HTTP_TESTS = [  # (id suffix, bench test, label, description)
@@ -127,11 +127,11 @@ def abspath(p):
 
 
 def ports_support():
-    """{proxy: {"tls": bool, "h2": bool}} from `# bench-ports:` in dut/*/Dockerfile."""
+    """{proxy: {"tls": bool, "h2": bool}} from `# bench-ports:` in proxies/*/Dockerfile."""
     out = {}
-    dut = os.path.join(BENCH, "dut")
-    for p in sorted(os.listdir(dut)):
-        df = os.path.join(dut, p, "Dockerfile")
+    proxies_dir = os.path.join(BENCH, "proxies")
+    for p in sorted(os.listdir(proxies_dir)):
+        df = os.path.join(proxies_dir, p, "Dockerfile")
         if not os.path.isfile(df):
             continue
         text = open(df).read()

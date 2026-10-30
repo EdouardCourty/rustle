@@ -1,6 +1,6 @@
 # gost v3 (Go): HTTP proxy with Basic auth. The Go runtime sizes
 # GOMAXPROCS from the CPU affinity (Docker cpuset): WORKERS is not needed.
-# Bench TLS certificate: same type for every DUT (ECDSA P-256,
+# Bench TLS certificate: same type for every proxy (ECDSA P-256,
 # self-signed) so handshake costs compare. The generator does not verify it.
 FROM alpine:3.20 AS cert
 RUN apk add --no-cache openssl && openssl req -x509 -newkey ec \
@@ -9,7 +9,7 @@ RUN apk add --no-cache openssl && openssl req -x509 -newkey ec \
 
 FROM gogost/gost:3.3.0
 COPY --from=cert /cert.pem /key.pem /etc/gost/
-# Access logs off, like the other DUTs (gost logs every connection at
+# Access logs off, like the other proxies (gost logs every connection at
 # info: per-connection I/O the others do not pay).
 # GOGC=400: measured +16 % at 1 KB for +50 % RAM (FAIRNESS.md); the Go default
 # (100) collects far more often than a proxy that allocates per request needs.

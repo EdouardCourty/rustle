@@ -27,7 +27,7 @@
 #   SKIP_BUILD=1                  images already built on every host
 set -euo pipefail
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPTS/.."   # the benchmark root: dut/, results/, tools/ and the Docker contexts are relative to it
+cd "$SCRIPTS/.."   # the benchmark root: proxies/, results/, tools/ and the Docker contexts are relative to it
 
 PROXY="${1:-rustle}"
 AUTH="${2:-on}"
@@ -66,7 +66,7 @@ GEN_THREADS="${GEN_THREADS:-$(threads_for "$GEN_HOST" 2 2 24)}"
 UP_THREADS="${UP_THREADS:-$(threads_for "$UP_HOST" 4 2 12)}"
 SINK_THREADS="${SINK_THREADS:-$(threads_for "$UP_HOST" 4 2 12)}"
 
-_port() { sed -n "s/^# bench-ports:.*$1=\([0-9]*\).*/\1/p" "dut/$PROXY/Dockerfile"; }
+_port() { sed -n "s/^# bench-ports:.*$1=\([0-9]*\).*/\1/p" "proxies/$PROXY/Dockerfile"; }
 proxy_port=8080; GEN_ARGS=(--threads "$GEN_THREADS"); LABEL="$PROXY"
 if [[ "$PROXY_H2" == 1 ]]; then
     proxy_port=$(_port h2); LABEL="$PROXY-h2"; GEN_ARGS+=(--proxy-h2)
@@ -88,7 +88,7 @@ if [[ "${SKIP_BUILD:-0}" != 1 ]]; then
     echo "==> building images"
     on "$GEN_HOST"   "cd $REMOTE_DIR/benchmarks && docker build -q -t bench-client generator" >/dev/null
     on "$UP_HOST"    "cd $REMOTE_DIR/benchmarks && docker build -q -t bench-client generator" >/dev/null
-    on "$PROXY_HOST" "cd $REMOTE_DIR/benchmarks && docker build -q -t $PROXY:bench -f dut/$PROXY/Dockerfile .." >/dev/null
+    on "$PROXY_HOST" "cd $REMOTE_DIR/benchmarks && docker build -q -t $PROXY:bench -f proxies/$PROXY/Dockerfile .." >/dev/null
 fi
 
 cleanup() {
@@ -126,7 +126,7 @@ echo "# $PROXY remote auth=$AUTH tls=$PROXY_TLS h2=$PROXY_H2 repeat=$REPEAT work
 
 # --- Raw snapshots on the machines --------------------------------------------
 # Taken before and after each test and read by tools/record.py: the proxy's whole
-# container (cgroup v2: multi-process DUTs included), the proxy host's network
+# container (cgroup v2: multi-process proxies included), the proxy host's network
 # counters (host network: the whole machine), the CPU of every process of the origin
 # and of the sink, and, after the run, the memory of the proxy's processes.
 snap() { # <directory>
