@@ -12,7 +12,7 @@ curl -fsSL https://raw.githubusercontent.com/EdouardCourty/rustle/main/install.s
 rustle init && rustle run
 ```
 
-Linux and macOS, no `sudo`. [Benchmarks](#benchmarks) · [Installation](#installation) · [Quick Start](#quick-start) · [Configuration](#configuration)
+Linux and macOS, no `sudo`. [Benchmarks](#benchmarks) · [Installation](#installation) · [Quick Start](#quick-start) · [Configuration](#configuration) · [Website](https://rustleproxy.dev)
 
 Table of Contents
 -----------------
@@ -37,6 +37,7 @@ Table of Contents
 *   [Reloading](#reloading)
 *   [Limitations](#limitations)
 *   [Contributing](#contributing)
+*   [Website](#website)
 *   [License](#license)
 
 * * *
@@ -298,6 +299,11 @@ make help       # all targets
 The e2e suite ([`e2e/`](e2e/README.md)) runs the real binary against real clients (HTTP/1.1, TLS, h2, SOCKS5, curl). A new feature or a bug fix comes with a scenario.
 
 Commits follow Conventional Commits, subject only: `type(scope): description`, e.g. `perf(relay): per-shard pipe pool for splice`. Performance claims need a fixed-seed benchmark run. Architecture, invariants and benchmark rules for contributors and agents: [`AGENTS.md`](AGENTS.md).
+
+Website
+-------
+
+[rustleproxy.dev](https://rustleproxy.dev) has the documentation, the benchmark results with their method, the changelog and a [blog](https://rustleproxy.dev/blog) on how rustle is built and measured.
 
 License
 -------
