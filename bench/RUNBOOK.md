@@ -25,7 +25,7 @@ Scaleway Elastic Metal (hourly billing, never monthly), same zone, the same Priv
 
 ```sh
 for h in $GEN_HOST $PROXY_HOST $UP_HOST; do
-  ssh $h 'sudo bash -s' < bench/remote/bootstrap.sh
+  ssh $h 'sudo bash -s' < bench/scripts/remote/bootstrap.sh
   ssh $h 'git clone https://github.com/EdouardCourty/rustle ~/rustle'   # or git pull
 done
 ```
@@ -33,7 +33,7 @@ done
 Private network (Elastic Metal: a VLAN on the NIC that carries the public address). Attach the three servers to one Private Network in the console, note each server's VLAN id (it can differ between servers) and private IP, then:
 
 ```sh
-ssh $GEN_HOST 'sudo bash -s -- <vlan> <ip>/<prefix>' < bench/remote/private-net.sh   # same for the other two
+ssh $GEN_HOST 'sudo bash -s -- <vlan> <ip>/<prefix>' < bench/scripts/remote/private-net.sh   # same for the other two
 ssh $GEN_HOST 'iperf3 -c <proxy private ip> -P 4 -t 5'                               # expect ~23 Gbit/s on 25 Gbit/s
 ```
 
@@ -49,7 +49,7 @@ export MIN_GBIT=20                                         # 25 Gbit/s private n
 ### 4. Preflight (always, before a campaign)
 
 ```sh
-APPLY=1 ./bench/preflight.sh          # moves NIC interrupts off the proxy core, offlines its hyperthread sibling
+APPLY=1 bench/scripts/preflight.sh          # moves NIC interrupts off the proxy core, offlines its hyperthread sibling
 ```
 
 It compares the three machines (sysctls, governor, MTU, offloads, kernel, Docker, git commit), measures both links with `iperf3`, and writes `bench/results/preflight-<ts>.txt`. It refuses (exit 1) on any difference or a link under `MIN_GBIT` (default 8; use 20 on a 25 Gbit/s setup). Keep the file: it documents the environment of the numbers.
@@ -59,8 +59,8 @@ It compares the three machines (sysctls, governor, MTU, offloads, kernel, Docker
 One proxy, one test, to prove the wiring before spending hours:
 
 ```sh
-BENCH_ONLY=http-1kb REPEAT=1 REMOTE=1 ./bench/run-remote.sh rustle on
-BENCH_ONLY=http-1kb REPEAT=1 REMOTE=1 ./bench/run-remote.sh 3proxy on
+BENCH_ONLY=http-1kb REPEAT=1 REMOTE=1 bench/scripts/run-remote.sh rustle on
+BENCH_ONLY=http-1kb REPEAT=1 REMOTE=1 bench/scripts/run-remote.sh 3proxy on
 ```
 
 Check in `results/<label>/remote-auth-on/<timestamp>/run.json` (or let `python3 bench/tools/aggregate.py --report --sources <manifest>` list the points): `err_kinds` empty, `proxy_util` near 1.00 at the best level, no `proxy_unsaturated` flag (if it shows, the sweep needs a higher level for that proxy: edit `sweep_levels` in `matrix.sh`), no `generator_saturated` flag. If the generator or origin is saturated, raise `GEN_THREADS` / `UP_THREADS`.
@@ -68,17 +68,17 @@ Check in `results/<label>/remote-auth-on/<timestamp>/run.json` (or let `python3 
 ### 6. The campaigns
 
 ```sh
-REMOTE=1 ./bench/run-all.sh                  # HTTP/CONNECT (plain, TLS, TLS full handshake, h2) + WebSocket
+REMOTE=1 bench/scripts/run-all.sh                  # HTTP/CONNECT (plain, TLS, TLS full handshake, h2) + WebSocket
                                              # -> report, validity check, charts, README table
 ```
 
 About 4 to 5 hours (the sweep multiplies the load tests). The script keeps going if a proxy fails and says so at the end.
 
-Multi-core curve (generator and origin hosts need at least as many cores as the proxy, preferably twice; re-run `APPLY=1 ./bench/preflight.sh` with the new `PROXY_CPUS` before each size, since the offlined siblings change):
+Multi-core curve (generator and origin hosts need at least as many cores as the proxy, preferably twice; re-run `APPLY=1 bench/scripts/preflight.sh` with the new `PROXY_CPUS` before each size, since the offlined siblings change):
 
 ```sh
 for n in 1 2 4 8; do
-  PROXY_CPUS=0-$((n-1)) WORKERS=$n REMOTE=1 BENCH_ONLY=http-1kb ./bench/run-campaign.sh
+  PROXY_CPUS=0-$((n-1)) WORKERS=$n REMOTE=1 BENCH_ONLY=http-1kb bench/scripts/run-campaign.sh
 done
 ```
 
@@ -99,7 +99,7 @@ One quiet Linux host with Docker (or a Docker VM given all its CPUs and 8 GB or 
 ```sh
 cd bench
 PROXIES="rustle 3proxy squid gost tinyproxy" MODES=plain BENCH_ONLY=flood-8 \
-  GEN_THREADS=4 SINK_THREADS=4 UP_THREADS=2 ./run-campaign.sh
+  GEN_THREADS=4 SINK_THREADS=4 UP_THREADS=2 ./scripts/run-campaign.sh
 ```
 
 One CPU for the proxy, the rest for the generator and the sink (`env.sh` reads the VM's CPUs). Note the host's model and CPU count in RESULTS.md.
@@ -107,7 +107,7 @@ One CPU for the proxy, the rest for the generator and the sink (`env.sh` reads t
 ## Publish
 
 ```sh
-FLOOD_FROM=bench/results/campaign-<single-host-manifest>.json REMOTE=1 REPORT_ONLY=1 ./bench/run-all.sh
+FLOOD_FROM=bench/results/campaign-<single-host-manifest>.json REMOTE=1 REPORT_ONLY=1 bench/scripts/run-all.sh
 git diff                     # benchmarks.json, README table and numbers, RESULTS.md, docs/benchmarks/*.svg
 ```
 

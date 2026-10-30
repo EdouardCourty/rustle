@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Prints key=value facts about this machine (read-only). Used by preflight.sh:
-#   ssh HOST 'bash -s -- <repo dir>' < bench/remote/probe.sh
+#   ssh HOST 'bash -s -- <repo dir>' < bench/scripts/remote/probe.sh
 repo="${1:-$HOME/rustle}"
 iface=$(ip route show default 2>/dev/null | awk '{print $5; exit}')
 echo "cpu=$(lscpu | awk -F: '/Model name/{gsub(/^ +/,"",$2); print $2}')"

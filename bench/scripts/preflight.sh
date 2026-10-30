@@ -3,16 +3,17 @@
 # machines before a campaign, measures the links, and writes the result to
 # results/preflight-<ts>.txt (keep it next to the numbers you publish).
 #
-#   GEN_HOST=a PROXY_HOST=b UP_HOST=c PROXY_CPUS=0 ./preflight.sh
+#   GEN_HOST=a PROXY_HOST=b UP_HOST=c PROXY_CPUS=0 bench/scripts/preflight.sh
 #   APPLY=1 ...     also keep the proxy cores to the proxy: hyperthread siblings
 #                   offline, NIC interrupts moved elsewhere (proxy host, through sudo)
 #   DRY_RUN=1 ...   print the ssh commands only
 #   GEN_ADDR PROXY_ADDR UP_ADDR   private addresses (default: the host names)
 #   REMOTE_DIR      repository checkout on every host (default ~/rustle)
 #   MIN_GBIT        link speed below which the run is refused (default 8)
-# Machines are prepared once with remote/bootstrap.sh.
+# Machines are prepared once with scripts/remote/bootstrap.sh.
 set -euo pipefail
-cd "$(dirname "$0")"
+SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPTS/.."   # the benchmark root: dut/, results/, tools/ and the Docker contexts are relative to it
 : "${GEN_HOST:?}" "${PROXY_HOST:?}" "${UP_HOST:?}" "${PROXY_CPUS:?set PROXY_CPUS, e.g. 0 or 0-3}"
 GEN_ADDR="${GEN_ADDR:-$GEN_HOST}"; PROXY_ADDR="${PROXY_ADDR:-$PROXY_HOST}"; UP_ADDR="${UP_ADDR:-$UP_HOST}"
 REMOTE_DIR="${REMOTE_DIR:-~/rustle}"; MIN_GBIT="${MIN_GBIT:-8}"; DRY_RUN="${DRY_RUN:-0}"
@@ -30,7 +31,7 @@ feed() { local host="$1" file="$2"; shift 2    # run a local script on a host
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 for role in GEN PROXY UP; do
     host_var="${role}_HOST"; host="${!host_var}"
-    feed "$host" remote/probe.sh "$REMOTE_DIR" > "$tmp/$role" || { echo "!! $role ($host): probe failed" >&2; exit 2; }
+    feed "$host" "$SCRIPTS/remote/probe.sh" "$REMOTE_DIR" > "$tmp/$role" || { echo "!! $role ($host): probe failed" >&2; exit 2; }
 done
 
 status=0
@@ -61,9 +62,9 @@ for k in keys:
 for r in roles:
     d = data[r]
     if d.get("governor") not in ("performance", "n/a"):
-        print(f"!! {r}: CPU governor is {d.get('governor')}, expected performance (remote/bootstrap.sh)"); bad += 1
+        print(f"!! {r}: CPU governor is {d.get('governor')}, expected performance (scripts/remote/bootstrap.sh)"); bad += 1
     if d.get("irqbalance") == "active":
-        print(f"!! {r}: irqbalance is running (remote/bootstrap.sh stops it)"); bad += 1
+        print(f"!! {r}: irqbalance is running (scripts/remote/bootstrap.sh stops it)"); bad += 1
     if d.get("docker") in ("missing", ""):
         print(f"!! {r}: Docker missing"); bad += 1
     if d.get("git") == "n/a" or d.get("git_dirty") not in ("0",):
@@ -93,7 +94,7 @@ done
 fi
 
 if [[ "${APPLY:-0}" == 1 ]]; then
-    FEED_SUDO=1 feed "$PROXY_HOST" remote/apply-proxy-host.sh "$PROXY_CPUS" | { [[ "$DRY_RUN" == 1 ]] && cat || tee -a "$out"; } || status=1
+    FEED_SUDO=1 feed "$PROXY_HOST" "$SCRIPTS/remote/apply-proxy-host.sh" "$PROXY_CPUS" | { [[ "$DRY_RUN" == 1 ]] && cat || tee -a "$out"; } || status=1
 fi
 
 [[ "$DRY_RUN" == 1 ]] && { echo "dry run: nothing executed"; exit 0; }

@@ -2,8 +2,8 @@
 # Attaches ONE Elastic Metal server to its Private Network (Ubuntu, netplan, run as root or through sudo).
 # Public and private traffic share the NIC: the private side is a VLAN interface on it.
 #
-#   ssh HOST 'sudo bash -s -- <vlan-id> dhcp'            < bench/remote/private-net.sh
-#   ssh HOST 'sudo bash -s -- <vlan-id> 172.16.12.10/22' < bench/remote/private-net.sh
+#   ssh HOST 'sudo bash -s -- <vlan-id> dhcp'            < bench/scripts/remote/private-net.sh
+#   ssh HOST 'sudo bash -s -- <vlan-id> 172.16.12.10/22' < bench/scripts/remote/private-net.sh
 #
 # <vlan-id>   shown in the console, server > "Private Networks" tab (the same on every server of the network).
 # dhcp | IP   dhcp = the address the Private Network's IPAM assigned; otherwise a static address with prefix.

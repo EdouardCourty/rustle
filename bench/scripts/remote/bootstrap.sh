@@ -2,7 +2,7 @@
 # Prepares ONE benchmark machine (Ubuntu 24.04+ / Debian 12, run as root or through sudo). Idempotent.
 # Same on the generator, proxy and origin hosts: the three must run identical settings.
 #
-#   ssh HOST 'sudo bash -s' < bench/remote/bootstrap.sh
+#   ssh HOST 'sudo bash -s' < bench/scripts/remote/bootstrap.sh
 #
 # Installs Docker and the measuring tools, writes the sysctls (REMOTE.md) to
 # /etc/sysctl.d, switches the CPU governor to performance and stops irqbalance.

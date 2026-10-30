@@ -41,7 +41,7 @@ class RemoteRun(unittest.TestCase):
             env = dict(os.environ, PATH=os.path.join(tmp, "bin") + os.pathsep + os.environ["PATH"], FAKE_STATE=tmp,
                        GEN_HOST="g", PROXY_HOST="p", UP_HOST="u", PROXY_CPUS="0", BENCH_ONLY="http-1kb", NO_SWEEP="1",
                        REPEAT="1", SKIP_BUILD="1", GEN_THREADS="24", UP_THREADS="8", SINK_THREADS="8")
-            proc = subprocess.run(["bash", os.path.join(BENCH, "run-remote.sh"), "rustle", "on"], env=env,
+            proc = subprocess.run(["bash", os.path.join(BENCH, "scripts", "run-remote.sh"), "rustle", "on"], env=env,
                                   capture_output=True, text=True, timeout=120)
             self.assertEqual(proc.returncode, 0, proc.stderr)
             run_dir = next(l[len("==> run in "):] for l in proc.stdout.splitlines() if l.startswith("==> run in "))

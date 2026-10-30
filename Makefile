@@ -44,18 +44,18 @@ images: ## build every Docker image (serialized — rustc peaks at ~1-2 GB)
 		docker build -q -t $$p:bench -f dut/$$p/Dockerfile .. >/dev/null && echo "$$p:bench"; done
 
 up: ## start the stack (upstream + sink + proxy)
-	cd bench && . ./env.sh && docker compose up -d upstream sink proxy && sleep 1 && docker ps --format '{{.Names}}\t{{.Status}}' | grep proxybench
+	cd bench && . ./scripts/env.sh && docker compose up -d upstream sink proxy && sleep 1 && docker ps --format '{{.Names}}\t{{.Status}}' | grep proxybench
 
 down: ## stop the stack
 	cd bench && docker compose down
 
 smoke: ## quick test through the stack (http 1kb)
-	cd bench && . ./env.sh && export PROXY_IMAGE=$${P:-rustle}:bench && \
+	cd bench && . ./scripts/env.sh && export PROXY_IMAGE=$${P:-rustle}:bench && \
 	docker compose --profile generator run --rm -T generator \
 		--repeat 1 --no-warmup http http://upstream:8000/1kb --conns 4 --requests 40
 
 bench: ## full matrix: make bench [P=rustle|3proxy|squid|gost|tinyproxy] [A=on|off] [R=3]
-	cd bench && REPEAT=$(R) ./run-bench.sh $(P) $(A)
+	cd bench && REPEAT=$(R) ./scripts/run-bench.sh $(P) $(A)
 
 data: ## regenerate everything published from the raw runs: benchmarks.json, charts, README and RESULTS.md numbers (make data [CAMPAIGN=2026-10-28], default: latest)
 	python3 bench/tools/aggregate.py --write $(if $(CAMPAIGN),--campaign $(CAMPAIGN))
@@ -93,18 +93,18 @@ latest: ## show the latest result pass of the current proxy
 latest-3proxy: latest P=3proxy
 latest-off: latest A=off
 
-bench-publish: ## everything: campaigns, raw runs -> benchmarks.json, validity report, charts, README and RESULTS.md numbers (see bench/run-all.sh)
-	cd bench && ./run-all.sh
+bench-publish: ## everything: campaigns, raw runs -> benchmarks.json, validity report, charts, README and RESULTS.md numbers (see bench/scripts/run-all.sh)
+	cd bench && ./scripts/run-all.sh
 
 bench-ws: ## WebSocket matrix: make bench-ws [P=rustle|squid|gost|…] [A=on|off] [R=3]
-	cd bench && MATRIX=ws REPEAT=$(R) ./run-bench.sh $(P) $(A)
+	cd bench && MATRIX=ws REPEAT=$(R) ./scripts/run-bench.sh $(P) $(A)
 
 bench-all: ## full campaign: 5 proxies × plain/TLS/h2 (~2-3 h), then tables
-	cd bench && AUTH=$(A) ./run-campaign.sh
+	cd bench && AUTH=$(A) ./scripts/run-campaign.sh
 	cd bench && python3 tools/aggregate.py --report --sources $$(ls -t results/campaign-[0-9]*.json | head -1)
 
 bench-scaling: ## multi-core curve (needs a many-core proxy host): PROXIES="..." NCPUS="1 2 4 8" make bench-scaling
-	cd bench && AUTH=$(A) ./run-scaling.sh
+	cd bench && AUTH=$(A) ./scripts/run-scaling.sh
 
 clean: ## clean Rust artifacts (long rebuild afterwards)
 	cargo clean

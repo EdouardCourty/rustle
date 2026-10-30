@@ -43,7 +43,7 @@ jobs:
       - name: Unit tests of the bench tools, syntax of the bench scripts
         run: |
           make test-tools
-          for f in bench/*.sh; do bash -n "$f"; done
+          for f in bench/scripts/*.sh bench/scripts/remote/*.sh; do bash -n "$f"; done
       - name: The published data match their JSON Schemas, are consistent, and are what the raw runs give
         run: make data-check
 

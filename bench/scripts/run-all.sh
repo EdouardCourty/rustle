@@ -5,8 +5,8 @@
 #   -> aggregation of the raw runs into data/<campaign>/benchmarks.json (the website's data)
 #   -> validity listing -> SVG charts (docs/benchmarks/), README table and numbers, RESULTS.md tables
 #
-# Single host (Docker, Linux):      ./run-all.sh
-# Three machines (bench/REMOTE.md): REMOTE=1 GEN_HOST=... PROXY_HOST=... UP_HOST=... PROXY_CPUS=0 ./run-all.sh
+# Single host (Docker, Linux):      bench/scripts/run-all.sh
+# Three machines (bench/REMOTE.md): REMOTE=1 GEN_HOST=... PROXY_HOST=... UP_HOST=... PROXY_CPUS=0 bench/scripts/run-all.sh
 #
 #   REPORT_ONLY=1  no campaign: aggregate and render from the newest manifests of results/
 #   SKIP_WS=1      only the HTTP/CONNECT campaign
@@ -27,21 +27,22 @@
 # Nothing is published blindly: aggregate.py --report lists every point that is invalid,
 # unsaturated or missing, and the script exits non-zero (the artifacts are still written, for a look).
 set -uo pipefail
-cd "$(dirname "$0")"
+SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPTS/.."   # the benchmark root: dut/, results/, tools/ and the Docker contexts are relative to it
 
 ts=$(date +%Y%m%d-%H%M%S)
 mkdir -p results
 last() { ls -t "results/$1"-[0-9]*.json 2>/dev/null | head -1; }
 
 if [[ "${REPORT_ONLY:-0}" != 1 ]]; then
-    MANIFEST="results/campaign-$ts.json" ./run-campaign.sh || echo "!! run-campaign.sh reported a failure; continuing with what exists" >&2
+    MANIFEST="results/campaign-$ts.json" "$SCRIPTS/run-campaign.sh" || echo "!! run-campaign.sh reported a failure; continuing with what exists" >&2
 fi
 main=$(last campaign)
 [[ -n "$main" ]] || { echo "no campaign manifest produced" >&2; exit 2; }
 sources=(--sources "$main")
 
 if [[ "${SKIP_WS:-0}" != 1 ]]; then
-    [[ "${REPORT_ONLY:-0}" == 1 ]] || MATRIX=ws MANIFEST="results/campaign-ws-$ts.json" ./run-campaign.sh || echo "!! WebSocket campaign reported a failure; continuing" >&2
+    [[ "${REPORT_ONLY:-0}" == 1 ]] || MATRIX=ws MANIFEST="results/campaign-ws-$ts.json" "$SCRIPTS/run-campaign.sh" || echo "!! WebSocket campaign reported a failure; continuing" >&2
     ws=$(last campaign-ws)
     [[ -z "$ws" ]] || sources+=(--sources "$ws")
 fi

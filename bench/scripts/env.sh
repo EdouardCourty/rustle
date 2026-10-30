@@ -1,6 +1,6 @@
 # Shared environment: CPU pinning auto-detected at run time.
 # Source this before docker compose commands: 
-#   . "$(dirname "$0")/env.sh"
+#   . "$SCRIPTS/env.sh"   # SCRIPTS = the directory of the calling script
 #
 # The exposed core layout changes between reboots ("0,2", "1,3", "0-1"):
 # this reads the cgroup cpuset instead of hardcoding anything.

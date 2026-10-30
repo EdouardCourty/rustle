@@ -54,20 +54,20 @@ e2e/                  black-box functional tests (see e2e/README.md): the releas
   src/clients/        http1.rs, h2.rs, socks5.rs, curl.rs
   src/suites/         one file per feature: matrix http connect h2 socks5 uploads limits security robustness process logs interop_curl
 bench/
-  run-bench.sh <proxy> <on|off>            matrix (proxy = rustle|3proxy|squid|gost|tinyproxy)
-  run-campaign.sh                          full campaign (5 proxies × plain/TLS/h2) → manifest results/campaign-<ts>.json (`runs` of campaign.json's `sources`); `MATRIX=ws` → campaign-ws-<ts>.json
-  run-scaling.sh                           multi-core curve (PROXIES, NCPUS, AUTH, PROXY_TLS, PROXY_H2), `REMOTE=1` = three machines
-  env.sh, docker-compose.yml               cpuset: proxy on PROXY_CPU, everything else on BENCH_CPU
+  scripts/run-bench.sh <proxy> <on|off>            matrix (proxy = rustle|3proxy|squid|gost|tinyproxy)
+  scripts/run-campaign.sh                          full campaign (5 proxies × plain/TLS/h2) → manifest results/campaign-<ts>.json (`runs` of campaign.json's `sources`); `MATRIX=ws` → campaign-ws-<ts>.json
+  scripts/run-scaling.sh                           multi-core curve (PROXIES, NCPUS, AUTH, PROXY_TLS, PROXY_H2), `REMOTE=1` = three machines
+  scripts/env.sh, docker-compose.yml               cpuset: proxy on PROXY_CPU, everything else on BENCH_CPU
   generator/                               bench-client crate (http | flood | hold | ws | sink | upstream): shared-nothing threads (one current_thread runtime each), prebuilt requests, per-thread histograms; `upstream` = static Rust origin (replaces nginx, ~3 µs/req vs ~9.5), `sink` = per-core SO_REUSEPORT discard
   dut/<proxy>/                             Dockerfiles + on/off configs (user bench / key secret1, port 8080); `# bench-ports: tls=<p> h2=<p>` line = supported modes (self-signed ECDSA P-256 cert generated at build); WORKERS read by the entrypoint (rustle, squid); rustle/Dockerfile.debug = strace; the rustle Dockerfile stubs the e2e workspace member
   upstream/                                nginx (1kb/10kb/1mb/10mb objects)
   tools/local-upstream-http11.py           local HTTP/1.1 keep-alive upstream (up11.py)
   docker-compose.seccomp.yml               `SECCOMP=unconfined` overlay (io_uring; apply it to every compared DUT)
-  matrix.sh                                workload list + seeded shuffle, sourced by run-bench.sh and run-remote.sh; `MATRIX=ws` = WebSocket workloads
-  run-remote.sh <proxy> <on|off>           same matrix on three machines (generator / proxy / origin+sink over SSH, host network); see REMOTE.md. run-scaling.sh REMOTE=1 = scaling curve on it
+  scripts/matrix.sh                                workload list + seeded shuffle, sourced by run-bench.sh and run-remote.sh; `MATRIX=ws` = WebSocket workloads
+  scripts/run-remote.sh <proxy> <on|off>           same matrix on three machines (generator / proxy / origin+sink over SSH, host network); see REMOTE.md. run-scaling.sh REMOTE=1 = scaling curve on it
   FAIRNESS.md                              competitor versions, settings and the A/B behind each one (read before touching dut/*)
   RUNBOOK.md                               the final-benchmark procedure, step by step (phase A: three machines, phase B: tunnels on the Mac); start here
-  preflight.sh, remote/                    bootstrap.sh (prepare a machine), probe.sh + preflight.sh (compare the three machines, measure links, results/preflight-<ts>.txt), apply-proxy-host.sh (APPLY=1: NIC interrupts and hyperthread siblings off the proxy cores)
+  scripts/preflight.sh, scripts/remote/                    bootstrap.sh (prepare a machine), probe.sh + preflight.sh (compare the three machines, measure links, results/preflight-<ts>.txt), apply-proxy-host.sh (APPLY=1: NIC interrupts and hyperthread siblings off the proxy cores)
   REMOTE.md                                three-machine setup: sizing, sysctls, validity checks (`generator_saturated`)
   tools/record.py                          collection: the generator's JSON document + raw counters (cgroup CPU, /proc status and stat, network) → the result in `run.json` (saturation and validity verdicts); `init`/`seed`/`add`/`manifest`; tests in tools/tests/
   tools/aggregate.py                       manifest (`campaign.json` `sources.runs`) + raw `run.json` → data/<campaign>/benchmarks.json (best clean level, unsupported, scaling); `--report` lists the points that are not clean
@@ -137,7 +137,7 @@ make check                               # fmt + clippy -D warnings + tests + we
 make e2e [F="filter"]                    # full e2e suite (~2 min, ~530 scenarios) — before every release or large change
 cargo run --profile e2e -p e2e -- --list # scenarios; --keep keeps the directories (config, logs)
 make bench P=rustle A=off R=3           # full matrix (see below)
-BENCH_ONLY=<test> BENCH_SEED=2004113323 bench/run-bench.sh rustle off
+BENCH_ONLY=<test> BENCH_SEED=2004113323 bench/scripts/run-bench.sh rustle off
 ```
 
 Optional features: `jemalloc`, `mimalloc` (mutually exclusive; default = glibc malloc).
@@ -156,7 +156,7 @@ Optional features: `jemalloc`, `mimalloc` (mutually exclusive; default = glibc m
 - Generator: honors `Connection: close`/HTTP/1.0 (reconnect) and replays a GET once on a reused connection closed before any byte (RFC 9112 §9.3.1) → `reconnects` (Tinyproxy: 1 per request, it closes without announcing it).
 - Metric to track: **proxy CPU per request** (`cpu_s_per_run / (rps × duration)`), throughput being capped by the harness. Noise between two identical matrices: up to ±7 % CPU, ±15 % on flood.
 - Measured split (1kb, single-host dev setup, not the published campaign): user ≈ 9 µs/req, sys ≈ 35 µs/req. Syscalls at the floor. Profiling: `dut/rustle/Dockerfile.debug` image (strace). No perf on the box (paranoid=4).
-- `ALLOCATOR="--features mimalloc" ./run-bench.sh …` for an allocator A/B (retested: neutral). **`err_kinds` must be empty.**
+- `ALLOCATOR="--features mimalloc" bench/scripts/run-bench.sh …` for an allocator A/B (retested: neutral). **`err_kinds` must be empty.**
 - Do not build images in parallel (OOM on 4 GB). The harness shares 2 cores: ceiling ~23 µs/req on the generator+nginx side.
 - **TLS parity**: the generator offers AES-128-GCM first and keeps an unbounded ticket store; every TLS result carries `tls.negotiated` and `tls.resumed`; the campaign runs the short TLS test with (`tls`) and without (`tlsfull`, `TLS_RESUME=0`) resumption; `tools/aggregate.py --report` flags differing ciphers and unexpected resumption.
 - **Sweep + saturation**: every load test runs at several `--conns` levels (`sweep_levels` in matrix.sh); `tools/aggregate.py` keeps the best clean level and the tables show `@conns`. `proxy_util`, `origin_util`, `sink_util` and the `proxy_unsaturated` / `*_saturated` flags (computed by `tools/record.py`) say whether the harness reached the limit: a best level flagged unsaturated is not a result. Measured: 3proxy needs ~1000 connections to fill a core, rustle collapsed above ~500 until the pool caps were raised.
@@ -169,7 +169,7 @@ Optional features: `jemalloc`, `mimalloc` (mutually exclusive; default = glibc m
 
 ### Benchmark tooling
 
-Pipeline, one command: `make bench-publish` (`bench/run-all.sh`) = `run-campaign.sh` (manifest `bench/results/campaign-<ts>.json`; `REMOTE=1` for the three-machine setup) + `MATRIX=ws` campaign → `tools/aggregate.py --report` (invalid, unsaturated or missing points; exit 1) → `tools/aggregate.py --write` (`data/<campaign>/benchmarks.json`) → `tools/render.py --write` (the SVGs in `docs/benchmarks/`, the README table and numbers between their `bench:table` markers and `<!--n …-->` markers, the tables and numbers of `bench/RESULTS.md`). `REPORT_ONLY=1` rebuilds the artifacts from the newest manifests without running anything. Never edit a number of README.md or RESULTS.md by hand: change the marker's expression or the data, run `make data`. After a campaign: review the report, copy the published runs under `bench/published/<id>/`, update the campaign's `campaign.json`, commit. The pipeline rewrite (JSON from the generator, `record.py`, `aggregate.py`) was unit-tested but not run end to end on the bench servers: run one short A/B (`BENCH_ONLY=http-1kb`) before the next campaign, and do not edit `run-bench.sh` during a bench.
+Pipeline, one command: `make bench-publish` (`bench/scripts/run-all.sh`) = `run-campaign.sh` (manifest `bench/results/campaign-<ts>.json`; `REMOTE=1` for the three-machine setup) + `MATRIX=ws` campaign → `tools/aggregate.py --report` (invalid, unsaturated or missing points; exit 1) → `tools/aggregate.py --write` (`data/<campaign>/benchmarks.json`) → `tools/render.py --write` (the SVGs in `docs/benchmarks/`, the README table and numbers between their `bench:table` markers and `<!--n …-->` markers, the tables and numbers of `bench/RESULTS.md`). `REPORT_ONLY=1` rebuilds the artifacts from the newest manifests without running anything. Never edit a number of README.md or RESULTS.md by hand: change the marker's expression or the data, run `make data`. After a campaign: review the report, copy the published runs under `bench/published/<id>/`, update the campaign's `campaign.json`, commit. The pipeline rewrite (JSON from the generator, `record.py`, `aggregate.py`) was unit-tested but not run end to end on the bench servers: run one short A/B (`BENCH_ONLY=http-1kb`) before the next campaign, and do not edit `run-bench.sh` during a bench.
 
 WebSocket matrix (`MATRIX=ws`, `make bench-ws P=<proxy>`, opt-in so the default seeded order stays comparable): origin echoes frames verbatim with a constant handshake accept (`bench-client ws`, route `/ws`); a DUT without Upgrade support is reported as unsupported, never as 0.
 

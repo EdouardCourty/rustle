@@ -4,8 +4,8 @@
 # "# bench-ports:" line), same seed, one core for the proxy.
 #
 # Usage:
-#   ./run-campaign.sh                      # auth on, all DUTs
-#   AUTH=off PROXIES="rustle squid" ./run-campaign.sh
+#   bench/scripts/run-campaign.sh                      # auth on, all DUTs
+#   AUTH=off PROXIES="rustle squid" bench/scripts/run-campaign.sh
 #
 # REMOTE=1: the same campaign on three machines (run-remote.sh; GEN_HOST, PROXY_HOST,
 # UP_HOST and the *_ADDR variables of bench/REMOTE.md).
@@ -16,7 +16,8 @@
 # tunnel test from another campaign, see run-all.sh) label a fragment for the other roles.
 # Numbers: tools/aggregate.py --sources <manifest>, then tools/render.py (make bench-publish).
 set -uo pipefail
-cd "$(dirname "$0")"
+SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPTS/.."   # the benchmark root: dut/, results/, tools/ and the Docker contexts are relative to it
 
 PROXIES="${PROXIES:-rustle 3proxy squid gost tinyproxy}"
 AUTH="${AUTH:-on}"
@@ -36,7 +37,7 @@ echo "# campaign proxies=[$PROXIES] auth=$AUTH seed=$BENCH_SEED role=$ROLE $(dat
 run() { # <proxy> <mode> [ENV=...]
     local p="$1" mode="$2"; shift 2
     echo "==> $p $mode"
-    env "$@" "./run-${RUNNER}.sh" "$p" "$AUTH" 2>&1 | tee /dev/stderr | while IFS= read -r line; do
+    env "$@" "$SCRIPTS/run-${RUNNER}.sh" "$p" "$AUTH" 2>&1 | tee /dev/stderr | while IFS= read -r line; do
         case "$line" in
             "==> run in "*) python3 tools/record.py manifest "$manifest" --role "$ROLE" --proxy "$p" --transport "$mode" --run "${line#==> run in }" ;;
         esac

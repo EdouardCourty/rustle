@@ -5,7 +5,7 @@
 #   - moves the NIC interrupts to the remaining cores (otherwise they land on
 #     the proxy's core, where their time is not charged to the proxy's cgroup).
 #
-#   ssh HOST 'sudo bash -s -- 0-3 [--dry]' < bench/remote/apply-proxy-host.sh
+#   ssh HOST 'sudo bash -s -- 0-3 [--dry]' < bench/scripts/remote/apply-proxy-host.sh
 set -euo pipefail
 list="${1:?proxy cpus, e.g. 0 or 0-3}"; dry="${2:-}"
 run() { if [[ "$dry" == --dry ]]; then echo "would: $*"; else eval "$@"; fi; }

@@ -9,8 +9,8 @@
 # the host network. Setup, sizing and sysctls: REMOTE.md.
 #
 # Usage:
-#   GEN_HOST=a PROXY_HOST=b UP_HOST=c ./run-remote.sh rustle on
-#   DRY_RUN=1 ... ./run-remote.sh rustle on        # print the commands only
+#   GEN_HOST=a PROXY_HOST=b UP_HOST=c bench/scripts/run-remote.sh rustle on
+#   DRY_RUN=1 ... bench/scripts/run-remote.sh rustle on        # print the commands only
 #
 # Environment:
 #   GEN_HOST PROXY_HOST UP_HOST   ssh targets (required)
@@ -26,7 +26,8 @@
 #   TLS_RESUME=0 (with PROXY_TLS=1) every TLS connection is a full handshake
 #   SKIP_BUILD=1                  images already built on every host
 set -euo pipefail
-cd "$(dirname "$0")"
+SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPTS/.."   # the benchmark root: dut/, results/, tools/ and the Docker contexts are relative to it
 
 PROXY="${1:-rustle}"
 AUTH="${2:-on}"
@@ -162,7 +163,7 @@ run_hold() {
 
 # Workloads point at the origin and sink by address (matrix.sh).
 export UP_HTTP="$UP_ADDR:8000" UP_SINK="$UP_ADDR:9000"
-. ./matrix.sh
+. "$SCRIPTS/matrix.sh"
 
 echo "### warmup-network"
 gen --repeat 1 --no-warmup "${GEN_ARGS[@]}" http "http://$UP_HTTP/1mb" --conns 16 --requests 200 >/dev/null 2>&1 || true

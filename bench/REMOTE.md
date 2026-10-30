@@ -20,7 +20,7 @@ Same matrix, seed, shuffle and results (`run.json`) as `run-bench.sh` (shared `m
 
 Three on-demand machines in the same region and private network, **dedicated cores** (shared or burstable vCPUs make a proxy benchmark meaningless), billed by the hour: a full campaign takes a working day, so a few tens of euros.
 
-*   **Scaleway Elastic Metal, I series (recommended).** Bare metal: dedicated cores, no noisy neighbour, hyperthread siblings and NIC interrupts really controllable (`remote/apply-proxy-host.sh`), hourly billing without commitment, 25 Gbit/s private network. The link between two machines is as fast as the slower end, so use the same series on all three: e.g. EM-I320E (24C/48T) for the proxy and the generator, EM-I220E or EM-I120E for the origin. Attach the same Private Network to every server and use the private addresses (the public interface is 1 Gbit/s).
+*   **Scaleway Elastic Metal, I series (recommended).** Bare metal: dedicated cores, no noisy neighbour, hyperthread siblings and NIC interrupts really controllable (`scripts/remote/apply-proxy-host.sh`), hourly billing without commitment, 25 Gbit/s private network. The link between two machines is as fast as the slower end, so use the same series on all three: e.g. EM-I320E (24C/48T) for the proxy and the generator, EM-I220E or EM-I120E for the origin. Attach the same Private Network to every server and use the private addresses (the public interface is 1 Gbit/s).
 *   **Other providers**: any bare-metal or dedicated-vCPU offer with a private network of at least 10 Gbit/s in one region (Hetzner Cloud CCX, DigitalOcean Premium CPU-Optimized). Check the per-instance network speed, not the monthly transfer allowance: it is a billing quota, not a speed.
 *   **Avoid** shared-vCPU or burstable classes, instances whose bandwidth scales with the vCPU count (Scaleway Instances: 200 Mbit/s per vCPU), and AWS "up to 12.5 Gbit/s" instances (baseline 3 Gbit/s, burst credits: flood results would measure the credits).
 
@@ -45,16 +45,16 @@ The proxy is the active closer of the tunnels to the sink: without `tcp_tw_reuse
 export GEN_HOST=bench-a PROXY_HOST=bench-b UP_HOST=bench-c
 export GEN_ADDR=10.0.0.1 PROXY_ADDR=10.0.0.2 UP_ADDR=10.0.0.3   # private addresses
 
-./bench/run-remote.sh rustle on                                  # whole matrix, 1 shard, all CPUs
-WORKERS=4 PROXY_CPUS=0-3 ./bench/run-remote.sh rustle on         # 4 cores
-BENCH_ONLY=http-1kb ./bench/run-remote.sh squid on               # one test
-PROXY_TLS=1 ./bench/run-remote.sh rustle on                      # HTTPS proxy (PROXY_H2=1: HTTP/2)
+bench/scripts/run-remote.sh rustle on                                  # whole matrix, 1 shard, all CPUs
+WORKERS=4 PROXY_CPUS=0-3 bench/scripts/run-remote.sh rustle on         # 4 cores
+BENCH_ONLY=http-1kb bench/scripts/run-remote.sh squid on               # one test
+PROXY_TLS=1 bench/scripts/run-remote.sh rustle on                      # HTTPS proxy (PROXY_H2=1: HTTP/2)
 
-REMOTE=1 NCPUS="1 2 4 8" PROXIES="rustle 3proxy squid gost" ./bench/run-scaling.sh   # scaling curve
-DRY_RUN=1 ./bench/run-remote.sh rustle on                        # print the commands only
+REMOTE=1 NCPUS="1 2 4 8" PROXIES="rustle 3proxy squid gost" bench/scripts/run-scaling.sh   # scaling curve
+DRY_RUN=1 bench/scripts/run-remote.sh rustle on                        # print the commands only
 
-REMOTE=1 ./bench/run-campaign.sh                                 # the whole campaign (5 proxies x plain/TLS/h2) on the three machines
-REMOTE=1 MATRIX=ws ./bench/run-campaign.sh                       # the WebSocket campaign
+REMOTE=1 bench/scripts/run-campaign.sh                                 # the whole campaign (5 proxies x plain/TLS/h2) on the three machines
+REMOTE=1 MATRIX=ws bench/scripts/run-campaign.sh                       # the WebSocket campaign
 ```
 
 Results land in `bench/results/<label>/remote-auth-<on|off>/<timestamp>/run.json` on the machine you run from (the generator prints one JSON document per test, `tools/record.py` adds the machines' counters and the verdicts); the header of the file records the hosts and parameters.

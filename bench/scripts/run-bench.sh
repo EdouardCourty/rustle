@@ -2,9 +2,9 @@
 # Benchmark one proxy (rustle | 3proxy) inside Docker.
 #
 # Usage:
-#   ./run-bench.sh [rustle|3proxy] [on|off]
-#   REPEAT=5 ./run-bench.sh rustle on     # more repetitions
-#   ALLOCATOR="--features mimalloc" ./run-bench.sh rustle on   # allocator A/B
+#   bench/scripts/run-bench.sh [rustle|3proxy] [on|off]
+#   REPEAT=5 bench/scripts/run-bench.sh rustle on     # more repetitions
+#   ALLOCATOR="--features mimalloc" bench/scripts/run-bench.sh rustle on   # allocator A/B
 #
 # Each client invocation does its own warmup + REPEAT measured runs and prints
 # one JSON document on stdout (its medians; a short human line per run goes to
@@ -15,7 +15,8 @@
 # Layout (2 cores): proxy pinned to core 0; generator/upstream/sink on core 1.
 # Results: bench/results/<label>/auth-<on|off>/<timestamp>/run.json
 set -euo pipefail
-cd "$(dirname "$0")"
+SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPTS/.."   # the benchmark root: dut/, results/, tools/ and the Docker contexts are relative to it
 
 PROXY="${1:-rustle}"
 AUTH="${2:-on}"
@@ -67,7 +68,7 @@ export PROXY_IMAGE="${PROXY}:bench"
 export AUTH
 
 # Auto-detected CPU pinning (shared with the Makefile).
-. "$(dirname "$0")/env.sh"
+. "$SCRIPTS/env.sh"
 echo "==> cpu pinning: proxy=$PROXY_CPU generator/upstream/sink=$BENCH_CPU (available: $ALL_CPUS)"
 
 echo "==> building images (serialized: rustc peaks ~1-2 GB transiently)"
@@ -169,7 +170,7 @@ docker compose --profile generator run --rm -T generator --repeat 1 --no-warmup 
     flood sink:9000 --conns 8 --duration 3 >/dev/null 2>&1 || true
 
 # --- Workloads: list, seeded shuffle and BENCH_ONLY live in matrix.sh.
-. ./matrix.sh
+. "$SCRIPTS/matrix.sh"
 matrix_select_and_shuffle
 
 for entry in "${shuffled[@]}"; do

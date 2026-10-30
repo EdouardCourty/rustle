@@ -4,12 +4,12 @@
 # and run the matrix (or one step with BENCH_ONLY) at the fixed seed.
 #
 # Usage (>= 2*max(n) CPUs recommended):
-#   ./run-scaling.sh                                  # defaults below
-#   PROXIES="rustle squid" NCPUS="1 2 4 8" AUTH=on ./run-scaling.sh
-#   BENCH_ONLY=http-1kb ./run-scaling.sh              # one step per point
-#   PROXY_TLS=1 ./run-scaling.sh                      # HTTPS proxy
-#   PROXY_H2=1 ./run-scaling.sh                       # HTTP/2 proxy (TLS, ALPN h2)
-#   REMOTE=1 GEN_HOST=a PROXY_HOST=b UP_HOST=c NCPUS="1 2 4 8" ./run-scaling.sh
+#   bench/scripts/run-scaling.sh                                  # defaults below
+#   PROXIES="rustle squid" NCPUS="1 2 4 8" AUTH=on bench/scripts/run-scaling.sh
+#   BENCH_ONLY=http-1kb bench/scripts/run-scaling.sh              # one step per point
+#   PROXY_TLS=1 bench/scripts/run-scaling.sh                      # HTTPS proxy
+#   PROXY_H2=1 bench/scripts/run-scaling.sh                       # HTTP/2 proxy (TLS, ALPN h2)
+#   REMOTE=1 GEN_HOST=a PROXY_HOST=b UP_HOST=c NCPUS="1 2 4 8" bench/scripts/run-scaling.sh
 #                                                     # three machines (run-remote.sh, REMOTE.md)
 #
 # Each point is a regular run-bench.sh run (results/<label>/auth-<a>/<ts>/run.json,
@@ -17,7 +17,8 @@
 # (role `scaling`, one entry per proxy and core count) is written to
 # results/scaling-<ts>.json, to paste into the `sources` of campaign.json.
 set -euo pipefail
-cd "$(dirname "$0")"
+SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPTS/.."   # the benchmark root: dut/, results/, tools/ and the Docker contexts are relative to it
 
 PROXIES="${PROXIES:-rustle 3proxy squid gost tinyproxy}"
 # The transport of the points (the same for all of them), as the manifest names it.
@@ -37,7 +38,7 @@ if [[ "${REMOTE:-0}" == 1 ]]; then
         if (( n > total )); then echo "skip n=$n: proxy host has $total CPUs"; continue; fi
         for p in $PROXIES; do
             echo "==> $p n=$n"
-            PROXY_CPUS="0-$((n - 1))" WORKERS="$n" ./run-remote.sh "$p" "$AUTH" | tee /dev/stderr | while IFS= read -r line; do
+            PROXY_CPUS="0-$((n - 1))" WORKERS="$n" "$SCRIPTS/run-remote.sh" "$p" "$AUTH" | tee /dev/stderr | while IFS= read -r line; do
                 case "$line" in
                     "==> run in "*) python3 tools/record.py manifest "$manifest" --role scaling --cores "$n" --proxy "$p" --transport "$(scaling_transport)" --run "${line#==> run in }" ;;
                 esac
@@ -77,7 +78,7 @@ for n in $NCPUS; do
         # Fresh env per point (env.sh caches its split in the process).
         env -u _BENCH_ENV_LOADED -u PROXY_CPU -u BENCH_CPU \
             PROXY_NCPU="$n" WORKERS="$n" GEN_THREADS="$(( total - n ))" \
-            ./run-bench.sh "$p" "$AUTH" | tee /dev/stderr | while IFS= read -r line; do
+            "$SCRIPTS/run-bench.sh" "$p" "$AUTH" | tee /dev/stderr | while IFS= read -r line; do
                 case "$line" in
                     "==> run in "*) python3 tools/record.py manifest "$manifest" --role scaling --cores "$n" --proxy "$p" --transport "$(scaling_transport)" --run "${line#==> run in }" ;;
                 esac
