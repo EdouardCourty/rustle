@@ -5,7 +5,7 @@ rustle
 [![Release](https://img.shields.io/github/v/release/EdouardCourty/rustle)](https://github.com/EdouardCourty/rustle/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A high-performance forward proxy written in Rust. One binary serves HTTP/1.1 and HTTPS (`CONNECT`), an HTTPS proxy with HTTP/2, WebSocket upgrades and SOCKS5 (TCP and UDP). Each CPU core runs its own event loop, connection pool and sockets, so it scales with cores (linear up to 8 cores in the benchmark) while staying light on memory (<!--n v plain-ram-25000.rustle-->95 MB<!--/n--> for 25,000 idle tunnels), and it is safe by default.
+The fastest forward proxy, written in Rust. One binary serves HTTP/1.1 and HTTPS (`CONNECT`), an HTTPS proxy with HTTP/2, WebSocket upgrades and SOCKS5 (TCP and UDP). Each CPU core runs its own event loop, connection pool and sockets, so it scales with cores (linear up to 8 cores in the benchmark) while staying light on memory (<!--n v plain-ram-25000.rustle-->95 MB<!--/n--> for 25,000 idle tunnels), and it is safe by default.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/EdouardCourty/rustle/main/install.sh | sh
@@ -93,9 +93,9 @@ make bench-publish           # campaigns → raw runs → validity report → be
 Under the Hood
 --------------
 
-*   **Shared-nothing, one core = one shard.** `workers` threads, each with its own single-threaded Tokio runtime, its own `SO_REUSEPORT` listener and its own upstream pool. A connection never leaves its core: no locks on the hot path, no work stealing, no cross-core wakeups (an earlier A/B against a multi-threaded runtime measured −11 % CPU per request on short connections; that run is not part of the published campaign).
-*   **Zero-copy relay.** Tunnels and large bodies move through `splice()` and pooled 1 MB pipes, so payload bytes never enter user space; small flows start with an adaptive copy and only switch when the flow is sustained.
-*   **Allocation-free hot path.** Request heads are parsed in place (spans into the read buffer), scratch buffers live as long as the connection, and a keep-alive request costs about two `recv` and two `send` syscalls (counted with `strace` during development).
+*   **Shared-nothing, one core = one shard.** `workers` threads, each with its own single-threaded Tokio runtime, its own `SO_REUSEPORT` listener and its own upstream pool. A connection never leaves its core: no work stealing, and almost nothing shared on the data path (a few counters and, for host names, a short-lived lock on the DNS cache; an earlier A/B against a multi-threaded runtime measured −11 % CPU per request on short connections; that run is not part of the published campaign).
+*   **Zero-copy relay.** Tunnels and large bodies move through `splice()` and pooled 1 MB pipes, so the payload bytes of a bulk flow stay out of user space; small flows start with an adaptive copy and only switch when the flow is sustained.
+*   **Allocation-free keep-alive path.** Request heads are parsed in place (spans into the read buffer), scratch buffers live as long as the connection, and a keep-alive request costs about two `recv` and two `send` syscalls (counted with `strace` during development).
 *   **Socket options set once.** `TCP_NODELAY` and `TCP_DEFER_ACCEPT` (and the socket buffer size when `socket_buffer_bytes` is set; the default is kernel autotuning) are applied on the listener and inherited by every accepted socket: no per-request `setsockopt`.
 *   **Optional extras.** `pin_cores` steers each connection to the shard of the CPU that received its SYN (`SO_ATTACH_REUSEPORT_CBPF`); `ktls` hands TLS sessions to the kernel after the handshake: <!--n ktrange-->5 to 20 %<!--/n--> less memory, but <!--n kttp-->−12 % to −43 %<!--/n--> throughput against rustls (software kernel TLS, no NIC TLS offload, campaign of 2026-10-28), hence off by default.
 
@@ -103,7 +103,7 @@ Features
 --------
 
 *   **Protocols**: plain HTTP/1.1 (WebSocket upgrades included) and `CONNECT`, HTTP/1.1 over TLS, HTTP/2 over TLS (ALPN `h2`), SOCKS5 (`CONNECT` + `UDP ASSOCIATE` for QUIC/HTTP3 and DNS).
-*   **Fast**: one shard per core, allocation-free hot path, zero-copy `splice()` relay on Linux. See [Benchmarks](#benchmarks).
+*   **Fast**: one shard per core, allocation-free keep-alive requests, zero-copy `splice()` relay of bulk flows on Linux. See [Benchmarks](#benchmarks).
 *   **Light**: <!--n v plain-ram-25000.rustle-->95 MB<!--/n--> for 25,000 idle CONNECT tunnels on one core (<!--n v tls-ram-25000.rustle-->810 MB<!--/n--> for the same tunnels over TLS), against <!--n v plain-ram-25000.tinyproxy-->274 MB<!--/n--> to <!--n gb plain-ram-25000.gost-->3.2<!--/n--> GB for the other proxies in plain HTTP.
 *   **Safe by default**: API key auth, client IP allowlist, bans after repeated wrong keys, private and internal destinations refused (DNS rebinding included), allowed ports, anti-slowloris, anti request smuggling.
 *   **Operable**: single static config file, access log that never blocks the proxy, `/health` endpoint, graceful shutdown, systemd/launchd service management, self-update.
