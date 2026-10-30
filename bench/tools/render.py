@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Everything published from the numbers is a pure function of bench/data/<latest>/benchmarks.json (and
-the campaign's campaign.json / proxies.json): the SVG charts of docs/benchmarks/, the summary table of
-the README and the generated tables of bench/RESULTS.md. Nothing is typed by hand.
+the campaign's campaign.json / proxies.json): the SVG charts of bench/charts/, the summary table of
+the README and the generated tables of bench/documentation/RESULTS.md. Nothing is typed by hand.
 
     tools/render.py            check that the committed files are what the data gives (exit 1 otherwise)
     tools/render.py --write    rewrite them
@@ -89,7 +89,7 @@ def charts(bench):
             continue
         svg = chart(title, sub, list(t["values"].items()), fmt, t["direction"] == "lower")
         if svg:
-            out[os.path.join("docs", "benchmarks", fname)] = svg
+            out[os.path.join("bench", "charts", fname)] = svg
     return out
 
 
@@ -153,8 +153,8 @@ def render_all(cid):
     readme = open(os.path.join(ROOT, "README.md")).read()
     import results_md
     out["README.md"] = results_md.expand_text(replace_block(readme, "table", readme_table(bench, proxies)), bench, proxies, campaign)
-    results = open(os.path.join(ROOT, "bench", "RESULTS.md")).read()
-    out["bench/RESULTS.md"] = results_md.render(results, bench, proxies, campaign)
+    results = open(os.path.join(ROOT, "bench", "documentation", "RESULTS.md")).read()
+    out["bench/documentation/RESULTS.md"] = results_md.render(results, bench, proxies, campaign)
     return out
 
 

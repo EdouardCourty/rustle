@@ -90,7 +90,7 @@ pub struct TlsConfig {
     pub http2: bool,
     /// Kernel TLS after the handshake (when the kernel supports it, probed
     /// at startup). Off by default: it saves memory, but is slower than
-    /// rustls on throughput without NIC TLS offload; see bench/RESULTS.md.
+    /// rustls on throughput without NIC TLS offload; see bench/documentation/RESULTS.md.
     pub ktls: bool,
 }
 

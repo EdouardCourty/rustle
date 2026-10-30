@@ -344,7 +344,7 @@
         "chart": {
           "$ref": "#/$defs/nullableString",
           "title": "Chart",
-          "description": "File name of the chart in docs/benchmarks/, or null."
+          "description": "File name of the chart in bench/charts/, or null."
         },
         "values": {
           "$ref": "#/$defs/valuesByProxy",

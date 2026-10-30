@@ -44,15 +44,15 @@ Table of Contents
 Benchmarks
 ----------
 
-rustle against 3proxy, Squid, gost and Tinyproxy, each pinned to **one core** with authentication on, every competitor with the tuning its own documentation recommends, at the connection count where it performs best ([versions, settings and the A/B behind each one](bench/FAIRNESS.md)). Three bare-metal servers on a <!--n c network.nominal_gbit_s-->25<!--/n--> Gbit/s private network (load generator → proxy → origin and sink, measured link <!--n c network.measured_gbit_s-->23.5<!--/n--> Gbit/s), the proxy on its own core of a <!--n c hardware.proxy.cores-->24<!--/n-->-core EPYC (rustle ran with `socket_buffer_bytes = 1048576` in the bench config; the shipped default is kernel autotuning, which made no measurable difference on the A/B host: [`bench/FAIRNESS.md`](bench/FAIRNESS.md)). Fixed-seed shuffled test order, median of <!--n c repeats-->3<!--/n--> runs, no client error in any published number (a proxy that cannot do a test is shown as —, never as zero).
+rustle against 3proxy, Squid, gost and Tinyproxy, each pinned to **one core** with authentication on, every competitor with the tuning its own documentation recommends, at the connection count where it performs best ([versions, settings and the A/B behind each one](bench/documentation/FAIRNESS.md)). Three bare-metal servers on a <!--n c network.nominal_gbit_s-->25<!--/n--> Gbit/s private network (load generator → proxy → origin and sink, measured link <!--n c network.measured_gbit_s-->23.5<!--/n--> Gbit/s), the proxy on its own core of a <!--n c hardware.proxy.cores-->24<!--/n-->-core EPYC (rustle ran with `socket_buffer_bytes = 1048576` in the bench config; the shipped default is kernel autotuning, which made no measurable difference on the A/B host: [`bench/documentation/FAIRNESS.md`](bench/documentation/FAIRNESS.md)). Fixed-seed shuffled test order, median of <!--n c repeats-->3<!--/n--> runs, no client error in any published number (a proxy that cannot do a test is shown as —, never as zero).
 
-![1 KB requests](docs/benchmarks/plain-1kb.svg)
-![1 MB requests](docs/benchmarks/plain-1mb.svg)
-![CPU per request](docs/benchmarks/plain-cpu.svg)
-![25,000 tunnels](docs/benchmarks/plain-ram.svg)
-![HTTPS proxy](docs/benchmarks/tls-1kb.svg)
-![HTTP/2 proxy](docs/benchmarks/h2-1kb.svg)
-![WebSocket, 64 B messages](docs/benchmarks/ws-64b-rps.svg)
+![1 KB requests](bench/charts/plain-1kb.svg)
+![1 MB requests](bench/charts/plain-1mb.svg)
+![CPU per request](bench/charts/plain-cpu.svg)
+![25,000 tunnels](bench/charts/plain-ram.svg)
+![HTTPS proxy](bench/charts/tls-1kb.svg)
+![HTTP/2 proxy](bench/charts/h2-1kb.svg)
+![WebSocket, 64 B messages](bench/charts/ws-64b-rps.svg)
 
 <!-- bench:table:start -->
 
@@ -76,11 +76,11 @@ Reading the numbers:
 
 *   **Small requests and memory are where rustle is far ahead**: <!--n x plain-1kb.rustle plain-1kb.3proxy-->2.6×<!--/n--> the next proxy (3proxy) at 1 KB, <!--n x plain-10kb.rustle plain-10kb.3proxy-->2.1×<!--/n--> at 10 KB, <!--n x plain-short.rustle plain-short.squid-->3.6×<!--/n--> on short connections (Squid), and <!--n v plain-ram-25000.rustle-->95 MB<!--/n--> for 25,000 idle tunnels against <!--n v plain-ram-25000.tinyproxy-->274 MB<!--/n--> for the next one (Tinyproxy) and <!--n gb plain-ram-25000.squid-->0.9<!--/n--> to <!--n gb plain-ram-25000.gost-->3.2<!--/n--> GB for the others.
 *   **Bulk transfers and tunnels reach the network**: at 1 MB, 10 MB and in tunnels rustle runs at <!--n gbit plain-1mb.rustle 1048576-->22.0<!--/n-->, <!--n gbit plain-10mb.rustle 10485760-->22.5<!--/n--> and <!--n v plain-flood.rustle-->22.0<!--/n--> Gbit/s of the <!--n c network.measured_gbit_s-->23.5<!--/n--> Gbit/s the test network can carry: there the network sets the number, not rustle, so its real lead is higher than shown. On tunnels it spends about half the CPU per GB of 3proxy (<!--n fmt plain-flood.rustle.cpu_ms_per_gb .0f-->253<!--/n--> against <!--n fmt plain-flood.3proxy.cpu_ms_per_gb .0f-->511<!--/n--> ms/GB).
-*   **Multi-core**: <!--n percore S8.rustle 8 1000-->55,000<!--/n--> req/s per added core at 1 KB, linear up to 8 cores (<!--n fmt S8.rustle ,.0f-->439,741<!--/n--> req/s), <!--n x S8.rustle S8.squid-->3.8×<!--/n--> the next proxy at 8 cores ([curve](bench/RESULTS.md)).
+*   **Multi-core**: <!--n percore S8.rustle 8 1000-->55,000<!--/n--> req/s per added core at 1 KB, linear up to 8 cores (<!--n fmt S8.rustle ,.0f-->439,741<!--/n--> req/s), <!--n x S8.rustle S8.squid-->3.8×<!--/n--> the next proxy at 8 cores ([curve](bench/documentation/RESULTS.md)).
 *   **HTTPS, HTTP/2 and WebSocket**: ahead of Squid and gost on every test (<!--n v tls-1kb.rustle-->49,461<!--/n--> req/s at 1 KB over TLS against <!--n v tls-1kb.squid-->13,509<!--/n--> for Squid; <!--n v h2-1kb.rustle-->33,451<!--/n--> over HTTP/2 against <!--n v h2-1kb.gost-->5,231<!--/n--> for gost). TLS and h2 carry no `splice`, so throughput is lower than in plain HTTP; on HTTP/2 tunnels the lead over gost is small (<!--n v h2-flood.rustle-->8.8<!--/n--> against <!--n v h2-flood.gost-->7.8<!--/n--> Gbit/s).
 *   One campaign, one seed, noise ±<!--n c noise_pct.min-->3<!--/n-->–<!--n c noise_pct.max-->5<!--/n--> %: differences below that are not conclusions. The workload is a static origin with `Content-Length` (no chunked bodies, uploads or SOCKS5): those are covered by the tests, not the bench.
 
-Full tables, the TLS, HTTP/2, WebSocket and multi-core matrices, and the raw data: [`bench/RESULTS.md`](bench/RESULTS.md). To reproduce (Docker, Linux):
+Full tables, the TLS, HTTP/2, WebSocket and multi-core matrices, and the raw data: [`bench/documentation/RESULTS.md`](bench/documentation/RESULTS.md). To reproduce (Docker, Linux):
 
 ```sh
 make bench P=rustle A=on      # one proxy (rustle|3proxy|squid|gost|tinyproxy)
@@ -225,7 +225,7 @@ HTTPS proxy and HTTP/2.
 | `cert` / `key` | `""` | PEM certificate chain and private key |
 | `handshake_timeout` | `"10s"` | Max duration of a TLS handshake |
 | `http2` | `true` | Offer HTTP/2 through ALPN |
-| `ktls` | `false` | Kernel TLS (Linux, `tls` module), opt-in. Software kernel TLS saves <!--n ktrange-->5 to 20 %<!--/n--> of memory but is slower than rustls on every throughput test, from <!--n kttp-->−12 % to −43 %<!--/n--> (campaign of <!--n c date-->2026-10-28<!--/n-->, 1 core, no NIC TLS offload; [`bench/RESULTS.md`](bench/RESULTS.md)) |
+| `ktls` | `false` | Kernel TLS (Linux, `tls` module), opt-in. Software kernel TLS saves <!--n ktrange-->5 to 20 %<!--/n--> of memory but is slower than rustls on every throughput test, from <!--n kttp-->−12 % to −43 %<!--/n--> (campaign of <!--n c date-->2026-10-28<!--/n-->, 1 core, no NIC TLS offload; [`bench/documentation/RESULTS.md`](bench/documentation/RESULTS.md)) |
 
 ### `[filter]`
 

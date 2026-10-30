@@ -108,10 +108,10 @@ One CPU for the proxy, the rest for the generator and the sink (`env.sh` reads t
 
 ```sh
 FLOOD_FROM=bench/results/campaign-<single-host-manifest>.json REMOTE=1 REPORT_ONLY=1 bench/scripts/run-all.sh
-git diff                     # benchmarks.json, README table and numbers, RESULTS.md, docs/benchmarks/*.svg
+git diff                     # benchmarks.json, README table and numbers, RESULTS.md, bench/charts/*.svg
 ```
 
-Every table and number of `bench/RESULTS.md`, the README table and the charts are written from the raw runs. By hand: the new campaign's folder under `bench/data/` (`campaign.json`, `proxies.json`, `index.json`, see `bench/data/README.md`), the prose of `RESULTS.md`, AGENTS.md "Known state" (campaign files), and copy the runs you publish into `bench/published/<date>/` (point the campaign's `sources` at them). `make data-check` must pass. `make bench-publish` is `run-all.sh`.
+Every table and number of `bench/documentation/RESULTS.md`, the README table and the charts are written from the raw runs. By hand: the new campaign's folder under `bench/data/` (`campaign.json`, `proxies.json`, `index.json`, see `bench/data/README.md`), the prose of `RESULTS.md`, AGENTS.md "Known state" (campaign files), and copy the runs you publish into `bench/published/<date>/` (point the campaign's `sources` at them). `make data-check` must pass. `make bench-publish` is `run-all.sh`.
 
 ## If something looks wrong
 

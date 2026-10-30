@@ -39,7 +39,7 @@ def check_file(problems, path, pointer):
 def check_proxies_latest(problems, doc):
     """Versions against FAIRNESS.md and protocols against the Dockerfiles: they describe the
     current setup, so only the latest campaign can be compared with them."""
-    fairness = open(os.path.join(BENCH, "FAIRNESS.md")).read()
+    fairness = open(os.path.join(BENCH, "documentation", "FAIRNESS.md")).read()
     support = ports_support()
     for p in doc["proxies"]:
         pid = p["id"]
@@ -95,8 +95,8 @@ def check_campaign(problems, entry, latest):
                     problems.append(f"{cid}/benchmarks.json: {t.get('id', t.get('cores'))}: {field} keys are not the campaign's proxies")
         if latest:
             for t in bench["tests"]:
-                if t["chart"] and not os.path.isfile(os.path.join(ROOT, "docs", "benchmarks", t["chart"])):
-                    problems.append(f"{cid}/benchmarks.json: test {t['id']}: chart docs/benchmarks/{t['chart']} does not exist")
+                if t["chart"] and not os.path.isfile(os.path.join(BENCH, "charts", t["chart"])):
+                    problems.append(f"{cid}/benchmarks.json: test {t['id']}: chart bench/charts/{t['chart']} does not exist")
     if camp is not None and prox is not None:
         try:
             fresh = aggregate.generate(cid)

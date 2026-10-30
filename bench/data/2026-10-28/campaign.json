@@ -52,8 +52,8 @@
     "max": 5
   },
   "protocol": "auth on, one proxy core and one worker for every proxy, shuffled test order, proxy restarted before each test, warmup run apart, median of the repeats, concurrency sweep per test (best clean level kept, at_conns)",
-  "fairness": "bench/FAIRNESS.md",
-  "results": "bench/RESULTS.md",
+  "fairness": "bench/documentation/FAIRNESS.md",
+  "results": "bench/documentation/RESULTS.md",
   "sources": {
     "runs": [
       {

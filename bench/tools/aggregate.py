@@ -46,7 +46,7 @@ HTTP_TESTS = [  # (id suffix, bench test, label, description)
 ]
 FLOOD = ("flood", "flood", "CONNECT tunnels, bulk transfer", "bulk upload through CONNECT tunnels")
 HOLDS = [1000, 5000, 10000, 25000]
-CHARTS = {  # test id -> chart file in docs/benchmarks/
+CHARTS = {  # test id -> chart file in bench/charts/
     "plain-1kb": "plain-1kb.svg", "plain-1mb": "plain-1mb.svg", "plain-cpu": "plain-cpu.svg",
     "plain-flood": "plain-flood.svg", "plain-ram-25000": "plain-ram.svg",
     "tls-1kb": "tls-1kb.svg", "tls-short": "tls-short.svg", "tls-short-full": "tls-short-full.svg",

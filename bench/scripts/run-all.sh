@@ -3,10 +3,10 @@
 #
 #   HTTP/CONNECT campaign (5 proxies x plain/TLS/h2)  ->  WebSocket campaign (plain, TLS)
 #   -> aggregation of the raw runs into data/<campaign>/benchmarks.json (the website's data)
-#   -> validity listing -> SVG charts (docs/benchmarks/), README table and numbers, RESULTS.md tables
+#   -> validity listing -> SVG charts (bench/charts/), README table and numbers, RESULTS.md tables
 #
 # Single host (Docker, Linux):      bench/scripts/run-all.sh
-# Three machines (bench/REMOTE.md): REMOTE=1 GEN_HOST=... PROXY_HOST=... UP_HOST=... PROXY_CPUS=0 bench/scripts/run-all.sh
+# Three machines (bench/documentation/REMOTE.md): REMOTE=1 GEN_HOST=... PROXY_HOST=... UP_HOST=... PROXY_CPUS=0 bench/scripts/run-all.sh
 #
 #   REPORT_ONLY=1  no campaign: aggregate and render from the newest manifests of results/
 #   SKIP_WS=1      only the HTTP/CONNECT campaign

@@ -33,7 +33,7 @@ Initial release.
 - Runtime configuration reload (`rustle reload` or `SIGHUP`) and a `/health` endpoint.
 - `rustle` command line: `init`, `check`, `status`, `reload`, `service` (systemd and launchd), `update`, `uninstall`.
 - `curl | sh` installer with SHA-256 verification; Linux (x86_64, aarch64) and macOS (Apple Silicon, Intel) builds.
-- Black-box end-to-end test suite and a reproducible benchmark harness; results are in `bench/RESULTS.md`.
+- Black-box end-to-end test suite and a reproducible benchmark harness; results are in `bench/documentation/RESULTS.md`.
 
 [Unreleased]: https://github.com/EdouardCourty/rustle/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/EdouardCourty/rustle/releases/tag/v1.0.0

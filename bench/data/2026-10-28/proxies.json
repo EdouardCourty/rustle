@@ -19,7 +19,7 @@
         "websocket": true
       },
       "characteristics": [],
-      "fairness": "bench/FAIRNESS.md#what-each-proxy-runs"
+      "fairness": "bench/documentation/FAIRNESS.md#what-each-proxy-runs"
     },
     {
       "id": "3proxy",
@@ -43,7 +43,7 @@
         "No TLS or HTTP/2 listener.",
         "Thread-per-connection: uses the n cores of the multi-core curve without a core-count setting."
       ],
-      "fairness": "bench/FAIRNESS.md#what-each-proxy-runs"
+      "fairness": "bench/documentation/FAIRNESS.md#what-each-proxy-runs"
     },
     {
       "id": "squid",
@@ -70,7 +70,7 @@
         "No HTTP/2 towards clients.",
         "Scales 1 to 8 cores almost as well as rustle (x7.74 against x7.96), from a lower base."
       ],
-      "fairness": "bench/FAIRNESS.md#what-each-proxy-runs"
+      "fairness": "bench/documentation/FAIRNESS.md#what-each-proxy-runs"
     },
     {
       "id": "gost",
@@ -92,7 +92,7 @@
         "HTTP/2 is a dedicated listener, not ALPN on the TLS port.",
         "Gives the same 2.5k req/s over TLS with or without keep-alive: its overhead is per request, not per connection."
       ],
-      "fairness": "bench/FAIRNESS.md#what-each-proxy-runs"
+      "fairness": "bench/documentation/FAIRNESS.md#what-each-proxy-runs"
     },
     {
       "id": "tinyproxy",
@@ -116,7 +116,7 @@
         "No TLS or HTTP/2 listener.",
         "Thread-per-connection with no core-count setting: left out of the multi-core curve."
       ],
-      "fairness": "bench/FAIRNESS.md#what-each-proxy-runs"
+      "fairness": "bench/documentation/FAIRNESS.md#what-each-proxy-runs"
     }
   ]
 }

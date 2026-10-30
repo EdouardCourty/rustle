@@ -93,7 +93,7 @@ http2 = true
 # Kernel TLS (Linux, opt-in, off by default). After the rustls handshake, the
 # session keys go to the kernel (module `tls`, probed at startup; userspace TLS
 # otherwise). Software kernel TLS saves memory but is slower than rustls on
-# throughput, tunnels included (see bench/RESULTS.md). Leave it off unless
+# throughput, tunnels included (see bench/documentation/RESULTS.md). Leave it off unless
 # memory matters more than throughput.
 ktls = false
 

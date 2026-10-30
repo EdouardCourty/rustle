@@ -1,4 +1,4 @@
-"""bench/RESULTS.md from the benchmark data: the tables between `<!-- bench:<name>:start -->` and
+"""bench/documentation/RESULTS.md from the benchmark data: the tables between `<!-- bench:<name>:start -->` and
 `<!-- bench:<name>:end -->` markers, and every number of the prose between inline markers
 
     <!--n EXPR-->value<!--/n-->

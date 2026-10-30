@@ -12,8 +12,8 @@ bench-client (JSON document per test)         bench/generator
   -> tools/record.py                          saturation and validity verdicts            -> run.json   (schema/run.schema.json)
   -> manifest = campaign.json `sources.runs`  which run plays which part                  (run-campaign.sh / run-scaling.sh write fragments)
   -> tools/aggregate.py                       best clean sweep level, unsupported, scaling -> <id>/benchmarks.json
-  -> tools/render.py                          pure functions of benchmarks.json:          charts docs/benchmarks/*.svg,
-                                              the README table and numbers, the tables and numbers of bench/RESULTS.md
+  -> tools/render.py                          pure functions of benchmarks.json:          charts bench/charts/*.svg,
+                                              the README table and numbers, the tables and numbers of bench/documentation/RESULTS.md
 ```
 
 `make data` runs the last two steps from the committed runs; `make bench-publish` (`run-all.sh`) runs a campaign first. `make data-check` regenerates all of it and fails when a committed file differs, so none of it can drift.
@@ -50,7 +50,7 @@ docs/
 
 Each campaign folder stands alone: its conditions, its competitors' versions and tuning (they change from one campaign to the next), its numbers. **Numbers are not comparable across campaigns**: the protocol, the versions and the hardware change (see "Do not compare numbers across bench protocol changes" in `AGENTS.md`). The website shows `latest`; a history page lists campaigns but must not chart a metric across them. `benchmarks.json` carries only `campaign: "<id>"`; the conditions are in the same folder's `campaign.json`, never duplicated.
 
-`tests[].chart` names a file of `docs/benchmarks/`, which holds the charts of the **latest** campaign only: use it for `latest` and ignore it for older campaigns.
+`tests[].chart` names a file of `bench/charts/`, which holds the charts of the **latest** campaign only: use it for `latest` and ignore it for older campaigns.
 
 ## JSON Schema
 
@@ -67,7 +67,7 @@ The producer owns the contract. Each file kind has a schema in dialect 2020-12; 
 `make data-check` (run by `make check` and the CI `website data` job) does two things:
 
 1. `make schema-check`: [`check-jsonschema`](https://pypi.org/project/check-jsonschema/) validates every data file against its schema and every schema against the JSON Schema metaschema (`bench/data/*/campaign.json` against `campaign.schema.json`, and so on, with globs, so a new campaign needs no list to edit; `docs/config.json` against `docs/config.schema.json`). It uses `check-jsonschema` if it is on the `PATH`, else `uvx` or `pipx run` at the pinned version, else it stops with an install hint (`pipx install check-jsonschema==<version>`). The version is pinned in one place, `CHECK_JSONSCHEMA_VERSION` in the `Makefile`; CI installs it with `make install-schema-tool`.
-2. `tools/check.py`: everything a JSON Schema cannot say. The charts, the README table and numbers and the tables and numbers of `bench/RESULTS.md` are regenerated from `benchmarks.json` and compared with the committed files, and `benchmarks.json` of every campaign is regenerated from its raw runs by `tools/aggregate.py` and compared (so `make data` is idempotent and nothing is typed by hand); exact `$schema` pointers; `index.json` lists `latest`, has unique ids that match the folders and each file's own `id` / `campaign`, and its `date`, `rustle_version` and `proxies` agree with the campaign's files; every by-proxy map of `benchmarks.json` has exactly the campaign's proxies; project URLs are well-formed `https`; `campaign.json`'s `seed`, `repeats`, `proxy_cores` and `auth` are what the runs say and no run is dated more than a day from the campaign; for `latest` only (they describe the current setup): `proxies.json` versions against the table of `FAIRNESS.md`, TLS and HTTP/2 support against the `# bench-ports:` lines of `dut/*/Dockerfile`, each chart file exists, and the kTLS saving and cost quoted by the documentation are the ones of `ktls[]`.
+2. `tools/check.py`: everything a JSON Schema cannot say. The charts, the README table and numbers and the tables and numbers of `bench/documentation/RESULTS.md` are regenerated from `benchmarks.json` and compared with the committed files, and `benchmarks.json` of every campaign is regenerated from its raw runs by `tools/aggregate.py` and compared (so `make data` is idempotent and nothing is typed by hand); exact `$schema` pointers; `index.json` lists `latest`, has unique ids that match the folders and each file's own `id` / `campaign`, and its `date`, `rustle_version` and `proxies` agree with the campaign's files; every by-proxy map of `benchmarks.json` has exactly the campaign's proxies; project URLs are well-formed `https`; `campaign.json`'s `seed`, `repeats`, `proxy_cores` and `auth` are what the runs say and no run is dated more than a day from the campaign; for `latest` only (they describe the current setup): `proxies.json` versions against the table of `FAIRNESS.md`, TLS and HTTP/2 support against the `# bench-ports:` lines of `dut/*/Dockerfile`, each chart file exists, and the kTLS saving and cost quoted by the documentation are the ones of `ktls[]`.
 
 `make test-tools` (in `make check` and the CI job) runs the unit tests of the bench tools (`bench/tools/tests/`: the saturation and validity logic and the parsing of the raw counters of `record.py`, on figures of the 2026-10-28 campaign; the best-level rule and the statuses of `aggregate.py`; the placeholders of `RESULTS.md`), and `cargo test -p bench-client` the JSON the generator prints.
 

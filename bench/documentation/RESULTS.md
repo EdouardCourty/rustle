@@ -1,6 +1,6 @@
 # Results
 
-Published measurements of rustle against 3proxy, Squid, gost and Tinyproxy. Every table and every number below is generated from [`data/2026-10-28/benchmarks.json`](data/2026-10-28/benchmarks.json) and [`campaign.json`](data/2026-10-28/campaign.json) by `tools/render.py` (`make data`): nothing is typed by hand, see [`data/README.md`](data/README.md).
+Published measurements of rustle against 3proxy, Squid, gost and Tinyproxy. Every table and every number below is generated from [`data/2026-10-28/benchmarks.json`](../data/2026-10-28/benchmarks.json) and [`campaign.json`](../data/2026-10-28/campaign.json) by `tools/render.py` (`make data`): nothing is typed by hand, see [`data/README.md`](../data/README.md).
 
 ## Environment
 
@@ -17,12 +17,12 @@ Three bare-metal machines (<!--n c hardware.provider-->Scaleway Elastic Metal, P
 <!-- bench:environment:end -->
 
 * Network: <!--n c network.kind-->25 Gbit/s Private Network (VLAN on the NIC)<!--/n-->, MTU <!--n c network.mtu-->1500<!--/n-->, `<!--n c network.measured_with-->iperf3 -P 4<!--/n-->`: **<!--n c network.measured_gbit_s-->23.5<!--/n--> Gbit/s** generator → proxy and proxy → origin. Where rustle gets close to it in the bulk and tunnel tests (~<!--n fmt plain-flood.rustle .0f-->22<!--/n--> Gbit/s), the test network sets the number, not the proxy.
-* Software: <!--n c software.os-->Ubuntu 26.04.1 LTS<!--/n-->, kernel <!--n c software.kernel-->7.0.0-38-generic<!--/n-->, Docker <!--n c software.docker-->29.1.3<!--/n-->, governor `<!--n c software.governor-->performance<!--/n-->`, irqbalance off, identical sysctls on the three hosts (`bench/scripts/remote/bootstrap.sh`). Preflight (all three machines compared, links measured): [`published/2026-10-28/preflight.txt`](published/2026-10-28/preflight.txt).
+* Software: <!--n c software.os-->Ubuntu 26.04.1 LTS<!--/n-->, kernel <!--n c software.kernel-->7.0.0-38-generic<!--/n-->, Docker <!--n c software.docker-->29.1.3<!--/n-->, governor `<!--n c software.governor-->performance<!--/n-->`, irqbalance off, identical sysctls on the three hosts (`bench/scripts/remote/bootstrap.sh`). Preflight (all three machines compared, links measured): [`published/2026-10-28/preflight.txt`](../published/2026-10-28/preflight.txt).
 * Commit: servers on `<!--n c commit-->7d1c143<!--/n-->`; the driving checkout was `0a77316` (only the Mac-side `bench/scripts/preflight.sh` differs).
 * Protocol: auth on, <!--n c proxy_cores-->1<!--/n--> proxy core and <!--n c proxy_cores-->1<!--/n--> worker for every proxy (rustle with `socket_buffer_bytes = 1048576` set in its bench config; its shipped default is kernel autotuning), seed `<!--n c seed-->2004113323<!--/n-->` (shuffled test order, proxy restarted before each test), warmup run apart, median of <!--n c repeats-->3<!--/n--> measured runs of <!--n c run_seconds-->15<!--/n--> s, concurrency sweep per test (best clean level kept, `@conns`). Competitor versions and settings: [`FAIRNESS.md`](FAIRNESS.md).
 * Date: <!--n c date-->2026-10-28<!--/n-->.
 * Units: memory is the peak RSS of the proxy (`VmHWM`) in MiB, written MB below; "ms/GB" is proxy CPU milliseconds per 10^9 bytes moved, GB being the decimal unit of the Gbit/s. `<90 % CPU` marks a point where the proxy used less than 90 % of its core at its best level: something other than the proxy's CPU set the number (the test network, the load generator, or the proxy waiting on latency).
-* Raw data: every run behind the tables is committed in [`published/2026-10-28/`](published/2026-10-28/) (`run.json` of each run, and the preflight); the manifest of the runs is the `sources` of [`campaign.json`](data/2026-10-28/campaign.json).
+* Raw data: every run behind the tables is committed in [`published/2026-10-28/`](../published/2026-10-28/) (`run.json` of each run, and the preflight); the manifest of the runs is the `sources` of [`campaign.json`](../data/2026-10-28/campaign.json).
 
 ## Chapter 1: plain HTTP proxy, 1 core
 

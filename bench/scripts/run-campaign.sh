@@ -8,7 +8,7 @@
 #   AUTH=off PROXIES="rustle squid" bench/scripts/run-campaign.sh
 #
 # REMOTE=1: the same campaign on three machines (run-remote.sh; GEN_HOST, PROXY_HOST,
-# UP_HOST and the *_ADDR variables of bench/REMOTE.md).
+# UP_HOST and the *_ADDR variables of bench/documentation/REMOTE.md).
 # MATRIX=ws: the WebSocket matrix (plain and TLS only), manifest results/campaign-ws-<ts>.json.
 # Manifest of the runs: results/campaign-<ts>.json (MANIFEST=<file> to choose it), the `runs` of
 # campaign.json's `sources`: one entry per run directory, {role, proxy, transport, run}. The role is
