@@ -1,0 +1,355 @@
+{
+  "$schema": "../schema/campaign.schema.json",
+  "schema_version": 1,
+  "id": "2026-10-28",
+  "date": "2026-10-28",
+  "rustle_version": "1.0.0",
+  "commit": "7d1c143",
+  "hardware": {
+    "provider": "Scaleway Elastic Metal, Paris",
+    "generator": {
+      "server": "EM-I320E-NVMe",
+      "cpu": "AMD EPYC 8224P",
+      "cores": 24,
+      "threads": 48,
+      "role": "bench-client, 24 threads"
+    },
+    "proxy": {
+      "server": "EM-I320E-NVMe",
+      "cpu": "AMD EPYC 8224P",
+      "cores": 24,
+      "threads": 48,
+      "role": "proxy under test, one core (CPU 0, its hyperthread sibling offline, NIC interrupts moved to the other cores)"
+    },
+    "origin_sink": {
+      "server": "EM-I220E-NVMe",
+      "cpu": "AMD EPYC 8124P",
+      "cores": 16,
+      "threads": 32,
+      "role": "static origin (8 threads) and discard sink (8 threads)"
+    }
+  },
+  "network": {
+    "kind": "25 Gbit/s Private Network (VLAN on the NIC)",
+    "mtu": 1500,
+    "nominal_gbit_s": 25,
+    "measured_gbit_s": 23.5,
+    "measured_with": "iperf3 -P 4"
+  },
+  "software": {
+    "os": "Ubuntu 26.04.1 LTS",
+    "kernel": "7.0.0-38-generic",
+    "docker": "29.1.3",
+    "governor": "performance"
+  },
+  "seed": 2004113323,
+  "repeats": 3,
+  "run_seconds": 15,
+  "proxy_cores": 1,
+  "auth": true,
+  "noise_pct": {
+    "min": 3,
+    "max": 5
+  },
+  "protocol": "auth on, one proxy core and one worker for every proxy, shuffled test order, proxy restarted before each test, warmup run apart, median of the repeats, concurrency sweep per test (best clean level kept, at_conns)",
+  "fairness": "benchmarks/documentation/FAIRNESS.md",
+  "results": "benchmarks/documentation/RESULTS.md",
+  "sources": {
+    "runs": [
+      {
+        "role": "main",
+        "proxy": "rustle",
+        "transport": "tls",
+        "run": "published/2026-10-28/runs/rustle-tls/remote-auth-on/20261028-163639"
+      },
+      {
+        "role": "main",
+        "proxy": "squid",
+        "transport": "tls",
+        "run": "published/2026-10-28/runs/squid-tls/remote-auth-on/20261028-165612"
+      },
+      {
+        "role": "main",
+        "proxy": "rustle",
+        "transport": "tlsfull",
+        "run": "published/2026-10-28/runs/rustle-tlsfull/remote-auth-on/20261028-171614"
+      },
+      {
+        "role": "main",
+        "proxy": "squid",
+        "transport": "tlsfull",
+        "run": "published/2026-10-28/runs/squid-tlsfull/remote-auth-on/20261028-171931"
+      },
+      {
+        "role": "main",
+        "proxy": "gost",
+        "transport": "tlsfull",
+        "run": "published/2026-10-28/runs/gost-tlsfull/remote-auth-on/20261028-172250"
+      },
+      {
+        "role": "main",
+        "proxy": "rustle",
+        "transport": "h2",
+        "run": "published/2026-10-28/runs/rustle-h2/remote-auth-on/20261028-172607"
+      },
+      {
+        "role": "main",
+        "proxy": "rustle",
+        "transport": "plain",
+        "run": "published/2026-10-28/runs/rustle/remote-auth-on/20261028-143824"
+      },
+      {
+        "role": "main",
+        "proxy": "3proxy",
+        "transport": "plain",
+        "run": "published/2026-10-28/runs/3proxy/remote-auth-on/20261028-145749"
+      },
+      {
+        "role": "main",
+        "proxy": "squid",
+        "transport": "plain",
+        "run": "published/2026-10-28/runs/squid/remote-auth-on/20261028-152258"
+      },
+      {
+        "role": "main",
+        "proxy": "tinyproxy",
+        "transport": "plain",
+        "run": "published/2026-10-28/runs/tinyproxy/remote-auth-on/20261028-154323"
+      },
+      {
+        "role": "main",
+        "proxy": "gost",
+        "transport": "h2",
+        "run": "published/2026-10-28/runs/gost-h2/remote-auth-on/20261028-201431"
+      },
+      {
+        "role": "main",
+        "proxy": "gost",
+        "transport": "plain",
+        "run": "published/2026-10-28/runs/gost/remote-auth-on/20261028-160515"
+      },
+      {
+        "role": "main",
+        "proxy": "gost",
+        "transport": "tls",
+        "run": "published/2026-10-28/runs/gost-tls/remote-auth-on/20261028-175641"
+      },
+      {
+        "role": "ws",
+        "proxy": "rustle",
+        "transport": "plain",
+        "run": "published/2026-10-28/runs/rustle-ws/remote-auth-on/20261028-203456"
+      },
+      {
+        "role": "ws",
+        "proxy": "3proxy",
+        "transport": "plain",
+        "run": "published/2026-10-28/runs/3proxy-ws/remote-auth-on/20261028-204200"
+      },
+      {
+        "role": "ws",
+        "proxy": "gost",
+        "transport": "plain",
+        "run": "published/2026-10-28/runs/gost-ws/remote-auth-on/20261028-205614"
+      },
+      {
+        "role": "ws",
+        "proxy": "tinyproxy",
+        "transport": "plain",
+        "run": "published/2026-10-28/runs/tinyproxy-ws/remote-auth-on/20261028-210320"
+      },
+      {
+        "role": "ws",
+        "proxy": "rustle",
+        "transport": "tls",
+        "run": "published/2026-10-28/runs/rustle-tls-ws/remote-auth-on/20261028-211027"
+      },
+      {
+        "role": "ws",
+        "proxy": "gost",
+        "transport": "tls",
+        "run": "published/2026-10-28/runs/gost-tls-ws/remote-auth-on/20261028-212442"
+      },
+      {
+        "role": "ws",
+        "proxy": "squid",
+        "transport": "plain",
+        "run": "published/2026-10-28/runs/squid-ws/remote-auth-on/20261028-213225"
+      },
+      {
+        "role": "ws",
+        "proxy": "squid",
+        "transport": "tls",
+        "run": "published/2026-10-28/runs/squid-tls-ws/remote-auth-on/20261028-213932"
+      },
+      {
+        "role": "ktls",
+        "proxy": "rustle",
+        "transport": "tls",
+        "run": "published/2026-10-28/runs/rustle-tls/remote-auth-on/20261028-215112"
+      },
+      {
+        "role": "scaling",
+        "proxy": "rustle",
+        "transport": "plain",
+        "cores": 1,
+        "run": "published/2026-10-28/runs/rustle/remote-auth-on/20261028-221208"
+      },
+      {
+        "role": "scaling",
+        "proxy": "3proxy",
+        "transport": "plain",
+        "cores": 1,
+        "run": "published/2026-10-28/runs/3proxy/remote-auth-on/20261028-221630"
+      },
+      {
+        "role": "scaling",
+        "proxy": "squid",
+        "transport": "plain",
+        "cores": 1,
+        "run": "published/2026-10-28/runs/squid/remote-auth-on/20261028-222054"
+      },
+      {
+        "role": "scaling",
+        "proxy": "gost",
+        "transport": "plain",
+        "cores": 1,
+        "run": "published/2026-10-28/runs/gost/remote-auth-on/20261028-222518"
+      },
+      {
+        "role": "scaling",
+        "proxy": "rustle",
+        "transport": "plain",
+        "cores": 2,
+        "run": "published/2026-10-28/runs/rustle/remote-auth-on/20261028-222959"
+      },
+      {
+        "role": "scaling",
+        "proxy": "3proxy",
+        "transport": "plain",
+        "cores": 2,
+        "run": "published/2026-10-28/runs/3proxy/remote-auth-on/20261028-223420"
+      },
+      {
+        "role": "scaling",
+        "proxy": "squid",
+        "transport": "plain",
+        "cores": 2,
+        "run": "published/2026-10-28/runs/squid/remote-auth-on/20261028-223842"
+      },
+      {
+        "role": "scaling",
+        "proxy": "gost",
+        "transport": "plain",
+        "cores": 2,
+        "run": "published/2026-10-28/runs/gost/remote-auth-on/20261028-224304"
+      },
+      {
+        "role": "scaling",
+        "proxy": "rustle",
+        "transport": "plain",
+        "cores": 4,
+        "run": "published/2026-10-28/runs/rustle/remote-auth-on/20261028-224743"
+      },
+      {
+        "role": "scaling",
+        "proxy": "3proxy",
+        "transport": "plain",
+        "cores": 4,
+        "run": "published/2026-10-28/runs/3proxy/remote-auth-on/20261028-225205"
+      },
+      {
+        "role": "scaling",
+        "proxy": "squid",
+        "transport": "plain",
+        "cores": 4,
+        "run": "published/2026-10-28/runs/squid/remote-auth-on/20261028-225626"
+      },
+      {
+        "role": "scaling",
+        "proxy": "gost",
+        "transport": "plain",
+        "cores": 4,
+        "run": "published/2026-10-28/runs/gost/remote-auth-on/20261028-230048"
+      },
+      {
+        "role": "scaling",
+        "proxy": "rustle",
+        "transport": "plain",
+        "cores": 8,
+        "run": "published/2026-10-28/runs/rustle/remote-auth-on/20261028-230524"
+      },
+      {
+        "role": "scaling",
+        "proxy": "3proxy",
+        "transport": "plain",
+        "cores": 8,
+        "run": "published/2026-10-28/runs/3proxy/remote-auth-on/20261028-230944"
+      },
+      {
+        "role": "scaling",
+        "proxy": "squid",
+        "transport": "plain",
+        "cores": 8,
+        "run": "published/2026-10-28/runs/squid/remote-auth-on/20261028-231405"
+      },
+      {
+        "role": "scaling",
+        "proxy": "gost",
+        "transport": "plain",
+        "cores": 8,
+        "run": "published/2026-10-28/runs/gost/remote-auth-on/20261028-231925"
+      }
+    ]
+  },
+  "unsupported": {
+    "ws": [
+      "tinyproxy"
+    ]
+  },
+  "limits": [
+    {
+      "id": "workload",
+      "text": "The origin is static with Content-Length. Chunked bodies, uploads, SOCKS5, IPv6, many origins and large header sets are not part of the matrix; they are covered functionally by the end-to-end suite."
+    },
+    {
+      "id": "one-campaign",
+      "text": "One campaign, one seed, three repeats, medians, noise about ±3 to 5 %, no confidence intervals. Differences below the noise are not conclusions."
+    },
+    {
+      "id": "closed-loop",
+      "text": "Latency is closed-loop at each concurrency level (no open-loop rate); CPU per request is measured with the proxy fully loaded, not at the same request rate for every proxy."
+    },
+    {
+      "id": "link-bound",
+      "text": "The test network can carry about 23.5 Gbit/s (25 nominal). Where rustle gets close to it (1 MB and 10 MB responses, plain tunnels), the network sets the number, not rustle: rustle's real figure, and its real lead, are higher than the one shown."
+    },
+    {
+      "id": "tls-no-splice",
+      "text": "There is no splice on a TLS port (the proxy decrypts in user space), so TLS and HTTP/2 throughput is lower than plain HTTP."
+    },
+    {
+      "id": "h2-sequential",
+      "text": "The HTTP/2 test opens one connection per client connection and sends sequential requests (no multiplexing)."
+    },
+    {
+      "id": "multi-core",
+      "text": "Multi-core was measured for plain HTTP at 1 KB only; TLS, HTTP/2 and tunnels were not measured on several cores."
+    },
+    {
+      "id": "cpu-attribution",
+      "text": "Proxy CPU is the container cgroup's (user + system); softirq time spent on other cores is not attributed."
+    },
+    {
+      "id": "flood-upload",
+      "text": "The tunnel test counts bytes written by the client and measures the upload direction only."
+    }
+  ],
+  "test_notes": {
+    "plain-1mb": "rustle uses 95 % of its core and gets about 22 of the 23.5 Gbit/s the test network can carry: the network starts to limit it here, so its real lead is somewhat higher than shown.",
+    "plain-10mb": "rustle uses 83 % of its core and gets about 22 of the 23.5 Gbit/s the test network can carry: the network is the limit here, so rustle can go faster.",
+    "plain-flood": "rustle uses 70 % of its core and gets about 22 of the 23.5 Gbit/s the test network can carry: the network is the limit here, so rustle can go faster.",
+    "tls-short-full": "Session resumption is off: every connection is a full handshake with the certificate signature.",
+    "ws-short": "Tinyproxy removes the Upgrade header (answered 426): it does not support WebSocket and is listed as unsupported, not as zero."
+  }
+}

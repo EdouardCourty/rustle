@@ -1,0 +1,455 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/EdouardCourty/rustle/main/benchmarks/data/schema/run.schema.json",
+  "title": "rustle benchmark run",
+  "description": "One run of the matrix against one proxy on one transport: the results of every test and sweep level, in the order they were measured. Written by benchmarks/tools/record.py.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "proxy",
+    "transport",
+    "matrix",
+    "host",
+    "auth",
+    "started",
+    "seed",
+    "repeat",
+    "workers",
+    "params",
+    "results"
+  ],
+  "properties": {
+    "$schema": {
+      "title": "Schema pointer",
+      "description": "Relative path to this schema, for editors.",
+      "type": "string"
+    },
+    "schema_version": {
+      "title": "Schema version",
+      "description": "Version of this contract.",
+      "const": 1
+    },
+    "proxy": {
+      "title": "Proxy",
+      "description": "Proxy under test.",
+      "enum": [
+        "rustle",
+        "3proxy",
+        "squid",
+        "gost",
+        "tinyproxy"
+      ]
+    },
+    "transport": {
+      "title": "Transport",
+      "description": "How the generator reached the proxy: plain port, HTTPS proxy with session resumption, HTTPS proxy with a full handshake every time, HTTP/2 over TLS.",
+      "enum": [
+        "plain",
+        "tls",
+        "tlsfull",
+        "h2"
+      ]
+    },
+    "matrix": {
+      "title": "Matrix",
+      "description": "http: HTTP and CONNECT workloads; ws: WebSocket workloads.",
+      "enum": [
+        "http",
+        "ws"
+      ]
+    },
+    "host": {
+      "title": "Host",
+      "description": "docker: everything on one host; remote: three machines over SSH.",
+      "enum": [
+        "docker",
+        "remote"
+      ]
+    },
+    "auth": {
+      "title": "Authentication",
+      "description": "Whether authentication was on.",
+      "type": "boolean"
+    },
+    "started": {
+      "title": "Started",
+      "description": "When the run started (local time).",
+      "type": "string"
+    },
+    "seed": {
+      "title": "Seed",
+      "description": "Seed of the shuffled test order.",
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "repeat": {
+      "title": "Repeat",
+      "description": "Measured runs per point; the median is kept.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "workers": {
+      "title": "Workers",
+      "description": "Shards or workers given to the proxy.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "params": {
+      "title": "Parameters",
+      "description": "The rest of the run's setup (cpuset, generator, origin and sink threads, hosts, kTLS, ...). Open by design.",
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "boolean"
+          }
+        ]
+      }
+    },
+    "results": {
+      "title": "Results",
+      "description": "The measured points.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/result",
+        "title": "Result",
+        "description": "One measured point."
+      }
+    }
+  },
+  "$defs": {
+    "result": {
+      "title": "Result",
+      "description": "One measured point: a workload at one connection level.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "test",
+        "mode",
+        "workload",
+        "measured",
+        "generator",
+        "proxy",
+        "saturation",
+        "valid",
+        "problems"
+      ],
+      "properties": {
+        "test": {
+          "title": "Test",
+          "description": "Stable name of the workload, not of the sweep level (http-1kb, http-1kb-short, flood, hold-25000, ws-64b, ...).",
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "mode": {
+          "title": "Mode",
+          "description": "Load generator mode.",
+          "enum": [
+            "http",
+            "ws",
+            "flood",
+            "hold"
+          ]
+        },
+        "workload": {
+          "title": "Workload",
+          "description": "What the generator was asked to do (url or target, connections, budget, keepalive, size, window, ...). Open by design: the fields depend on the mode.",
+          "type": "object",
+          "required": [
+            "conns"
+          ],
+          "properties": {
+            "conns": {
+              "title": "Connections",
+              "description": "Concurrent connections (tunnels for hold).",
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          }
+        },
+        "err_kinds": {
+          "title": "Client errors",
+          "description": "Kinds of client-side errors with their counts (empty when there was none); http and ws only.",
+          "type": "string"
+        },
+        "measured": {
+          "title": "Measured",
+          "description": "The generator's medians over the measured runs (rps, mbps, gbps, mb, p50_ms, p95_ms, p99_ms, errors, opened, ...). Open by design: the fields depend on the mode; null is a value the run could not compute.",
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "generator": {
+          "title": "Generator",
+          "description": "The load generator's own cost.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cpu_s_per_run",
+            "own_rss_mb",
+            "own_rss_end_mb",
+            "tls"
+          ],
+          "properties": {
+            "cpu_s_per_run": {
+              "title": "CPU",
+              "description": "CPU seconds of the generator per measured run.",
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "own_rss_mb": {
+              "title": "RSS at start",
+              "description": "Resident memory of the generator before the runs, MiB.",
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "own_rss_end_mb": {
+              "title": "RSS at end",
+              "description": "Resident memory of the generator after the runs, MiB.",
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tls": {
+              "title": "TLS",
+              "description": "Version and suite negotiated with the proxy and share of resumed handshakes, when the run used TLS.",
+              "anyOf": [
+                {
+                  "title": "TLS footing",
+                  "description": "TLS towards the proxy.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "negotiated",
+                    "resumed"
+                  ],
+                  "properties": {
+                    "negotiated": {
+                      "title": "Negotiated",
+                      "description": "Version and cipher suite.",
+                      "type": "string"
+                    },
+                    "resumed": {
+                      "title": "Resumed",
+                      "description": "Share of resumed handshakes, 0 to 1.",
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "proxy": {
+          "title": "Proxy",
+          "description": "What the proxy under test used.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cpu_s_per_run",
+            "rss_mb",
+            "peak_rss_mb",
+            "tcp"
+          ],
+          "properties": {
+            "cpu_s_per_run": {
+              "title": "CPU",
+              "description": "CPU seconds of the proxy's whole container per measured run.",
+              "type": "number",
+              "minimum": 0
+            },
+            "rss_mb": {
+              "title": "RSS",
+              "description": "Resident memory after the load ended (memory still held), MiB.",
+              "type": "number",
+              "minimum": 0
+            },
+            "peak_rss_mb": {
+              "title": "Peak RSS",
+              "description": "Peak resident memory of the test (VmHWM; the proxy restarts before each test), MiB.",
+              "type": "number",
+              "minimum": 0
+            },
+            "tcp": {
+              "title": "TCP",
+              "description": "Network counters of the proxy's namespace, null for a hold split across replicas.",
+              "anyOf": [
+                {
+                  "title": "TCP counters",
+                  "description": "Counters of the proxy's network namespace over the measured runs: segments sent, connections opened upstream (pool churn), retransmits, delayed ACKs per run; accept-queue overflows and drops as totals (any above zero explains SYN retransmits).",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "segs_out_per_run",
+                    "active_opens_per_run",
+                    "retrans_per_run",
+                    "delayed_acks_per_run",
+                    "listen_overflows",
+                    "listen_drops"
+                  ],
+                  "properties": {
+                    "segs_out_per_run": {
+                      "title": "segs_out_per_run",
+                      "description": "Counter.",
+                      "type": "integer"
+                    },
+                    "active_opens_per_run": {
+                      "title": "active_opens_per_run",
+                      "description": "Counter.",
+                      "type": "integer"
+                    },
+                    "retrans_per_run": {
+                      "title": "retrans_per_run",
+                      "description": "Counter.",
+                      "type": "integer"
+                    },
+                    "delayed_acks_per_run": {
+                      "title": "delayed_acks_per_run",
+                      "description": "Counter.",
+                      "type": "integer"
+                    },
+                    "listen_overflows": {
+                      "title": "listen_overflows",
+                      "description": "Counter.",
+                      "type": "integer"
+                    },
+                    "listen_drops": {
+                      "title": "listen_drops",
+                      "description": "Counter.",
+                      "type": "integer"
+                    }
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "saturation": {
+          "title": "Saturation",
+          "description": "Did the run reach the proxy's limit? Null when it cannot be told (a hold split across replicas).",
+          "anyOf": [
+            {
+              "title": "Saturation",
+              "description": "Utilisation of the proxy, the origin and the sink.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "proxy_util",
+                "origin_util",
+                "sink_util",
+                "flags"
+              ],
+              "properties": {
+                "proxy_util": {
+                  "title": "Proxy utilisation",
+                  "description": "Proxy CPU over the cores it was given.",
+                  "type": "number",
+                  "minimum": 0
+                },
+                "origin_util": {
+                  "title": "Origin utilisation",
+                  "description": "Origin CPU over its threads.",
+                  "type": "number",
+                  "minimum": 0
+                },
+                "sink_util": {
+                  "title": "Sink utilisation",
+                  "description": "Sink CPU over its threads.",
+                  "type": "number",
+                  "minimum": 0
+                },
+                "flags": {
+                  "title": "Flags",
+                  "description": "proxy_unsaturated: below 90 % of its cores (the harness, the link or a latency-bound proxy set the number; not raised for hold). origin_saturated, sink_saturated: above 90 % of their threads. generator_saturated: above 70 % of its threads.",
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "proxy_unsaturated",
+                      "origin_saturated",
+                      "sink_saturated",
+                      "generator_saturated"
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "valid": {
+          "title": "Valid",
+          "description": "False when the point is not publishable: a client-side error, or fewer tunnels than asked.",
+          "type": "boolean"
+        },
+        "problems": {
+          "title": "Problems",
+          "description": "Why the point is invalid.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

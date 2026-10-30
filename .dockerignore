@@ -1,5 +1,5 @@
 target
 .git
 results
-bench/results
+benchmarks/results
 **/target

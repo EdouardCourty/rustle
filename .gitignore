@@ -1,5 +1,4 @@
 /target
-bench/client/target
-bench/results/
+benchmarks/results/
 results/
 __pycache__/

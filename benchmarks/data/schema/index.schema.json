@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/EdouardCourty/rustle/main/benchmarks/data/schema/index.schema.json",
+  "title": "rustle benchmark campaigns",
+  "description": "Every published campaign, newest last. Each campaign is self-contained; numbers are not comparable across campaigns (the protocol, the versions and the hardware change). Hand-edited, checked against the campaign folders.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "latest",
+    "campaigns"
+  ],
+  "properties": {
+    "$schema": {
+      "title": "Schema pointer",
+      "description": "Relative path to this schema, for editors.",
+      "const": "./schema/index.schema.json"
+    },
+    "schema_version": {
+      "title": "Schema version",
+      "description": "Version of this contract. A breaking change bumps it; readers must refuse a version they do not know.",
+      "const": 1
+    },
+    "latest": {
+      "title": "Latest",
+      "description": "Id of the campaign the website shows.",
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}(-[a-z0-9]+)*$"
+    },
+    "campaigns": {
+      "title": "Campaigns",
+      "description": "All published campaigns.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/entry",
+        "title": "Campaign",
+        "description": "One published campaign."
+      }
+    }
+  },
+  "$defs": {
+    "proxyId": {
+      "title": "Proxy id",
+      "description": "Identifier of a compared proxy. A new proxy is added here: an additive change.",
+      "enum": [
+        "rustle",
+        "3proxy",
+        "squid",
+        "gost",
+        "tinyproxy"
+      ]
+    },
+    "entry": {
+      "title": "Campaign entry",
+      "description": "One published campaign.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "date",
+        "rustle_version",
+        "proxies",
+        "path"
+      ],
+      "properties": {
+        "id": {
+          "title": "Campaign id",
+          "description": "Id of the campaign: its folder name under benchmarks/data/ and benchmarks/published/.",
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}(-[a-z0-9]+)*$"
+        },
+        "date": {
+          "title": "Date",
+          "description": "Day of the campaign (YYYY-MM-DD).",
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "rustle_version": {
+          "title": "rustle version",
+          "description": "Version of rustle that was benchmarked.",
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+"
+        },
+        "proxies": {
+          "title": "Proxies",
+          "description": "The proxies compared in that campaign, in column order.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/proxyId",
+            "title": "Proxy",
+            "description": "A proxy id."
+          }
+        },
+        "path": {
+          "title": "Path",
+          "description": "Folder of the campaign, relative to this file, with a trailing slash.",
+          "type": "string",
+          "pattern": "^[^/]+/$"
+        }
+      }
+    }
+  }
+}
