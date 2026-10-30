@@ -5,7 +5,6 @@ use super::*;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 mod accesslog;
-mod config_reference;
 mod http2;
 mod policy;
 mod reload;

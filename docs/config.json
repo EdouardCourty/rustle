@@ -1,7 +1,6 @@
 {
   "$schema": "./config.schema.json",
   "schema_version": 1,
-  "version": "1.0.0",
   "tables": [
     {
       "name": "server",
@@ -272,7 +271,7 @@
           "path": "tls.ktls",
           "type": "boolean",
           "default": false,
-          "description": "Kernel TLS (Linux, `tls` module), opt-in. Software kernel TLS saves 5 % to 20 % of memory but is slower than rustls on every throughput test, from -12 % to -43 % (campaign of 2026-10-28, 1 core, no NIC TLS offload; see `bench/RESULTS.md`).",
+          "description": "Kernel TLS (Linux, `tls` module), opt-in. Software kernel TLS saves memory but is slower than rustls on throughput, tunnels included; see `bench/RESULTS.md`.",
           "reload": "restart"
         }
       ]
@@ -329,7 +328,11 @@
           "key": "access",
           "path": "log.access",
           "type": "enum",
-          "values": ["off", "errors", "all"],
+          "values": [
+            "off",
+            "errors",
+            "all"
+          ],
           "default": "errors",
           "description": "`off`, `errors` (refusals and failures) or `all` (one line per request and tunnel).",
           "reload": "restart"
@@ -338,7 +341,10 @@
           "key": "output",
           "path": "log.output",
           "type": "enum",
-          "values": ["file", "stdout"],
+          "values": [
+            "file",
+            "stdout"
+          ],
           "default": "file",
           "description": "`file` or `stdout`.",
           "reload": "restart"
@@ -355,7 +361,10 @@
           "key": "target",
           "path": "log.target",
           "type": "enum",
-          "values": ["host", "url"],
+          "values": [
+            "host",
+            "url"
+          ],
           "default": "host",
           "description": "Log `host:port` or the full URL (`url`) of `http://` requests.",
           "reload": "restart"

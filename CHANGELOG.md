@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Docs: `tls.ktls` is documented with the measured figures. Software kernel TLS saves 5 % to 20 % of memory but is slower than rustls on every throughput test (−12 % to −43 % in the 2026-10-28 campaign); the example config said the opposite for tunnels. The README no longer lists 1 MB socket buffers as a default (the default is kernel autotuning).
+- Docs: `tls.ktls` is documented as saving memory but being slower than rustls on throughput, tunnels included (the example config said the opposite for tunnels). The README no longer lists 1 MB socket buffers as a default (the default is kernel autotuning).
 - Docs: the README no longer says a renewed TLS certificate needs a restart; `rustle reload` picks it up (as the reload section and the code already did).
 - Reload: a changed `server.control_socket` is now reported as needing a restart (it was silently ignored: the socket is bound at startup).
 - Installer: the error shown for a glibc that is too old no longer lists RHEL 9 (glibc 2.34, below the 2.35 requirement), and its source-build link points to the right README section.

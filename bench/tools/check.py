@@ -12,7 +12,7 @@ compared with the committed files, and the files are consistent with each other.
   campaign's proxies, `$schema` pointers are exact, project URLs are https;
 * for the latest campaign: proxies.json against FAIRNESS.md (versions) and dut/*/Dockerfile (TLS and
   HTTP/2 support), each chart file exists;
-* the kTLS figures quoted by the config documentation are the ones of benchmarks.json."""
+* the kTLS saving and cost quoted by the README and AGENTS.md are the ones of benchmarks.json."""
 import json, os, sys
 from urllib.parse import urlsplit
 
@@ -108,8 +108,7 @@ def check_campaign(problems, entry, latest):
             problems.append(f"{cid}/benchmarks.json is stale: run `python3 bench/tools/aggregate.py --write --campaign {cid}`")
 
 
-KTLS_FILES = ("README.md", "AGENTS.md", "rustle/config.toml.example", "rustle/src/config/mod.rs",
-              "rustle/src/config/reference.rs", "docs/config.json")
+KTLS_FILES = ("README.md", "AGENTS.md")
 
 
 def check_ktls_wording(problems, bench):

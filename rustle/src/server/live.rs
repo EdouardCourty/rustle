@@ -66,7 +66,7 @@ impl Live {
 
 /// Settings only a restart can apply (listeners, threads, pools, the log
 /// writer). `reload` keeps the running value and reports them.
-pub(super) fn restart_required(old: &Config, new: &Config) -> Vec<&'static str> {
+fn restart_required(old: &Config, new: &Config) -> Vec<&'static str> {
     let mut v = Vec::new();
     macro_rules! keys {
         ($($a:ident.$b:ident),* $(,)?) => {$(
@@ -96,7 +96,7 @@ pub(super) fn restart_required(old: &Config, new: &Config) -> Vec<&'static str> 
 }
 
 /// `new` with the restart-only settings of `old`: what actually runs.
-pub(super) fn effective(old: &Config, mut new: Config) -> Config {
+fn effective(old: &Config, mut new: Config) -> Config {
     new.server = old.server.clone();
     new.socks5 = old.socks5.clone();
     new.log = old.log.clone();

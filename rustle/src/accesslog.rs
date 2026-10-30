@@ -33,7 +33,6 @@ use anyhow::Context;
 use serde::Deserialize;
 
 /// Which events are written.
-#[cfg_attr(test, derive(serde::Serialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Level {
@@ -44,7 +43,6 @@ pub enum Level {
 }
 
 /// Where lines go.
-#[cfg_attr(test, derive(serde::Serialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Output {
@@ -56,7 +54,6 @@ pub enum Output {
 }
 
 /// How a plain-HTTP request target is written.
-#[cfg_attr(test, derive(serde::Serialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum TargetMode {

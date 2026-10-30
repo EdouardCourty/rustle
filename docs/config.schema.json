@@ -2,10 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/EdouardCourty/rustle/main/docs/config.schema.json",
   "title": "rustle configuration reference",
-  "description": "Reference of every key of rustle's config.toml: type, default, description and whether `rustle reload` applies it. Generated from the config structs by `cargo test -p rustle config_reference`; read by the rustle website at the release tag.",
+  "description": "Reference of every key of rustle's config.toml: type, default, description and whether `rustle reload` applies it. Hand-maintained next to the code; read by the rustle website.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "version", "tables"],
+  "required": [
+    "schema_version",
+    "tables"
+  ],
   "properties": {
     "$schema": {
       "title": "Schema pointer",
@@ -17,45 +20,67 @@
       "description": "Version of this contract. A breaking change bumps it; readers must refuse a version they do not know.",
       "const": 1
     },
-    "version": {
-      "title": "rustle version",
-      "description": "The rustle version this reference describes.",
-      "type": "string",
-      "pattern": "^\\d+\\.\\d+\\.\\d+"
-    },
     "tables": {
       "title": "Tables",
       "description": "The [tables] of config.toml, in reading order.",
       "type": "array",
       "minItems": 1,
-      "items": { "$ref": "#/$defs/table", "title": "Table", "description": "One table of config.toml." }
+      "items": {
+        "$ref": "#/$defs/table",
+        "title": "Table",
+        "description": "One table of config.toml."
+      }
     }
   },
   "$defs": {
     "scalar": {
       "title": "Scalar",
       "description": "A TOML scalar written as JSON.",
-      "anyOf": [{ "type": "string" }, { "type": "integer" }, { "type": "boolean" }]
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "boolean"
+        }
+      ]
     },
     "table": {
       "title": "Table",
       "description": "One table of config.toml.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "description", "keys"],
+      "required": [
+        "name",
+        "description",
+        "keys"
+      ],
       "properties": {
         "name": {
           "title": "Name",
           "description": "Table name, as written between brackets in config.toml.",
-          "enum": ["server", "auth", "limits", "timeouts", "http", "dns", "tls", "filter", "socks5", "log"]
+          "type": "string",
+          "minLength": 1
         },
-        "description": { "title": "Description", "description": "What the table configures.", "type": "string", "minLength": 1 },
+        "description": {
+          "title": "Description",
+          "description": "What the table configures.",
+          "type": "string",
+          "minLength": 1
+        },
         "keys": {
           "title": "Keys",
           "description": "The keys of the table, in reading order.",
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/key", "title": "Key", "description": "One key of the table." }
+          "items": {
+            "$ref": "#/$defs/key",
+            "title": "Key",
+            "description": "One key of the table."
+          }
         }
       }
     },
@@ -64,39 +89,78 @@
       "description": "One key of config.toml.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["key", "path", "type", "default", "description", "reload"],
+      "required": [
+        "key",
+        "path",
+        "type",
+        "default",
+        "description",
+        "reload"
+      ],
       "properties": {
-        "key": { "title": "Key", "description": "Key name inside its table.", "type": "string", "minLength": 1 },
+        "key": {
+          "title": "Key",
+          "description": "Key name inside its table.",
+          "type": "string",
+          "minLength": 1
+        },
         "path": {
           "title": "Path",
           "description": "table.key.",
-          "enum": ["server.listen", "server.workers", "server.pin_cores", "server.admin_listen", "server.control_socket", "server.socket_buffer_bytes", "auth.api_keys", "auth.allow_clients", "auth.max_failures", "auth.failure_window", "auth.ban_duration", "limits.max_connections", "limits.max_header_bytes", "timeouts.connect", "timeouts.idle", "timeouts.request_head", "http.upstream_keepalive", "http.max_idle_per_origin", "http.max_request_body_bytes", "http.max_response_body_bytes", "http.allow_websocket", "dns.ttl", "dns.max_entries", "tls.listen", "tls.cert", "tls.key", "tls.handshake_timeout", "tls.http2", "tls.ktls", "filter.block_private", "filter.deny", "filter.allowed_ports", "socks5.listen", "log.access", "log.output", "log.file", "log.target"]
+          "type": "string",
+          "pattern": "^[a-z0-9_]+\\.[a-z0-9_]+$"
         },
         "type": {
           "title": "Type",
           "description": "TOML type. duration is a string such as \"5s\" or \"1m\"; enum is a string among values.",
-          "enum": ["string", "integer", "boolean", "duration", "string list", "integer list", "enum"]
+          "enum": [
+            "string",
+            "integer",
+            "boolean",
+            "duration",
+            "string list",
+            "integer list",
+            "enum"
+          ]
         },
         "values": {
           "title": "Values",
           "description": "The accepted strings, for an enum.",
           "type": "array",
           "minItems": 2,
-          "items": { "type": "string", "minLength": 1 }
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "default": {
           "title": "Default",
           "description": "Default value (durations as strings such as \"1m\"; lists as arrays).",
           "anyOf": [
-            { "$ref": "#/$defs/scalar" },
-            { "type": "array", "items": { "$ref": "#/$defs/scalar" } }
+            {
+              "$ref": "#/$defs/scalar"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/scalar"
+              }
+            }
           ]
         },
-        "description": { "title": "Description", "description": "What the key does; plain text with `code` spans.", "type": "string", "minLength": 1 },
+        "description": {
+          "title": "Description",
+          "description": "What the key does; plain text with `code` spans.",
+          "type": "string",
+          "minLength": 1
+        },
         "reload": {
           "title": "Reload",
           "description": "live: `rustle reload` applies it to new connections. restart: only a restart applies it (a reload keeps the running value and reports it).",
-          "enum": ["live", "restart"]
+          "enum": [
+            "live",
+            "restart"
+          ]
         }
       }
     }

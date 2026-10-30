@@ -92,11 +92,9 @@ handshake_timeout = "10s"
 http2 = true
 # Kernel TLS (Linux, opt-in, off by default). After the rustls handshake, the
 # session keys go to the kernel (module `tls`, probed at startup; userspace TLS
-# otherwise). Software kernel TLS saves memory (5 % to 20 % less RAM with 1,000
-# to 25,000 TLS tunnels) but is slower than rustls on every throughput test:
-# -12 % to -37 % requests per second from 1 KB to 10 MB responses and -43 % on
-# CONNECT tunnels (campaign of 2026-10-28, 1 core, no NIC TLS offload, see
-# bench/RESULTS.md). Leave it off unless memory matters more than throughput.
+# otherwise). Software kernel TLS saves memory but is slower than rustls on
+# throughput, tunnels included (see bench/RESULTS.md). Leave it off unless
+# memory matters more than throughput.
 ktls = false
 
 [filter]

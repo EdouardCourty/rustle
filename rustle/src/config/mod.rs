@@ -3,9 +3,6 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-#[cfg(test)]
-pub(crate) mod reference;
-
 fn de_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -14,7 +11,6 @@ where
     humantime::parse_duration(&s).map_err(serde::de::Error::custom)
 }
 
-#[cfg_attr(test, derive(serde::Serialize))]
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
@@ -31,7 +27,6 @@ pub struct Config {
 }
 
 /// Access log (see `accesslog`).
-#[cfg_attr(test, derive(serde::Serialize))]
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct LogConfig {
@@ -46,7 +41,6 @@ pub struct LogConfig {
 }
 
 /// Destination policy (see `policy`).
-#[cfg_attr(test, derive(serde::Serialize))]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct FilterConfig {
@@ -73,7 +67,6 @@ impl Default for FilterConfig {
 
 /// SOCKS5 listener (TCP CONNECT and UDP ASSOCIATE; the API key is the
 /// password).
-#[cfg_attr(test, derive(serde::Serialize))]
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct Socks5Config {
@@ -83,7 +76,6 @@ pub struct Socks5Config {
 
 /// HTTPS proxy listener (TLS between client and proxy), next to the plain
 /// one. Disabled while `listen` is empty.
-#[cfg_attr(test, derive(serde::Serialize))]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct TlsConfig {
@@ -97,10 +89,8 @@ pub struct TlsConfig {
     /// Offer HTTP/2 through ALPN (clients that do not ask keep HTTP/1.1).
     pub http2: bool,
     /// Kernel TLS after the handshake (when the kernel supports it, probed
-    /// at startup). Off by default: software kernel TLS saves 5 % to 20 % of
-    /// memory but is slower than rustls on every throughput test, -12 % to
-    /// -43 % (bench/RESULTS.md, kTLS chapter: campaign of 2026-10-28, 1 core,
-    /// no NIC TLS offload).
+    /// at startup). Off by default: it saves memory, but is slower than
+    /// rustls on throughput without NIC TLS offload; see bench/RESULTS.md.
     pub ktls: bool,
 }
 
@@ -117,7 +107,6 @@ impl Default for TlsConfig {
     }
 }
 
-#[cfg_attr(test, derive(serde::Serialize))]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DnsConfig {
@@ -137,7 +126,6 @@ impl Default for DnsConfig {
     }
 }
 
-#[cfg_attr(test, derive(serde::Serialize))]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ServerConfig {
@@ -194,7 +182,6 @@ impl Default for ServerConfig {
     }
 }
 
-#[cfg_attr(test, derive(serde::Serialize))]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AuthConfig {
@@ -223,7 +210,6 @@ impl Default for AuthConfig {
     }
 }
 
-#[cfg_attr(test, derive(serde::Serialize))]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LimitsConfig {
@@ -240,7 +226,6 @@ impl Default for LimitsConfig {
     }
 }
 
-#[cfg_attr(test, derive(serde::Serialize))]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct TimeoutsConfig {
@@ -264,7 +249,6 @@ impl Default for TimeoutsConfig {
     }
 }
 
-#[cfg_attr(test, derive(serde::Serialize))]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct HttpConfig {
