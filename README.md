@@ -235,6 +235,10 @@ HTTPS proxy and HTTP/2.
 | `block_private` | `true` | Refuse loopback, private, link-local, CGNAT, multicast and ULA destinations (403). Set `false` to reach your LAN |
 | `deny` | `[]` | Extra refused networks (CIDR) |
 | `allowed_ports` | `[]` | Allowed destination ports, e.g. `[80, 443]`; empty = all |
+| `allowed_hosts` | `[]` | Allowed exact hostnames or wildcard subdomains; empty = all |
+| `denied_hosts` | `[]` | Refused hostnames; overrides `allowed_hosts` |
+
+Hostname filtering: `filter.allowed_hosts` and `filter.denied_hosts` accept exact ASCII DNS names or `*.example.com` (subdomains only). Matching ignores case and a trailing dot; deny wins. Empty lists impose no hostname restriction. Literal IP destinations remain governed by IP and port rules, so a hostname allowlist is not an exclusive destination boundary. Settings reload for new connections.
 
 ### `[socks5]`
 
@@ -283,7 +287,6 @@ Limitations
 *   `Upgrade` is supported for WebSocket only (not `h2c` or other protocols), over HTTP/1.1 clients; WebSocket over HTTP/2 (RFC 8441) is not. `wss://` and browsers' `ws://` go through `CONNECT`.
 *   Authentication is by API key: several keys can be configured, but there are no per-user accounts, per-user quotas or policies, and no LDAP/OIDC.
 *   Pipelined client requests are answered one at a time, then the connection closes.
-*   `Expect: 100-continue` is not fully supported.
 *   No HTTP/3 to the proxy itself (QUIC traffic works through SOCKS5 UDP).
 *   Towards origins, plain HTTP/1.1 only.
 

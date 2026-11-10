@@ -104,8 +104,81 @@ fn refusal(t: &str, http: u16, socks: Outcome) -> Access {
 }
 
 pub fn scenarios() -> Vec<Scenario> {
-    let mut v = Vec::new();
+    let mut v = vec![scenario(
+        "security/policy/hostname-tunnels-and-upgrade",
+        |env| async move {
+            let p = Proxy::start(Config::new().set("filter", "denied_hosts", "[\"localhost\"]"))
+                .await?;
+            let target = format!("localhost:{}", env.origin.v4.port());
+            for method in ["CONNECT", "GET"] {
+                let mut c = Client::plain(p.addr).await?;
+                let uri = if method == "CONNECT" {
+                    target.clone()
+                } else {
+                    format!("http://{target}/ws")
+                };
+                let extra = if method == "GET" {
+                    "Connection: Upgrade\r\nUpgrade: websocket\r\n"
+                } else {
+                    ""
+                };
+                c.roundtrip(
+                    &request(method, &uri, Some(&default_auth()), extra, b""),
+                    false,
+                )
+                .await?
+                .expect(403)?;
+            }
+            let mut h2 = h2c::connect(p.tls()).await?;
+            ensure!(
+                h2c::connect_tunnel(&mut h2, &target, Some(&default_auth()))
+                    .await?
+                    .0
+                    == 403
+            );
+            p.finish().await
+        },
+    )
+    .quick()];
+
     for t in ALL {
+        v.push(
+            scenario(
+                format!("security/policy/hostname/{t}"),
+                move |env| async move {
+                    let cfg = Config::new().set("filter", "allowed_hosts", "[\"LOCALHOST.\"]");
+                    let p = Proxy::start(cfg).await?;
+                    ensure!(attempt(&p, t, Some(KEY), env.origin.v4, true).await? == Access::Ok);
+                    ensure!(attempt(&p, t, Some(KEY), env.origin.v4, false).await? == Access::Ok);
+                    p.finish().await?;
+                    let p = Proxy::start(Config::new().set(
+                        "filter",
+                        "allowed_hosts",
+                        "[\"other.invalid\"]",
+                    ))
+                    .await?;
+                    ensure!(
+                        attempt(&p, t, Some(KEY), env.origin.v4, true).await?
+                            == refusal(t, 403, Outcome::Rep(2))
+                    );
+                    ensure!(attempt(&p, t, Some(KEY), env.origin.v4, false).await? == Access::Ok);
+                    p.finish().await?;
+                    let p = Proxy::start(
+                        Config::new()
+                            .set("filter", "allowed_hosts", "[\"localhost\"]")
+                            .set("filter", "denied_hosts", "[\"localhost\"]"),
+                    )
+                    .await?;
+                    ensure!(
+                        attempt(&p, t, Some(KEY), env.origin.v4, true).await?
+                            == refusal(t, 403, Outcome::Rep(2))
+                    );
+                    p.finish().await
+                },
+            )
+            .quick(),
+        );
+
         v.push(
             scenario(
                 format!("security/auth/missing-wrong-valid/{t}"),

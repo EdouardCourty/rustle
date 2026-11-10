@@ -175,6 +175,38 @@ pub async fn response<C: ClientStream>(
     adaptive::response(up, client, remaining, idle).await
 }
 
+/// Tracks actual upstream upload writes for the concurrent response deadline.
+pub(crate) struct ProgressWriter<W> {
+    pub inner: W,
+    pub timer: IdleTimer,
+}
+
+impl<W: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for ProgressWriter<W> {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        data: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        let result = std::pin::Pin::new(&mut self.inner).poll_write(cx, data);
+        if matches!(&result, std::task::Poll::Ready(Ok(n)) if *n > 0) {
+            self.timer.reset();
+        }
+        result
+    }
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_flush(cx)
+    }
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -53,6 +53,10 @@ pub struct FilterConfig {
     /// Destination ports allowed for CONNECT, HTTP and SOCKS5 (empty =
     /// every port).
     pub allowed_ports: Vec<u16>,
+    /// Exact ASCII DNS names or *.domain subdomains; empty permits all names.
+    pub allowed_hosts: Vec<String>,
+    /// Refused names, taking precedence over allowed_hosts; literal IPs use IP policy.
+    pub denied_hosts: Vec<String>,
 }
 
 impl Default for FilterConfig {
@@ -61,6 +65,8 @@ impl Default for FilterConfig {
             block_private: true,
             deny: Vec::new(),
             allowed_ports: Vec::new(),
+            allowed_hosts: Vec::new(),
+            denied_hosts: Vec::new(),
         }
     }
 }

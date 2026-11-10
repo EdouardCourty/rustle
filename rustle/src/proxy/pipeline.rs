@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
@@ -65,6 +65,10 @@ pub(super) async fn http<C: ClientStream>(
         _ => return false,
     };
     let host_str = std::str::from_utf8(host_span.slice(buf)).unwrap_or("");
+    if !svc.dest.host_allowed(host_str) {
+        super::reply(client, super::RESP_403).await;
+        return false;
+    }
     origin_key.clear();
     origin_key.push_str(&String::from_utf8_lossy(host_span.slice(buf)));
     origin_key.push(':');
@@ -158,6 +162,61 @@ pub(super) async fn http<C: ClientStream>(
             sent: 0,
             rewrite_buf,
         };
+        if expects_continue(&buf[..head.raw_len])
+            && (head.chunked
+                || head.content_length.unwrap_or(0) > (buf.len() - head.raw_len) as u64)
+        {
+            let result = {
+                let (mut cr, mut cw) = tokio::io::split(&mut *client);
+                let (mut ur, uw) = up.split();
+                let (upload_timer, mut response_timer) = relay::IdleTimer::pair(idle);
+                let mut uw = relay::ProgressWriter {
+                    inner: uw,
+                    timer: upload_timer,
+                };
+                let upload = forward_request(&mut cr, &mut uw, buf, head, origin_span, &mut ctx);
+                let response = read_continue_final(
+                    &mut ur,
+                    &mut cw,
+                    resp_buf,
+                    max_head,
+                    idle,
+                    &mut response_timer,
+                );
+                tokio::pin!(upload);
+                tokio::pin!(response);
+                let result = tokio::select! {
+                    r = &mut response => Some((r, false)),
+                    ok = &mut upload => if ok {
+                        Some((response.as_mut().await, true))
+                    } else { None },
+                };
+                result
+            };
+            let response_timed_out = matches!(&result, Some((Err(RespError::Head(HeadError::Io(e))), _)) if e.kind() == std::io::ErrorKind::TimedOut);
+            if let Some((Ok(h), complete)) = result {
+                // Cancellation leaves request framing incomplete on both sockets.
+                close_after = !complete || ctx.close_after;
+                sent = ctx.sent;
+                if !complete {
+                    // Prevent pooling even when the origin advertises keep-alive.
+                    let mut h = h;
+                    h.keep_alive = false;
+                    break (up, from_pool, h);
+                }
+                break (up, from_pool, h);
+            }
+            if response_timed_out {
+                super::reply(client, RESP_504).await;
+            } else if ctx.body_rejected {
+                super::reply(client, RESP_413).await;
+            } else if ctx.bad_request {
+                super::reply(client, super::RESP_400).await;
+            } else {
+                super::reply(client, RESP_502).await;
+            }
+            return false;
+        }
         let forwarded = forward_request(client, &mut up, buf, head, origin_span, &mut ctx).await;
         close_after = ctx.close_after;
         sent = ctx.sent;
@@ -397,9 +456,9 @@ struct UpWriteCtx<'a> {
     rewrite_buf: &'a mut Vec<u8>,
 }
 
-async fn forward_request<C: ClientStream>(
+async fn forward_request<C: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     client: &mut C,
-    up: &mut TcpStream,
+    up: &mut W,
     buf: &[u8],
     head: &RequestHead,
     origin: Span,
@@ -438,10 +497,10 @@ async fn forward_request<C: ClientStream>(
     if body.is_empty() {
         // Fast path (GET/HEAD, the keep-alive hot path): one write, no
         // iovec bookkeeping.
-        if timeout(ctx.idle, up.write_all(ctx.rewrite_buf))
-            .await
-            .is_err()
-        {
+        if !matches!(
+            timeout(ctx.idle, up.write_all(ctx.rewrite_buf)).await,
+            Ok(Ok(()))
+        ) {
             return false;
         }
     } else {
@@ -524,9 +583,9 @@ impl<R: AsyncRead + Unpin> AsyncRead for EndWatch<R> {
 /// (framing included) by the chunked relay — the rewrite scratch is its
 /// staging buffer (the head is out), seeded with the body bytes read along
 /// with the head. The body budget is enforced while relaying.
-async fn forward_chunked<C: ClientStream>(
+async fn forward_chunked<C: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     client: &mut C,
-    up: &mut TcpStream,
+    up: &mut W,
     buf: &[u8],
     head: &RequestHead,
     ctx: &mut UpWriteCtx<'_>,
@@ -579,6 +638,9 @@ pub(super) async fn connect_upstream(
     key: &str,
     dest: &DestPolicy,
 ) -> Result<TcpStream, UpstreamError> {
+    if !dest.host_allowed(host) {
+        return Err(UpstreamError::Forbidden("hostname"));
+    }
     if !dest.port_allowed(port) {
         return Err(UpstreamError::Forbidden("port"));
     }
@@ -695,4 +757,43 @@ fn split_timeout(
         }
         r => Ok(r),
     }
+}
+
+fn expects_continue(raw: &[u8]) -> bool {
+    let mut headers = [httparse::EMPTY_HEADER; crate::http::MAX_HEADERS];
+    let mut req = httparse::Request::new(&mut headers);
+    req.parse(raw).is_ok()
+        && req.headers.iter().any(|h| {
+            h.name.eq_ignore_ascii_case("expect")
+                && h.value.trim_ascii().eq_ignore_ascii_case(b"100-continue")
+        })
+}
+
+async fn read_continue_final<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+    upstream: &mut R,
+    client: &mut W,
+    buf: &mut Vec<u8>,
+    max: usize,
+    idle: Duration,
+    timer: &mut relay::IdleTimer,
+) -> Result<ResponseHead, RespError> {
+    let mut head = crate::http::read_response_head_timed(upstream, buf, max, timer, &[]).await?;
+    for _ in 0..16 {
+        if !(100..200).contains(&head.status) || head.status == 101 {
+            return Ok(head);
+        }
+        if !matches!(
+            timeout(idle, async {
+                client.write_all(&buf[..head.raw_len]).await?;
+                client.flush().await
+            })
+            .await,
+            Ok(Ok(()))
+        ) {
+            return Err(RespError::Closed);
+        }
+        let residual = buf[head.raw_len..].to_vec();
+        head = crate::http::read_response_head_timed(upstream, buf, max, timer, &residual).await?;
+    }
+    Err(RespError::Head(HeadError::Invalid))
 }

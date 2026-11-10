@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Relay origin informational and early final responses during Expect: 100-continue uploads for HTTP/1.1 and HTTP/2 clients.
+
+### Added
+
+- Reloadable destination hostname allowlists and denylists for HTTP and SOCKS5, including UDP.
+
 ## [1.0.0] - 2026-10-30
 
 Initial release.

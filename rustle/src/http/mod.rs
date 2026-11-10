@@ -10,3 +10,5 @@ pub use response::{read_response_head, RespError, ResponseHead};
 
 /// Parser header-array capacity (proxy clients are small; 64 is generous).
 pub(crate) const MAX_HEADERS: usize = 64;
+
+pub(crate) use response::read_response_head_timed;

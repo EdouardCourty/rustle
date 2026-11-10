@@ -197,7 +197,7 @@ fn write_header(buf: &mut [u8], from: SocketAddr) -> usize {
 
 /// Destination policy + resolution (DNS cache) for one datagram.
 async fn resolve(svc: &Services, host: &str, port: u16) -> Option<SocketAddr> {
-    if !svc.dest.port_allowed(port) {
+    if !svc.dest.host_allowed(host) || !svc.dest.port_allowed(port) {
         return None;
     }
     let addrs: Vec<SocketAddr> = match host.parse::<IpAddr>() {
