@@ -163,6 +163,9 @@ impl DestPolicy {
 
     /// Match the requested name, independently of resolved address policy.
     pub fn host_allowed(&self, host: &str) -> bool {
+        if self.allowed_hosts.is_empty() && self.denied_hosts.is_empty() {
+            return true;
+        }
         if host.parse::<IpAddr>().is_ok() {
             return true;
         }

@@ -232,10 +232,6 @@ async fn connect(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
         reply(&mut respond, StatusCode::BAD_REQUEST);
         return;
     };
-    if !ctx.svc.dest.host_allowed(&host) {
-        reply(&mut respond, StatusCode::FORBIDDEN);
-        return;
-    }
     let key = origin_key(&host, port);
     let up = match dial(ctx, &host, port, &key).await {
         Ok(up) => up,
@@ -426,7 +422,7 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
         .map(|a| a.as_str().to_string())
         .unwrap_or_default();
     if !ctx.svc.dest.host_allowed(&host) {
-        reply(&mut respond, StatusCode::FORBIDDEN);
+        fail(&mut respond, StatusCode::FORBIDDEN, Some("hostname"));
         return;
     }
     let key = origin_key(&host, port);
@@ -745,9 +741,12 @@ async fn read_head_final<R: tokio::io::AsyncRead + Unpin>(
     let mut timer = timer.unwrap_or_else(|| IdleTimer::new(idle));
     // The idle timeout is applied per read inside read_response_head.
     let mut h = crate::http::read_response_head_timed(up, resp_buf, max, &mut timer, &[]).await?;
-    for _ in 0..3 {
+    for count in 0..=crate::http::MAX_INFORMATIONAL_RESPONSES {
         if !(100..200).contains(&h.status) || h.status == 101 {
             return Ok(h);
+        }
+        if count == crate::http::MAX_INFORMATIONAL_RESPONSES {
+            return Err(RespError::Head(HeadError::Invalid));
         }
         let mut info = Response::new(());
         *info.status_mut() = StatusCode::from_u16(h.status).map_err(|_| RespError::Closed)?;

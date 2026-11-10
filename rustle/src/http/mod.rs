@@ -12,3 +12,6 @@ pub use response::{read_response_head, RespError, ResponseHead};
 pub(crate) const MAX_HEADERS: usize = 64;
 
 pub(crate) use response::read_response_head_timed;
+
+/// Maximum informational responses accepted before a final response.
+pub(crate) const MAX_INFORMATIONAL_RESPONSES: usize = 16;

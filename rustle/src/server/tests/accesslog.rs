@@ -158,3 +158,53 @@ async fn access_log_errors_only_and_reopen() {
         .unwrap()
         .unwrap();
 }
+
+#[tokio::test]
+async fn hostname_refusals_are_logged_on_http_and_h2() {
+    let (cfg, der) = tls_config();
+    let mut cfg = (*cfg).clone();
+    let path = log_path("hostname");
+    cfg.log.access = crate::accesslog::Level::Errors;
+    cfg.log.file = path.to_string_lossy().into_owned();
+    cfg.filter.denied_hosts = vec!["blocked.example".into()];
+    let srv = start(Arc::new(cfg)).unwrap();
+    let out = send_recv(
+        srv.local_addr(),
+        b"GET http://blocked.example/ HTTP/1.1\r\nHost: blocked.example\r\n\r\n",
+    )
+    .await;
+    assert!(status(&out).starts_with("HTTP/1.1 403"));
+    wait_log(&path, &["via=http1", "status=403", "reason=hostname"]).await;
+
+    let mut send = h2_client(srv.tls_addr().unwrap(), der).await;
+    for connect in [false, true] {
+        let req = if connect {
+            http::Request::builder()
+                .method("CONNECT")
+                .uri("blocked.example:443")
+        } else {
+            http::Request::builder()
+                .method("GET")
+                .uri("http://blocked.example/")
+        }
+        .body(())
+        .unwrap();
+        let (resp, _) = send.send_request(req, true).unwrap();
+        assert_eq!(resp.await.unwrap().status(), 403);
+        wait_log(
+            &path,
+            &[
+                "via=h2",
+                if connect { "kind=connect" } else { "kind=http" },
+                "status=403",
+                "reason=hostname",
+            ],
+        )
+        .await;
+    }
+    drop(send);
+    tokio::task::spawn_blocking(move || srv.shutdown_and_join())
+        .await
+        .unwrap()
+        .unwrap();
+}

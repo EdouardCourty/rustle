@@ -152,7 +152,9 @@ pub fn scenarios() -> Vec<Scenario> {
                     let mut c = if tls { Client::tls(p.tls(), true).await? } else { Client::plain(p.addr).await? };
                     c.send(&post_head(&format!("http://{addr}/"), if chunked { "Transfer-Encoding: chunked\r\nExpect: 100-continue\r\n" } else { "Content-Length: 5\r\nExpect: 100-continue\r\n" })).await?;
                     if reject {
-                        c.response(false).await?.expect(417)?;
+                        let response = c.response(false).await?;
+                        response.expect(417)?;
+                        ensure!(response.header("connection") == Some("close"));
                         ensure!(c.closed(Duration::from_secs(2)).await);
                     } else {
                         let hints = c.w.head().await?.unwrap();
@@ -169,6 +171,41 @@ pub fn scenarios() -> Vec<Scenario> {
                 }
             }
             Ok(())
+        }).quick(),
+
+        scenario("uploads/short-body-never-reuses-upstream", |_env| async move {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+            let addr = listener.local_addr()?;
+            let origin = tokio::spawn(async move {
+                let (socket, _) = listener.accept().await?;
+                let mut wire = crate::harness::origin::Wire::new(socket);
+                wire.head().await?.unwrap();
+                ensure!(wire.exact(2).await? == b"ab");
+                tokio::time::sleep(Duration::from_millis(150)).await;
+                wire.s.write_all(b"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok").await?;
+                let (socket, _) = listener.accept().await?;
+                let mut second = crate::harness::origin::Wire::new(socket);
+                second.head().await?.unwrap();
+                second.s.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok").await?;
+                anyhow::Ok(())
+            });
+            let cfg = Config::new().set("timeouts", "idle", "\"100ms\"");
+            let p = Proxy::start(cfg).await?;
+            let mut c = Client::plain(p.addr).await?;
+            let mut request = post_head(&format!("http://{addr}/"), "Content-Length: 5\r\n");
+            request.extend_from_slice(b"ab");
+            c.send(&request).await?;
+            let response = c.response(false).await?;
+            response.expect(200)?;
+            ensure!(response.body == b"ok");
+            ensure!(response.header("connection") == Some("close"));
+            ensure!(c.closed(Duration::from_secs(1)).await);
+            let mut second = Client::plain(p.addr).await?;
+            second.roundtrip(&get(&format!("http://{addr}/")), false).await?.expect(200)?;
+            origin.await??;
+            drop(c);
+            drop(second);
+            p.finish().await
         }).quick(),
 
         scenario("uploads/chunked-extensions-and-trailers", |env| async move {

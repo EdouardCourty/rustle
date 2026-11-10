@@ -65,10 +65,6 @@ pub(super) async fn http<C: ClientStream>(
         _ => return false,
     };
     let host_str = std::str::from_utf8(host_span.slice(buf)).unwrap_or("");
-    if !svc.dest.host_allowed(host_str) {
-        super::reply(client, super::RESP_403).await;
-        return false;
-    }
     origin_key.clear();
     origin_key.push_str(&String::from_utf8_lossy(host_span.slice(buf)));
     origin_key.push(':');
@@ -104,11 +100,17 @@ pub(super) async fn http<C: ClientStream>(
         }
     };
 
+    if !svc.dest.host_allowed(host_str) {
+        log_fail(403, Some("hostname"));
+        super::reply(client, super::RESP_403).await;
+        return false;
+    }
     // Upstream connection: pooled reuse when possible, fresh otherwise. A
     // pooled connection that died while idle is retried once on a fresh
     // one (safe: no response byte has reached the client at that point).
     let mut attempt = 0;
     let mut close_after;
+    let mut upload_complete;
     let mut sent: u64;
     let (mut up, _from_pool, mut rhead) = loop {
         attempt += 1;
@@ -160,9 +162,10 @@ pub(super) async fn http<C: ClientStream>(
             client_gone: false,
             close_after: false,
             sent: 0,
+            complete: false,
             rewrite_buf,
         };
-        if expects_continue(&buf[..head.raw_len])
+        if head.expect_continue
             && (head.chunked
                 || head.content_length.unwrap_or(0) > (buf.len() - head.raw_len) as u64)
         {
@@ -194,31 +197,35 @@ pub(super) async fn http<C: ClientStream>(
                 result
             };
             let response_timed_out = matches!(&result, Some((Err(RespError::Head(HeadError::Io(e))), _)) if e.kind() == std::io::ErrorKind::TimedOut);
-            if let Some((Ok(h), complete)) = result {
+            if let Some((Ok(mut h), finished)) = result {
+                let complete = finished && ctx.complete;
+                upload_complete = complete;
                 // Cancellation leaves request framing incomplete on both sockets.
                 close_after = !complete || ctx.close_after;
                 sent = ctx.sent;
-                if !complete {
-                    // Prevent pooling even when the origin advertises keep-alive.
-                    let mut h = h;
-                    h.keep_alive = false;
-                    break (up, from_pool, h);
-                }
+                h.keep_alive &= complete;
                 break (up, from_pool, h);
             }
             if response_timed_out {
+                log_fail(504, Some("no-response"));
                 super::reply(client, RESP_504).await;
             } else if ctx.body_rejected {
+                log_fail(413, None);
                 super::reply(client, RESP_413).await;
             } else if ctx.bad_request {
+                log_fail(400, Some("chunked"));
                 super::reply(client, super::RESP_400).await;
+            } else if ctx.client_gone {
+                log_fail(400, Some("body-incomplete"));
             } else {
+                log_fail(502, Some("no-response"));
                 super::reply(client, RESP_502).await;
             }
             return false;
         }
         let forwarded = forward_request(client, &mut up, buf, head, origin_span, &mut ctx).await;
-        close_after = ctx.close_after;
+        upload_complete = ctx.complete;
+        close_after = ctx.close_after || !ctx.complete;
         sent = ctx.sent;
         if !forwarded {
             // Body over budget: answer 413 and drop (the client may still
@@ -248,7 +255,10 @@ pub(super) async fn http<C: ClientStream>(
         }
         // The idle timeout is applied per read inside read_response_head.
         match split_timeout(read_response_head(&mut up, resp_buf, max_head, idle, &[]).await) {
-            Ok(Ok(h)) => break (up, from_pool, h),
+            Ok(Ok(mut h)) => {
+                h.keep_alive &= ctx.complete;
+                break (up, from_pool, h);
+            }
             // B6: retry once on ANY I/O failure of a pooled socket — clean
             // EOF or RST — as long as the request is replayable (B7).
             Ok(Err(RespError::Head(HeadError::Io(_))))
@@ -276,13 +286,13 @@ pub(super) async fn http<C: ClientStream>(
     // B2: informational responses (1xx — e.g. `100 Continue`) are not
     // final. Forward each verbatim and re-read the real head on the same
     // socket; never pool in between (the response is still in flight).
-    let mut hops = 0u8;
+    let mut hops = 0usize;
     loop {
         if !(100..200).contains(&rhead.status) {
             break;
         }
         hops += 1;
-        if hops > 3 {
+        if hops > crate::http::MAX_INFORMATIONAL_RESPONSES {
             return false;
         }
         if relay::write_flush(client, &resp_buf[..rhead.raw_len])
@@ -304,6 +314,21 @@ pub(super) async fn http<C: ClientStream>(
     // Body end: Content-Length, zero for HEAD/204/304 (B5: case-insensitive
     // and chunked must not override a declared zero body), chunked framing,
     // or unknown (then: relay until EOF, no pooling).
+    rhead.keep_alive &= upload_complete;
+    if close_after {
+        rewrite_buf.clear();
+        for line in resp_buf[..rhead.raw_len - 2].split_inclusive(|&b| b == b'\n') {
+            let name = line.split(|&b| b == b':').next().unwrap_or_default();
+            if !name.eq_ignore_ascii_case(b"connection")
+                && !name.eq_ignore_ascii_case(b"keep-alive")
+            {
+                rewrite_buf.extend_from_slice(line);
+            }
+        }
+        rewrite_buf.extend_from_slice(b"Connection: close\r\n\r\n");
+        resp_buf.splice(..rhead.raw_len, rewrite_buf.iter().copied());
+        rhead.raw_len = rewrite_buf.len();
+    }
     let zero_body = rhead.no_body_status || head.method.slice(buf).eq_ignore_ascii_case(b"HEAD");
     let body_left = if zero_body {
         Some(0)
@@ -453,6 +478,7 @@ struct UpWriteCtx<'a> {
     close_after: bool,
     /// Request body bytes forwarded (access log).
     sent: u64,
+    complete: bool,
     rewrite_buf: &'a mut Vec<u8>,
 }
 
@@ -529,6 +555,7 @@ async fn forward_request<C: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             }
         }
     }
+    ctx.sent = body.len() as u64;
     let remaining = content_length - body.len() as u64;
     if remaining > 0 {
         let mut limited = EndWatch {
@@ -538,6 +565,7 @@ async fn forward_request<C: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         // Inactivity-bounded (idle resets on progress): slow uploads no
         // longer die at the absolute cap.
         let copied = crate::relay::copy_limited(&mut limited, up, None, ctx.idle).await;
+        ctx.sent += copied;
         if copied < remaining && limited.ended {
             // The client closed mid-body: the origin would wait for the
             // rest until its own timeout. Abort both sides now. (A short
@@ -547,7 +575,7 @@ async fn forward_request<C: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             return false;
         }
     }
-    ctx.sent = content_length;
+    ctx.complete = ctx.sent == content_length;
     true
 }
 
@@ -610,6 +638,7 @@ async fn forward_chunked<C: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     {
         Ok(end) => {
             ctx.close_after = end.over_read;
+            ctx.complete = true;
             ctx.sent = end.body;
             true
         }
@@ -759,16 +788,6 @@ fn split_timeout(
     }
 }
 
-fn expects_continue(raw: &[u8]) -> bool {
-    let mut headers = [httparse::EMPTY_HEADER; crate::http::MAX_HEADERS];
-    let mut req = httparse::Request::new(&mut headers);
-    req.parse(raw).is_ok()
-        && req.headers.iter().any(|h| {
-            h.name.eq_ignore_ascii_case("expect")
-                && h.value.trim_ascii().eq_ignore_ascii_case(b"100-continue")
-        })
-}
-
 async fn read_continue_final<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     upstream: &mut R,
     client: &mut W,
@@ -778,9 +797,12 @@ async fn read_continue_final<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     timer: &mut relay::IdleTimer,
 ) -> Result<ResponseHead, RespError> {
     let mut head = crate::http::read_response_head_timed(upstream, buf, max, timer, &[]).await?;
-    for _ in 0..16 {
+    for count in 0..=crate::http::MAX_INFORMATIONAL_RESPONSES {
         if !(100..200).contains(&head.status) || head.status == 101 {
             return Ok(head);
+        }
+        if count == crate::http::MAX_INFORMATIONAL_RESPONSES {
+            break;
         }
         if !matches!(
             timeout(idle, async {
@@ -796,4 +818,45 @@ async fn read_continue_final<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         head = crate::http::read_response_head_timed(upstream, buf, max, timer, &residual).await?;
     }
     Err(RespError::Head(HeadError::Invalid))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn short_upload_is_not_complete() {
+        let (mut source, mut reader) = tokio::io::duplex(1024);
+        source.write_all(b"POST http://example.com/ HTTP/1.1\r\nHost: example.com\r\nContent-Length: 5\r\n\r\nab").await.unwrap();
+        let mut buf = Vec::new();
+        let head = crate::http::read_head(
+            &mut reader,
+            &mut buf,
+            4096,
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let Target::Http { origin, .. } = crate::http::classify(&head, &buf).unwrap() else {
+            panic!("http target")
+        };
+        let mut scratch = Vec::new();
+        let mut ctx = UpWriteCtx {
+            idle: Duration::from_millis(20),
+            max_request_body: 0,
+            body_rejected: false,
+            bad_request: false,
+            client_gone: false,
+            close_after: false,
+            sent: 0,
+            complete: false,
+            rewrite_buf: &mut scratch,
+        };
+        let mut upstream = tokio::io::sink();
+        assert!(forward_request(&mut reader, &mut upstream, &buf, &head, origin, &mut ctx).await);
+        assert!(!ctx.complete);
+        assert_eq!(ctx.sent, 2);
+    }
 }
