@@ -175,10 +175,80 @@ pub async fn response<C: ClientStream>(
     adaptive::response(up, client, remaining, idle).await
 }
 
+/// Tracks actual upstream upload writes for the concurrent response deadline.
+pub(crate) struct ProgressWriter<W> {
+    pub inner: W,
+    pub timer: IdleTimer,
+}
+
+impl<W: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for ProgressWriter<W> {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        data: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        let result = std::pin::Pin::new(&mut self.inner).poll_write(cx, data);
+        if matches!(&result, std::task::Poll::Ready(Ok(n)) if *n > 0) {
+            self.timer.reset();
+        }
+        result
+    }
+    fn is_write_vectored(&self) -> bool {
+        self.inner.is_write_vectored()
+    }
+
+    fn poll_write_vectored(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        bufs: &[std::io::IoSlice<'_>],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        let result = std::pin::Pin::new(&mut self.inner).poll_write_vectored(cx, bufs);
+        if matches!(&result, std::task::Poll::Ready(Ok(n)) if *n > 0) {
+            self.timer.reset();
+        }
+        result
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_flush(cx)
+    }
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn progress_writer_preserves_vectored_writes() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut reader = tokio::net::TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (writer, _) = listener.accept().await.unwrap();
+        let mut writer = ProgressWriter {
+            inner: writer,
+            timer: IdleTimer::new(std::time::Duration::from_secs(1)),
+        };
+        assert!(tokio::io::AsyncWrite::is_write_vectored(&writer));
+        let bufs = [
+            std::io::IoSlice::new(b"head"),
+            std::io::IoSlice::new(b"body"),
+        ];
+        assert_eq!(writer.write_vectored(&bufs).await.unwrap(), 8);
+        let mut received = [0; 8];
+        reader.read_exact(&mut received).await.unwrap();
+        assert_eq!(&received, b"headbody");
+    }
 
     /// End-to-end tunnel relay check: two TCP pairs, relay between the two
     /// server-side sockets, push bytes through, verify integrity and that

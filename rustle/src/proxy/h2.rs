@@ -28,7 +28,7 @@ use tokio::time::timeout;
 use super::pipeline::{self, UpstreamError};
 use crate::accesslog::TargetMode;
 use crate::config::Config;
-use crate::http::{read_response_head, HeadError, RespError};
+use crate::http::{HeadError, RespError};
 use crate::relay::{chunk_size, IdleTimer};
 
 /// Streams in flight per client connection.
@@ -421,6 +421,10 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
         .authority()
         .map(|a| a.as_str().to_string())
         .unwrap_or_default();
+    if !ctx.svc.dest.host_allowed(&host) {
+        fail(&mut respond, StatusCode::FORBIDDEN, Some("hostname"));
+        return;
+    }
     let key = origin_key(&host, port);
 
     // Request body framing: h2 frames the body itself; HTTP/1.1 upstream
@@ -452,6 +456,11 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
     // B7: only an idempotent request without body may be replayed on a
     // fresh connection (same rule as the HTTP/1 pipeline).
     let replayable = !has_body && (method_head || req.method() == Method::GET);
+    let expect_continue = req.headers().get(http::header::EXPECT).is_some_and(|v| {
+        v.as_bytes()
+            .trim_ascii()
+            .eq_ignore_ascii_case(b"100-continue")
+    });
     let mut body = req.into_body();
 
     // Upstream: pooled socket (one retry on a stale one when the request
@@ -459,6 +468,7 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
     let mut resp_buf: Vec<u8> = Vec::new();
     let mut attempt = 0;
     let mut sent: u64 = 0;
+    let mut upload_complete = true;
     let (mut up, rhead) = loop {
         attempt += 1;
         let (mut up, pooled) = match ctx.pool.take(&key) {
@@ -482,6 +492,55 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
             fail(&mut respond, StatusCode::BAD_GATEWAY, None);
             return;
         }
+        if has_body && expect_continue {
+            let result = {
+                let (mut ur, uw) = up.split();
+                let (upload_timer, response_timer) = IdleTimer::pair(idle);
+                let mut uw = crate::relay::ProgressWriter {
+                    inner: uw,
+                    timer: upload_timer,
+                };
+                let sending = upload(&mut body, &mut uw, body_len, budget, idle);
+                let receiving = read_head_final(
+                    &mut ur,
+                    &mut resp_buf,
+                    cfg,
+                    idle,
+                    &mut respond,
+                    Some(response_timer),
+                );
+                tokio::pin!(sending);
+                tokio::pin!(receiving);
+                tokio::select! {
+                    result = &mut receiving => Some((result, None)),
+                    uploaded = &mut sending => match uploaded {
+                        Some(n) => Some((receiving.as_mut().await, Some(n))),
+                        None => None,
+                    }
+                }
+            };
+            match result {
+                Some((Ok(h), n)) => {
+                    upload_complete = n.is_some();
+                    sent = n.unwrap_or(0);
+                    break (up, h);
+                }
+                Some((Err(RespError::Head(HeadError::Io(e))), _))
+                    if e.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    fail(
+                        &mut respond,
+                        StatusCode::GATEWAY_TIMEOUT,
+                        Some("no-response"),
+                    );
+                    return;
+                }
+                _ => {
+                    fail(&mut respond, StatusCode::BAD_GATEWAY, Some("no-response"));
+                    return;
+                }
+            }
+        }
         if has_body {
             match upload(&mut body, &mut up, body_len, budget, idle).await {
                 Some(n) => sent = n,
@@ -491,7 +550,7 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
                 }
             }
         }
-        match read_head_final(&mut up, &mut resp_buf, cfg, idle).await {
+        match read_head_final(&mut up, &mut resp_buf, cfg, idle, &mut respond, None).await {
             Ok(h) => break (up, h),
             Err(RespError::Head(HeadError::Io(e))) if e.kind() == std::io::ErrorKind::TimedOut => {
                 fail(
@@ -563,7 +622,7 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
     };
     if zero_body {
         log_ok(0);
-        if rhead.keep_alive && resp_buf.len() == rhead.raw_len {
+        if upload_complete && rhead.keep_alive && resp_buf.len() == rhead.raw_len {
             ctx.pool.put(&key, up);
         }
         return;
@@ -608,7 +667,11 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
         }
     };
     // Framed, complete, nothing over-read, keep-alive: reusable.
-    if clean && rhead.keep_alive && (rhead.chunked || rhead.content_length.is_some()) {
+    if upload_complete
+        && clean
+        && rhead.keep_alive
+        && (rhead.chunked || rhead.content_length.is_some())
+    {
         ctx.pool.put(&key, up);
     }
 }
@@ -616,9 +679,9 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
 /// Streams the h2 request body upstream: exactly `len` bytes, or chunked
 /// framing when the length is unknown (each DATA frame = one chunk).
 /// `budget` caps the body (0 = unlimited).
-async fn upload(
+async fn upload<W: tokio::io::AsyncWrite + Unpin>(
     body: &mut RecvStream,
-    up: &mut TcpStream,
+    up: &mut W,
     len: Option<u64>,
     budget: u64,
     idle: Duration,
@@ -665,23 +728,49 @@ async fn upload(
     }
 }
 
-/// Reads the final response head (1xx informational heads are skipped:
-/// h2 clients get the final one).
-async fn read_head_final(
-    up: &mut TcpStream,
+/// Relay informational responses while reading the final head.
+async fn read_head_final<R: tokio::io::AsyncRead + Unpin>(
+    up: &mut R,
     resp_buf: &mut Vec<u8>,
     cfg: &Config,
     idle: Duration,
+    respond: &mut SendResponse<Bytes>,
+    timer: Option<IdleTimer>,
 ) -> Result<crate::http::ResponseHead, RespError> {
     let max = cfg.limits.max_header_bytes;
+    let mut timer = timer.unwrap_or_else(|| IdleTimer::new(idle));
     // The idle timeout is applied per read inside read_response_head.
-    let mut h = read_response_head(up, resp_buf, max, idle, &[]).await?;
-    for _ in 0..3 {
+    let mut h = crate::http::read_response_head_timed(up, resp_buf, max, &mut timer, &[]).await?;
+    for count in 0..=crate::http::MAX_INFORMATIONAL_RESPONSES {
         if !(100..200).contains(&h.status) || h.status == 101 {
             return Ok(h);
         }
+        if count == crate::http::MAX_INFORMATIONAL_RESPONSES {
+            return Err(RespError::Head(HeadError::Invalid));
+        }
+        let mut info = Response::new(());
+        *info.status_mut() = StatusCode::from_u16(h.status).map_err(|_| RespError::Closed)?;
+        let mut headers = [httparse::EMPTY_HEADER; crate::http::MAX_HEADERS];
+        let mut parsed = httparse::Response::new(&mut headers);
+        parsed
+            .parse(&resp_buf[..h.raw_len])
+            .map_err(|_| RespError::Closed)?;
+        for header in parsed.headers.iter() {
+            let name = header.name.to_ascii_lowercase();
+            if !DROP_RESP.contains(&name.as_str()) {
+                if let (Ok(n), Ok(v)) = (
+                    HeaderName::from_bytes(name.as_bytes()),
+                    HeaderValue::from_bytes(header.value),
+                ) {
+                    info.headers_mut().append(n, v);
+                }
+            }
+        }
+        respond
+            .send_informational(info)
+            .map_err(|_| RespError::Closed)?;
         let rest = resp_buf[h.raw_len..].to_vec();
-        h = read_response_head(up, resp_buf, max, idle, &rest).await?;
+        h = crate::http::read_response_head_timed(up, resp_buf, max, &mut timer, &rest).await?;
     }
     Err(RespError::Head(HeadError::Invalid))
 }

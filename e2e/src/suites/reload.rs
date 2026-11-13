@@ -46,6 +46,28 @@ fn only_key(key: &str) -> String {
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
+        scenario("reload/hostname-policy-and-pool", |env| async move {
+            let cfg = Config::new();
+            let p = Proxy::start_text(&cfg.dir, &cfg.render()).await?;
+            let url = format!("http://localhost:{}/data/1", env.origin.v4.port());
+            ensure!(status_with(&p, &url, KEY).await? == 200);
+            let cfg = cfg.set("filter", "denied_hosts", "[\"localhost\"]");
+            write_config(&cfg)?;
+            ensure!(reload_cmd(&cfg.dir)?.0 == 0);
+            ensure!(status_with(&p, &url, KEY).await? == 403);
+            let bad = cfg.set("filter", "allowed_hosts", "[\"*bad\"]");
+            write_config(&bad)?;
+            ensure!(reload_cmd(&bad.dir)?.0 != 0);
+            ensure!(status_with(&p, &url, KEY).await? == 403);
+            let cfg = bad
+                .set("filter", "allowed_hosts", "[]")
+                .set("filter", "denied_hosts", "[]");
+            write_config(&cfg)?;
+            ensure!(reload_cmd(&cfg.dir)?.0 == 0);
+            ensure!(status_with(&p, &url, KEY).await? == 200);
+            p.finish().await
+        })
+        .quick(),
         scenario("reload/command-swaps-keys", |env| async move {
             let cfg = Config::new();
             let p = Proxy::start_text(&cfg.dir, &cfg.render()).await?;

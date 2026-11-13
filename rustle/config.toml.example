@@ -98,6 +98,9 @@ http2 = true
 ktls = false
 
 [filter]
+# Exact names or *.example.com (subdomains only); literal IPs use IP rules.
+allowed_hosts = []
+denied_hosts = []
 # Refuse non-public destinations: loopback, private networks, link-local
 # (incl. cloud metadata 169.254.169.254), CGNAT, multicast, reserved, IPv6
 # ULA/link-local. Checked on the resolved address (a public name pointing

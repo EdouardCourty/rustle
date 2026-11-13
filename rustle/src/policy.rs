@@ -115,11 +115,41 @@ pub struct DestPolicy {
     block_private: bool,
     deny: Vec<Cidr>,
     allowed_ports: Vec<u16>,
+    allowed_hosts: Vec<String>,
+    denied_hosts: Vec<String>,
 }
 
 impl DestPolicy {
     pub fn from_config(cfg: &Config) -> anyhow::Result<Self> {
+        let normalize = |patterns: &[String]| -> anyhow::Result<Vec<String>> {
+            patterns
+                .iter()
+                .map(|p| {
+                    let raw = p.strip_prefix("*.").unwrap_or(p);
+                    let name = raw.strip_suffix('.').unwrap_or(raw);
+                    anyhow::ensure!(
+                        !name.is_empty()
+                            && name.len() <= 253
+                            && name.split('.').all(|label| !label.is_empty()
+                                && label.len() <= 63
+                                && !label.starts_with('-')
+                                && !label.ends_with('-')
+                                && label
+                                    .bytes()
+                                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')),
+                        "invalid hostname pattern {p}"
+                    );
+                    anyhow::ensure!(
+                        name.parse::<IpAddr>().is_err(),
+                        "hostname pattern must not be an IP: {p}"
+                    );
+                    Ok(p.strip_suffix('.').unwrap_or(p).to_ascii_lowercase())
+                })
+                .collect()
+        };
         Ok(Self {
+            allowed_hosts: normalize(&cfg.filter.allowed_hosts)?,
+            denied_hosts: normalize(&cfg.filter.denied_hosts)?,
             block_private: cfg.filter.block_private,
             deny: cfg
                 .filter
@@ -129,6 +159,29 @@ impl DestPolicy {
                 .collect::<anyhow::Result<_>>()?,
             allowed_ports: cfg.filter.allowed_ports.clone(),
         })
+    }
+
+    /// Match the requested name, independently of resolved address policy.
+    pub fn host_allowed(&self, host: &str) -> bool {
+        if self.allowed_hosts.is_empty() && self.denied_hosts.is_empty() {
+            return true;
+        }
+        if host.parse::<IpAddr>().is_ok() {
+            return true;
+        }
+        let host = host.strip_suffix('.').unwrap_or(host);
+        let matches = |pattern: &String| {
+            if let Some(suffix) = pattern.strip_prefix("*.") {
+                host.len() > suffix.len() + 1
+                    && host.as_bytes()[host.len() - suffix.len() - 1] == b'.'
+                    && host.as_bytes()[host.len() - suffix.len()..]
+                        .eq_ignore_ascii_case(suffix.as_bytes())
+            } else {
+                host.eq_ignore_ascii_case(pattern)
+            }
+        };
+        !self.denied_hosts.iter().any(matches)
+            && (self.allowed_hosts.is_empty() || self.allowed_hosts.iter().any(matches))
     }
 
     /// Port allowlist (empty = every port).
@@ -411,5 +464,50 @@ mod tests {
             l.fail(ip("198.51.100.1"));
         }
         assert!(!l.banned(ip("198.51.100.1")));
+    }
+}
+
+#[cfg(test)]
+mod hostname_tests {
+    use super::*;
+
+    #[test]
+    fn hostname_rules() {
+        let mut cfg = Config::default();
+        assert!(DestPolicy::from_config(&cfg)
+            .unwrap()
+            .host_allowed("unrestricted.test"));
+        cfg.filter.allowed_hosts = vec!["EXAMPLE.com.".into(), "*.example.com".into()];
+        cfg.filter.denied_hosts = vec!["blocked.example.com".into()];
+        let p = DestPolicy::from_config(&cfg).unwrap();
+        for host in [
+            "example.com",
+            "EXAMPLE.COM.",
+            "a.example.com",
+            "deep.a.example.com",
+            "127.0.0.1",
+            "::1",
+        ] {
+            assert!(p.host_allowed(host), "{host}");
+        }
+        for host in ["blocked.example.com", "other.com", "badexample.com"] {
+            assert!(!p.host_allowed(host), "{host}");
+        }
+        cfg.filter.allowed_hosts = vec!["*.example.com".into()];
+        assert!(!DestPolicy::from_config(&cfg)
+            .unwrap()
+            .host_allowed("example.com"));
+        for pattern in [
+            "*",
+            "a..com",
+            "-a.com",
+            "127.0.0.1",
+            "a/b",
+            "é.com",
+            "example.com..",
+        ] {
+            cfg.filter.allowed_hosts = vec![pattern.into()];
+            assert!(DestPolicy::from_config(&cfg).is_err(), "{pattern}");
+        }
     }
 }

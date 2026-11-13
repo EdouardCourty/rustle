@@ -54,6 +54,8 @@ pub struct RequestHead {
     pub close: bool,
     /// `Connection: Upgrade` with `Upgrade: websocket` (a WebSocket handshake).
     pub upgrade: bool,
+    /// Whether the request asks the origin for permission to send its body.
+    pub expect_continue: bool,
 }
 
 /// The proxy target derived from a head: CONNECT `host:port` -> raw tunnel,
@@ -131,6 +133,7 @@ impl RequestHead {
         let mut close = false;
         let mut conn_upgrade = false;
         let mut upgrade_ws = false;
+        let mut expect_continue = false;
         for h in req.headers.iter() {
             if h.name.eq_ignore_ascii_case("proxy-authorization") {
                 if auth.is_none() {
@@ -154,6 +157,8 @@ impl RequestHead {
             } else if h.name.eq_ignore_ascii_case("connection") {
                 close |= contains_token(h.value, "close");
                 conn_upgrade |= contains_token(h.value, "upgrade");
+            } else if h.name.eq_ignore_ascii_case("expect") {
+                expect_continue |= h.value.trim_ascii().eq_ignore_ascii_case(b"100-continue");
             } else if h.name.eq_ignore_ascii_case("upgrade") {
                 upgrade_ws |= contains_token(h.value, "websocket");
             }
@@ -172,6 +177,7 @@ impl RequestHead {
             chunked,
             close,
             upgrade: conn_upgrade && upgrade_ws,
+            expect_continue,
         })
     }
 }
@@ -397,6 +403,7 @@ mod tests {
             chunked: false,
             close: false,
             upgrade: false,
+            expect_continue: false,
         }
     }
 
@@ -601,6 +608,15 @@ mod tests {
         assert_eq!(
             text,
             "GET /ws HTTP/1.1\r\nHost: h\r\nUpgrade: websocket\r\nSec-WebSocket-Key: k\r\nConnection: Upgrade\r\n\r\n"
+        );
+    }
+    #[test]
+    fn expect_continue_is_parsed_with_the_head() {
+        assert!(head_of(b"POST http://h/ HTTP/1.1\r\nHost: h\r\neXpEcT:  100-CoNtInUe \r\nContent-Length: 1\r\n\r\n").expect_continue);
+        assert!(!head_of(b"GET http://h/ HTTP/1.1\r\nHost: h\r\n\r\n").expect_continue);
+        assert!(
+            !head_of(b"POST http://h/ HTTP/1.1\r\nHost: h\r\nExpect: something-else\r\n\r\n")
+                .expect_continue
         );
     }
 }

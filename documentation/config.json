@@ -303,6 +303,22 @@
           "default": [],
           "description": "Allowed destination ports, e.g. `[80, 443]`; empty = all.",
           "reload": "live"
+        },
+        {
+          "key": "allowed_hosts",
+          "path": "filter.allowed_hosts",
+          "type": "string list",
+          "default": [],
+          "description": "Allowed exact ASCII DNS names or *.example.com (subdomains only). Matching ignores case and one trailing dot; deny takes precedence. Empty lists impose no restriction. Literal IP destinations use IP and port policies.",
+          "reload": "live"
+        },
+        {
+          "key": "denied_hosts",
+          "path": "filter.denied_hosts",
+          "type": "string list",
+          "default": [],
+          "description": "Refused exact ASCII DNS names or *.example.com (subdomains only). Matching ignores case and one trailing dot; deny takes precedence. Empty lists impose no restriction. Literal IP destinations use IP and port policies.",
+          "reload": "live"
         }
       ]
     },

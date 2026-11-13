@@ -36,6 +36,22 @@ async fn udp_once(
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
+        scenario("socks5/udp/hostname-policy", |env| async move {
+            let p = Proxy::start(Config::new().set("filter", "denied_hosts", "[\"localhost\"]"))
+                .await?;
+            let (_ctl, relay) = socks5::udp_associate(p.socks(), Some(("u", KEY))).await?;
+            let sock = UdpSocket::bind("127.0.0.1:0").await?;
+            let name = Target::Name("localhost".into(), env.targets.udp.port());
+            ensure!(udp_once(&sock, relay, &name, b"denied").await?.is_none());
+            ensure!(
+                udp_once(&sock, relay, &Target::Ip(env.targets.udp), b"allowed")
+                    .await?
+                    .as_deref()
+                    == Some(b"allowed".as_slice())
+            );
+            p.finish().await
+        })
+        .quick(),
         scenario(
             "socks5/auth/method-without-credentials-refused",
             |env| async move {

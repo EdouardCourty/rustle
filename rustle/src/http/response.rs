@@ -7,8 +7,6 @@
 use std::time::Duration;
 
 use tokio::io::AsyncReadExt;
-use tokio::net::TcpStream;
-use tokio::time::timeout;
 
 use super::request::{contains_token, HeadError};
 use super::MAX_HEADERS;
@@ -46,10 +44,21 @@ pub enum RespError {
 /// `httparse::Response`. A clean EOF before any byte returns
 /// [`RespError::Closed`] — the signature of a stale pooled connection.
 pub async fn read_response_head(
-    sock: &mut TcpStream,
+    sock: &mut (impl tokio::io::AsyncRead + Unpin),
     buf: &mut Vec<u8>,
     max_bytes: usize,
     idle: Duration,
+    prefix: &[u8],
+) -> Result<ResponseHead, RespError> {
+    let mut timer = crate::relay::IdleTimer::new(idle);
+    read_response_head_timed(sock, buf, max_bytes, &mut timer, prefix).await
+}
+
+pub(crate) async fn read_response_head_timed(
+    sock: &mut (impl tokio::io::AsyncRead + Unpin),
+    buf: &mut Vec<u8>,
+    max_bytes: usize,
+    timer: &mut crate::relay::IdleTimer,
     prefix: &[u8],
 ) -> Result<ResponseHead, RespError> {
     buf.clear();
@@ -110,11 +119,12 @@ pub async fn read_response_head(
         if buf.capacity() - buf.len() < 2048 {
             buf.reserve(RESP_READ);
         }
-        let n = match timeout(idle, sock.read_buf(buf)).await {
-            Ok(Ok(n)) => n,
-            Ok(Err(e)) => return Err(RespError::Head(HeadError::Io(e))),
-            Err(_) => return Err(RespError::Head(HeadError::Io(err_timedout()))),
+        let n = match timer.park(sock.read_buf(buf)).await {
+            Some(Ok(n)) => n,
+            Some(Err(e)) => return Err(RespError::Head(HeadError::Io(e))),
+            None => return Err(RespError::Head(HeadError::Io(err_timedout()))),
         };
+        timer.reset();
         if n == 0 {
             // Clean EOF with zero bytes: stale pooled connection.
             return Err(RespError::Closed);
