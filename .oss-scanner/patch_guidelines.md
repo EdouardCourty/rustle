@@ -1,8 +1,14 @@
 # How we would like patches made
 
 ## Size and scope of a fix
-- As narrow as possible: fix the faulty function or check. No refactoring, no renames, no reformatting of
-  untouched code.
+- Fix the root cause as narrowly as practical. If the same faulty pattern exists in a shared helper or on
+  another path (plain, TLS, h2, SOCKS5, WebSocket), fix every instance with that root cause, not only the
+  reproducer's call site.
+- No refactoring, renames or reformatting of code the fix does not need to touch.
+- A refused request keeps a static error response (400, 403, 413, 431, 502, 504); do not turn a bug into a
+  silent connection drop.
+- Do not edit `benchmarks/` data, `benchmarks/documentation/RESULTS.md` or the README benchmark tables:
+  numbers there are generated from measured campaigns.
 - Keep the hot path allocation-free: reuse `buf`, `resp_buf`, `rewrite_buf` and `origin_key`; no per-request
   `setsockopt`; do not invalidate `RequestHead` spans (no `buf.clear()` or reallocation between parse and use).
 - Do not widen request retry (idempotent method with a fully buffered body only) and do not change the pool
@@ -10,8 +16,10 @@
 - Stay inside the existing `unsafe` boundaries; any new `unsafe` block needs a `SAFETY` comment.
 
 ## Code style
-- Rust 2021, `cargo fmt`, `cargo clippy -D warnings` clean. Few comments: only where the code is not obvious.
-  English only. No history or milestone labels in comments.
+- Follow the surrounding code and the edition set in `Cargo.toml`. `cargo fmt` and `cargo clippy -D warnings`
+  must pass (`make check` runs both). Few comments: only where the code is not obvious, for example an
+  invariant or why an order of operations matters. English only. No history or milestone labels in comments.
+- No new dependency.
 - Errors on the request path stay static responses (`&[u8]`) with I/O errors mostly ignored (`let _ =`);
   `anyhow` only at startup.
 
