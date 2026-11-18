@@ -3,7 +3,7 @@
 
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::task::{ready, Context as Cx, Poll};
+use std::task::{Context as Cx, Poll, ready};
 
 use anyhow::Context;
 use bytes::Bytes;

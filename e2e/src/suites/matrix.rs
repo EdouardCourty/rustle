@@ -9,12 +9,12 @@ use std::time::Duration;
 
 use anyhow::Context;
 
-use super::{quick_mode, H1};
+use super::{H1, quick_mode};
 use crate::clients::http1::{self, Client};
 use crate::clients::socks5::{self, Outcome, Target};
 use crate::clients::{self as cl, h2 as h2c};
-use crate::harness::{certs, payload, Config, Env, Proxy};
-use crate::runner::{scenario, skip, Scenario};
+use crate::harness::{Config, Env, Proxy, certs, payload};
+use crate::runner::{Scenario, scenario, skip};
 
 const FULL: &[usize] = &[
     0,

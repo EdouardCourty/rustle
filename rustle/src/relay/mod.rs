@@ -23,8 +23,8 @@ pub(crate) use chunked::chunk_size;
 pub use chunked::chunked;
 pub use splice::degraded_pipes;
 
-use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::time::Duration;
 use tokio::time::Instant;
 

@@ -10,8 +10,8 @@ use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
-use super::request::{contains_token, HeadError};
 use super::MAX_HEADERS;
+use super::request::{HeadError, contains_token};
 
 /// Upstream read window while waiting for a response head (see the loop).
 const RESP_READ: usize = 16 * 1024;

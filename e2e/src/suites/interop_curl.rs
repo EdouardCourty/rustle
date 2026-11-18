@@ -6,8 +6,8 @@ use anyhow::ensure;
 
 use crate::clients::curl::{self, CurlResult};
 use crate::harness::proxy::KEY;
-use crate::harness::{payload, Config, Proxy};
-use crate::runner::{scenario, skip, Scenario};
+use crate::harness::{Config, Proxy, payload};
+use crate::runner::{Scenario, scenario, skip};
 
 fn ok(r: &CurlResult, status: u16) -> anyhow::Result<()> {
     ensure!(

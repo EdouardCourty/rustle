@@ -8,12 +8,12 @@ use anyhow::ensure;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::matrix::open_tunnel;
-use crate::clients::http1::{connect_req, default_auth, Client};
+use crate::clients::http1::{Client, connect_req, default_auth};
 use crate::clients::socks5::{self, Outcome, Target};
 use crate::clients::{closed_within, echo_roundtrip, h2 as h2c};
 use crate::harness::proxy::KEY;
 use crate::harness::{Config, Proxy};
-use crate::runner::{scenario, skip, Scenario};
+use crate::runner::{Scenario, scenario, skip};
 
 const TRANSPORTS: &[&str] = &["h1", "tls", "h2", "socks5"];
 

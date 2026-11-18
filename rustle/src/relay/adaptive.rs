@@ -10,7 +10,7 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use super::{IdleTimer, RELAY_BUF0, RELAY_BUF_MAX, RELAY_BUF_MAX_COPY};
+use super::{IdleTimer, RELAY_BUF_MAX, RELAY_BUF_MAX_COPY, RELAY_BUF0};
 
 /// Remaining declared body from which the response goes straight to splice.
 const SPLICE_EARLY: u64 = 128 * 1024;

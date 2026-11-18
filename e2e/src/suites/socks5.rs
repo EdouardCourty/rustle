@@ -11,7 +11,7 @@ use crate::clients::echo_roundtrip;
 use crate::clients::socks5::{self, Outcome, Target};
 use crate::harness::proxy::{KEY, KEY2};
 use crate::harness::{Config, Proxy};
-use crate::runner::{scenario, skip, Scenario};
+use crate::runner::{Scenario, scenario, skip};
 
 /// One UDP exchange through the relay; Some(payload) when echoed.
 async fn udp_once(

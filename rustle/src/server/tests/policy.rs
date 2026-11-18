@@ -160,12 +160,16 @@ async fn client_allowlist_closes_outsiders_at_accept() {
     cfg.auth.allow_clients = vec!["10.0.0.0/8".into()];
     cfg.socks5.listen = "127.0.0.1:0".into();
     let srv = start(Arc::new(cfg)).unwrap();
-    assert!(send_recv(srv.local_addr(), b"garbage\r\n\r\n")
-        .await
-        .is_empty());
-    assert!(send_recv(srv.socks_addr().unwrap(), &[5, 1, 0])
-        .await
-        .is_empty());
+    assert!(
+        send_recv(srv.local_addr(), b"garbage\r\n\r\n")
+            .await
+            .is_empty()
+    );
+    assert!(
+        send_recv(srv.socks_addr().unwrap(), &[5, 1, 0])
+            .await
+            .is_empty()
+    );
     tokio::task::spawn_blocking(move || srv.shutdown_and_join())
         .await
         .unwrap()

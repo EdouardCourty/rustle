@@ -7,9 +7,9 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 
-use super::{quote_arg, resolve_config, run_capture, run_inherit, user_config_dir, SYSTEM_CONFIG};
+use super::{SYSTEM_CONFIG, quote_arg, resolve_config, run_capture, run_inherit, user_config_dir};
 
 #[derive(Clone, Copy, PartialEq, clap::ValueEnum)]
 pub enum Action {
@@ -451,7 +451,7 @@ pub fn run(cmd: Args) -> anyhow::Result<i32> {
         Action::Disable => disable(&ctx)?,
         Action::Logs => return logs(&ctx),
         a @ (Action::Start | Action::Stop | Action::Restart | Action::Status) => {
-            return control(&ctx, a)
+            return control(&ctx, a);
         }
     }
     Ok(0)

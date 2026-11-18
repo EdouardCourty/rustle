@@ -5,10 +5,10 @@ use std::time::Duration;
 
 use anyhow::ensure;
 
-use crate::clients::http1::{default_auth, get, Client};
+use crate::clients::http1::{Client, default_auth, get};
 use crate::clients::{basic, h2 as h2c};
-use crate::harness::{payload, Config, Proxy};
-use crate::runner::{scenario, Scenario};
+use crate::harness::{Config, Proxy, payload};
+use crate::runner::{Scenario, scenario};
 
 fn auth() -> Vec<(&'static str, String)> {
     vec![("proxy-authorization", default_auth())]

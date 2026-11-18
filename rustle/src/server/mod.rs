@@ -37,7 +37,7 @@ use control::{admin_loop, control_loop};
 use cpu::steer_by_cpu;
 use cpu::{allowed_cpus, pin_to_cpu};
 pub use live::Reloaded;
-use live::{reload_from_file, Live};
+use live::{Live, reload_from_file};
 pub(crate) use socket::widen_buffers;
 use socket::{bind, bind_control, bind_group, set_socket_buffers};
 

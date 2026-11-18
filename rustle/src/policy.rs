@@ -16,8 +16,8 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
@@ -361,9 +361,11 @@ mod tests {
     #[test]
     fn client_allowlist() {
         let mut cfg = Config::default();
-        assert!(ClientPolicy::from_config(&cfg)
-            .unwrap()
-            .allows(ip("203.0.113.1")));
+        assert!(
+            ClientPolicy::from_config(&cfg)
+                .unwrap()
+                .allows(ip("203.0.113.1"))
+        );
         cfg.auth.allow_clients = vec!["100.64.0.0/10".into(), "::1".into()];
         let p = ClientPolicy::from_config(&cfg).unwrap();
         assert!(p.allows(ip("100.101.102.103")));

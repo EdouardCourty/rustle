@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::harness::{proxy::OUTPUTS, Env};
+use crate::harness::{Env, proxy::OUTPUTS};
 
 pub type Fut = Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>;
 type RunFn = Arc<dyn Fn(Arc<Env>) -> Fut + Send + Sync>;

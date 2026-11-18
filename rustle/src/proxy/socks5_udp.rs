@@ -19,8 +19,8 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use tokio::io::AsyncReadExt;
 use tokio::net::{TcpStream, UdpSocket};
 
-use super::socks5::{reply, REP_OK};
 use super::Services;
+use super::socks5::{REP_OK, reply};
 use crate::policy::canonical;
 
 /// Room kept in front of a received reply for the SOCKS5 UDP header
