@@ -47,6 +47,8 @@ rustle/              the proxy
 documentation/       the config reference read by the website: config.json (every config key) and config.schema.json (its JSON Schema), maintained by hand next to the code (a new or changed key is edited there)
 CHANGELOG.md          Keep a Changelog format, checked in CI (`parse-changelog`); the section of the tagged version becomes the release notes
 install.sh            curl|sh installer (POSIX sh): detects target, glibc gate, SHA-256 check, no sudo; tested by `.github/scripts/test-installer.sh` (CI `installer` job)
+SECURITY.md           how to report a vulnerability (private reporting, contact)
+.oss-scanner/         inputs of Anthropic's OSS Scanner: Dockerfile (offline build + tests), threat_model.md, report_guidelines.md, patch_guidelines.md; keep the Dockerfile building after changes to the workspace or the e2e harness
 .github/workflows/    ci.yml (lint, tests+e2e on Linux/macOS, installer), release.yml (tag vX.Y.Z → 4 targets → SHA256SUMS + VERSION + attestation → smoke install)
 e2e/                  black-box functional tests (see e2e/README.md): the release binary started per scenario (generated config, ports read from the `rustle listening` line), programmable local origins/targets, HTTP/1.1, TLS, h2, SOCKS5, curl clients
   src/harness/        proxy.rs (Config, Proxy: spawn, /proc, signals, finish = CLOSE_WAIT leak check + clean SIGTERM), origin.rs, targets.rs, payload.rs, certs.rs
