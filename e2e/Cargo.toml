@@ -1,7 +1,8 @@
 [package]
 name = "e2e"
 version = "1.0.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.85"
 publish = false
 description = "Black-box functional suite: runs the real rustle binary against local origins and clients"
 
