@@ -215,10 +215,9 @@ pub fn scenarios() -> Vec<Scenario> {
                 let mut b = [0u8; 64];
                 if let Ok(Ok((n, _))) =
                     tokio::time::timeout(Duration::from_millis(500), sock.recv_from(&mut b)).await
+                    && socks5::udp_parse(&b[..n])?.1 == i.to_be_bytes()
                 {
-                    if socks5::udp_parse(&b[..n])?.1 == i.to_be_bytes() {
-                        ok += 1;
-                    }
+                    ok += 1;
                 }
             }
             // Loopback UDP: losses would be a proxy bug, allow a handful.

@@ -58,10 +58,11 @@ impl AsyncRead for ReadAhead {
             let want = out.remaining();
             let before = out.filled().len();
             let r = std::pin::Pin::new(&mut this.tcp).poll_read(cx, out);
-            if let Poll::Ready(Ok(())) = r {
-                if want > 0 && out.filled().len() - before == want {
-                    this.buf = Vec::with_capacity(READ_AHEAD); // bulk: read ahead
-                }
+            if let Poll::Ready(Ok(())) = r
+                && want > 0
+                && out.filled().len() - before == want
+            {
+                this.buf = Vec::with_capacity(READ_AHEAD); // bulk: read ahead
             }
             return r;
         }

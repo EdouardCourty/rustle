@@ -303,12 +303,12 @@ fn writer(
         }
         let _ = out.flush();
         // Reopen (SIGHUP) only means something for a file.
-        if c.reopen.swap(false, Relaxed) {
-            if let Some(p) = path.as_deref() {
-                match open(Some(p)) {
-                    Ok(o) => out = o,
-                    Err(e) => tracing::warn!(error = %e, path = p, "access log reopen failed"),
-                }
+        if c.reopen.swap(false, Relaxed)
+            && let Some(p) = path.as_deref()
+        {
+            match open(Some(p)) {
+                Ok(o) => out = o,
+                Err(e) => tracing::warn!(error = %e, path = p, "access log reopen failed"),
             }
         }
         if disconnected {

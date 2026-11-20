@@ -351,10 +351,10 @@ async fn http_get(
                         }
                     }
                 }
-                if let Some(want) = expect {
-                    if cl != Some(want) {
-                        anyhow::bail!("bad response: body length {cl:?}, expected {want}");
-                    }
+                if let Some(want) = expect
+                    && cl != Some(want)
+                {
+                    anyhow::bail!("bad response: body length {cl:?}, expected {want}");
                 }
                 break (len, cl.unwrap_or(0), reusable && keepalive);
             }
@@ -402,10 +402,10 @@ async fn h2_get(
         let _ = body.flow_control().release_capacity(chunk.len());
         got += chunk.len() as u64;
     }
-    if let Some(want) = expect {
-        if got != want {
-            anyhow::bail!("bad response: body length {got}, expected {want}");
-        }
+    if let Some(want) = expect
+        && got != want
+    {
+        anyhow::bail!("bad response: body length {got}, expected {want}");
     }
     Ok((got, true))
 }

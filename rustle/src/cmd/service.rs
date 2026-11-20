@@ -280,10 +280,10 @@ fn install(ctx: &Ctx) -> anyhow::Result<()> {
         }
         let config = config_for(ctx)?;
         let log = log_path()?;
-        if !ctx.dry {
-            if let Some(d) = log.parent() {
-                std::fs::create_dir_all(d)?;
-            }
+        if !ctx.dry
+            && let Some(d) = log.parent()
+        {
+            std::fs::create_dir_all(d)?;
         }
         return ctx.write(&plist_path()?, &render_launchd_plist(&exe, &config, &log));
     }
