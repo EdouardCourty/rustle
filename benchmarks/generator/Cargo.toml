@@ -2,7 +2,7 @@
 name = "bench-client"
 version = "1.0.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.100"
 description = "Load generator for the rustle benchmark harness"
 
 [dependencies]
