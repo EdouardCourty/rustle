@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-22
+
+### Changed
+
+- The workspace now builds on Rust edition 2024; building from source requires Rust 1.100 or newer. Release binaries are unaffected.
+- Dependencies updated to their latest releases (tokio 1.54, rustls 0.23.46, rustls-webpki 0.103.17, and others).
+
 ## [1.0.0] - 2026-10-30
 
 Initial release.
@@ -28,5 +35,6 @@ Initial release.
 - `curl | sh` installer with SHA-256 verification; Linux (x86_64, aarch64) and macOS (Apple Silicon, Intel) builds.
 - Black-box end-to-end test suite and a reproducible benchmark harness; results are in `benchmarks/documentation/RESULTS.md`.
 
-[Unreleased]: https://github.com/EdouardCourty/rustle/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/EdouardCourty/rustle/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/EdouardCourty/rustle/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/EdouardCourty/rustle/releases/tag/v1.0.0
