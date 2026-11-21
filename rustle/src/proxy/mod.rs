@@ -24,7 +24,7 @@ use crate::accesslog::AccessLog;
 use crate::auth::Authenticator;
 use crate::config::Config;
 use crate::dns::DnsCache;
-use crate::http::{classify, read_head, HeadError, Target};
+use crate::http::{HeadError, Target, classify, read_head};
 use crate::policy::{AuthLimiter, DestPolicy};
 use crate::relay;
 use crate::stream::ClientStream;

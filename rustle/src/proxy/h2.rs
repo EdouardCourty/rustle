@@ -13,8 +13,8 @@
 //! for bodiless requests.
 
 use std::net::IpAddr;
-use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
@@ -28,8 +28,8 @@ use tokio::time::timeout;
 use super::pipeline::{self, UpstreamError};
 use crate::accesslog::TargetMode;
 use crate::config::Config;
-use crate::http::{read_response_head, HeadError, RespError};
-use crate::relay::{chunk_size, IdleTimer};
+use crate::http::{HeadError, RespError, read_response_head};
+use crate::relay::{IdleTimer, chunk_size};
 
 /// Streams in flight per client connection.
 const MAX_CONCURRENT_STREAMS: u32 = 256;
@@ -504,7 +504,7 @@ async fn forward(ctx: &Ctx, req: Request<RecvStream>, mut respond: SendResponse<
             Err(RespError::Closed) | Err(RespError::Head(HeadError::Io(_)))
                 if pooled && attempt == 1 && replayable =>
             {
-                continue
+                continue;
             }
             Err(_) => {
                 fail(&mut respond, StatusCode::BAD_GATEWAY, Some("no-response"));

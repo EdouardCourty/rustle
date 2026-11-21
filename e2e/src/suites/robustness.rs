@@ -8,10 +8,10 @@ use anyhow::ensure;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use crate::clients::http1::{default_auth, get, request, Client};
+use crate::clients::http1::{Client, default_auth, get, request};
 use crate::clients::{ends_within, h2 as h2c};
-use crate::harness::{payload, Config, Proxy};
-use crate::runner::{scenario, Scenario};
+use crate::harness::{Config, Proxy, payload};
+use crate::runner::{Scenario, scenario};
 
 /// One good request: the proxy is still healthy.
 async fn still_serves(p: &Proxy, url: &str) -> anyhow::Result<()> {

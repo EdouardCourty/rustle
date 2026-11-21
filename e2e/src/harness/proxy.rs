@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 
@@ -164,10 +164,10 @@ fn collect(
         let mut lines = BufReader::new(stream).lines();
         while let Ok(Some(l)) = lines.next_line().await {
             let l = strip_ansi(&l);
-            if let Some(tx) = &ready {
-                if l.contains("rustle listening") {
-                    let _ = tx.send(l.clone());
-                }
+            if let Some(tx) = &ready
+                && l.contains("rustle listening")
+            {
+                let _ = tx.send(l.clone());
             }
             let mut s = sink.lock().unwrap();
             s.push_str(&l);
@@ -373,10 +373,12 @@ impl Proxy {
         let ports = self.listen_ports();
         let (mut n, mut local, mut state) = (0, None::<u16>, String::new());
         let mut flush = |local: &mut Option<u16>, state: &mut String| {
-            if let Some(p) = local.take() {
-                if ports.contains(&p) && state != "LISTEN" && f(state == "CLOSE_WAIT") {
-                    n += 1;
-                }
+            if let Some(p) = local.take()
+                && ports.contains(&p)
+                && state != "LISTEN"
+                && f(state == "CLOSE_WAIT")
+            {
+                n += 1;
             }
             state.clear();
         };

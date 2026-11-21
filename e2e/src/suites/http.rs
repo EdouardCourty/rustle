@@ -4,12 +4,12 @@
 
 use std::time::{Duration, Instant};
 
-use anyhow::{ensure, Context};
+use anyhow::{Context, ensure};
 
 use super::matrix::split_echo;
-use crate::clients::http1::{default_auth, get, request, Client};
-use crate::harness::{origin, payload, Config, Proxy};
-use crate::runner::{scenario, Scenario};
+use crate::clients::http1::{Client, default_auth, get, request};
+use crate::harness::{Config, Proxy, origin, payload};
+use crate::runner::{Scenario, scenario};
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![

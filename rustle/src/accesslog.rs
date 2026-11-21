@@ -25,7 +25,7 @@ use std::fmt::Write as _;
 use std::io::Write as _;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
-use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender, TrySendError};
+use std::sync::mpsc::{RecvTimeoutError, SyncSender, TrySendError, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -303,12 +303,12 @@ fn writer(
         }
         let _ = out.flush();
         // Reopen (SIGHUP) only means something for a file.
-        if c.reopen.swap(false, Relaxed) {
-            if let Some(p) = path.as_deref() {
-                match open(Some(p)) {
-                    Ok(o) => out = o,
-                    Err(e) => tracing::warn!(error = %e, path = p, "access log reopen failed"),
-                }
+        if c.reopen.swap(false, Relaxed)
+            && let Some(p) = path.as_deref()
+        {
+            match open(Some(p)) {
+                Ok(o) => out = o,
+                Err(e) => tracing::warn!(error = %e, path = p, "access log reopen failed"),
             }
         }
         if disconnected {

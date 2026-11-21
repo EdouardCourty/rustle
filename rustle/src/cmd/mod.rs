@@ -11,7 +11,7 @@ pub mod update;
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 
 /// `$HOME`, or an error telling what to set.
 pub fn home() -> anyhow::Result<PathBuf> {

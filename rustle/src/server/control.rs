@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use tokio::net::TcpListener;
 
-use super::live::reload_from_file;
 use super::Shared;
+use super::live::reload_from_file;
 
 /// Health/admin listener: `GET /health` -> 200 "ok", anything else 404.
 /// No auth, no proxying — separate port so probes never touch the proxy

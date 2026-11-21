@@ -12,8 +12,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
-use super::pipeline::{self, UpstreamError};
 use super::Services;
+use super::pipeline::{self, UpstreamError};
 use crate::relay;
 
 const VER: u8 = 5;

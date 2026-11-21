@@ -3,14 +3,14 @@
 
 use std::time::Duration;
 
-use anyhow::{ensure, Context};
+use anyhow::{Context, ensure};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::clients::http1::{default_auth, request, Client};
 use crate::clients::BoxIo;
+use crate::clients::http1::{Client, default_auth, request};
 use crate::harness::origin;
-use crate::harness::{payload, Config, Proxy};
-use crate::runner::{scenario, Scenario};
+use crate::harness::{Config, Proxy, payload};
+use crate::runner::{Scenario, scenario};
 
 const HANDSHAKE: &str = "Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n";
 

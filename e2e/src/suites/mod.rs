@@ -20,7 +20,7 @@ pub mod websocket;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::clients::http1::Client;
-use crate::harness::{certs, Proxy};
+use crate::harness::{Proxy, certs};
 use crate::runner::Scenario;
 
 pub fn all() -> Vec<Scenario> {

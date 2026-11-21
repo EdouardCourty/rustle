@@ -7,9 +7,9 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 
-use super::{quote_arg, resolve_config, run_capture, run_inherit, user_config_dir, SYSTEM_CONFIG};
+use super::{SYSTEM_CONFIG, quote_arg, resolve_config, run_capture, run_inherit, user_config_dir};
 
 #[derive(Clone, Copy, PartialEq, clap::ValueEnum)]
 pub enum Action {
@@ -280,10 +280,10 @@ fn install(ctx: &Ctx) -> anyhow::Result<()> {
         }
         let config = config_for(ctx)?;
         let log = log_path()?;
-        if !ctx.dry {
-            if let Some(d) = log.parent() {
-                std::fs::create_dir_all(d)?;
-            }
+        if !ctx.dry
+            && let Some(d) = log.parent()
+        {
+            std::fs::create_dir_all(d)?;
         }
         return ctx.write(&plist_path()?, &render_launchd_plist(&exe, &config, &log));
     }
@@ -451,7 +451,7 @@ pub fn run(cmd: Args) -> anyhow::Result<i32> {
         Action::Disable => disable(&ctx)?,
         Action::Logs => return logs(&ctx),
         a @ (Action::Start | Action::Stop | Action::Restart | Action::Status) => {
-            return control(&ctx, a)
+            return control(&ctx, a);
         }
     }
     Ok(0)

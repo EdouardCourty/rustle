@@ -10,7 +10,7 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use super::{IdleTimer, RELAY_BUF0, RELAY_BUF_MAX, RELAY_BUF_MAX_COPY};
+use super::{IdleTimer, RELAY_BUF_MAX, RELAY_BUF_MAX_COPY, RELAY_BUF0};
 
 /// Remaining declared body from which the response goes straight to splice.
 const SPLICE_EARLY: u64 = 128 * 1024;
@@ -59,12 +59,11 @@ pub(super) async fn response<C: ClientStream>(
     // Known large body: zero-copy from the first byte (the copy ramp
     // 8 -> 64 KB moved ~120 KB of a 1 MB body through user space, with
     // four reallocations, before handing over).
-    if remaining.is_some_and(|r| r >= SPLICE_EARLY) {
-        if let Some(tcp) = client.tcp() {
-            if let Some(pipe) = super::splice::PipePair::take() {
-                return super::splice::response(up, tcp, remaining, &pipe, idle).await;
-            }
-        }
+    if remaining.is_some_and(|r| r >= SPLICE_EARLY)
+        && let Some(tcp) = client.tcp()
+        && let Some(pipe) = super::splice::PipePair::take()
+    {
+        return super::splice::response(up, tcp, remaining, &pipe, idle).await;
     }
     // Spliceable client: grow to 64 KB, then hand over to splice.
     // Otherwise (TLS) the copy is the whole relay: grow further.
@@ -77,10 +76,10 @@ pub(super) async fn response<C: ClientStream>(
     let mut timer = IdleTimer::new(idle);
     let mut total: u64 = 0;
     loop {
-        if let Some(l) = remaining {
-            if total == l {
-                return total; // body fully consumed, over-read avoided
-            }
+        if let Some(l) = remaining
+            && total == l
+        {
+            return total; // body fully consumed, over-read avoided
         }
         buf.clear();
         // Bound the read to what remains (a unified take wrapper caps
@@ -139,10 +138,10 @@ where
     let mut timer = IdleTimer::new(idle);
     let mut total: u64 = 0;
     loop {
-        if let Some(l) = remaining {
-            if total == l {
-                return total;
-            }
+        if let Some(l) = remaining
+            && total == l
+        {
+            return total;
         }
         buf.clear();
         // Unified take wrapper: a single future type feeds the park.

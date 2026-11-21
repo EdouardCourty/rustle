@@ -37,7 +37,7 @@ use control::{admin_loop, control_loop};
 use cpu::steer_by_cpu;
 use cpu::{allowed_cpus, pin_to_cpu};
 pub use live::Reloaded;
-use live::{reload_from_file, Live};
+use live::{Live, reload_from_file};
 pub(crate) use socket::widen_buffers;
 use socket::{bind, bind_control, bind_group, set_socket_buffers};
 
@@ -161,10 +161,10 @@ pub fn start_with(cfg: Arc<Config>, config_path: Option<PathBuf>) -> anyhow::Res
     #[cfg(target_os = "linux")]
     if n > 1 && n <= cpus.len() {
         for group in [&plain, &tls_listeners, &socks_listeners] {
-            if let Some(first) = group.first() {
-                if let Err(e) = steer_by_cpu(first, &cpus[..n]) {
-                    tracing::warn!(error = %e, "SO_ATTACH_REUSEPORT_CBPF failed: hash balancing");
-                }
+            if let Some(first) = group.first()
+                && let Err(e) = steer_by_cpu(first, &cpus[..n])
+            {
+                tracing::warn!(error = %e, "SO_ATTACH_REUSEPORT_CBPF failed: hash balancing");
             }
         }
     }

@@ -6,9 +6,9 @@ use std::time::Duration;
 use anyhow::Context;
 use tokio::io::AsyncWriteExt;
 
-use super::{basic, BoxIo};
+use super::{BoxIo, basic};
 use crate::harness::certs;
-use crate::harness::origin::{parse_headers, Wire};
+use crate::harness::origin::{Wire, parse_headers};
 use crate::harness::proxy::KEY;
 
 pub struct Response {

@@ -13,8 +13,8 @@
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
-use super::adaptive::{copy_limited, write_flush};
 use super::IdleTimer;
+use super::adaptive::{copy_limited, write_flush};
 
 /// Minimum staging capacity (refill size).
 const STAGE: usize = 4096;
