@@ -49,7 +49,7 @@ pub fn run(args: Args) -> anyhow::Result<i32> {
         .enable_all()
         .build()?;
     let _guard = rt.enter();
-    use tokio::signal::unix::{signal, SignalKind};
+    use tokio::signal::unix::{SignalKind, signal};
     let mut hup = signal(SignalKind::hangup()).context("SIGHUP handler")?;
     let mut term = signal(SignalKind::terminate()).context("SIGTERM handler")?;
     let mut int = signal(SignalKind::interrupt()).context("SIGINT handler")?;

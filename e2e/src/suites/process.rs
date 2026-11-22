@@ -3,12 +3,12 @@
 
 use std::time::{Duration, Instant};
 
-use anyhow::{ensure, Context};
+use anyhow::{Context, ensure};
 
-use crate::clients::http1::{default_auth, get, Client};
+use crate::clients::http1::{Client, default_auth, get};
 use crate::harness::proxy::health;
-use crate::harness::{payload, Config, Proxy};
-use crate::runner::{scenario, Scenario};
+use crate::harness::{Config, Proxy, payload};
+use crate::runner::{Scenario, scenario};
 
 fn example_config() -> anyhow::Result<String> {
     let p = concat!(env!("CARGO_MANIFEST_DIR"), "/../rustle/config.toml.example");
@@ -17,16 +17,56 @@ fn example_config() -> anyhow::Result<String> {
 
 /// Invalid configs: (name, TOML, substring expected in stderr).
 const INVALID: &[(&str, &str, &str)] = &[
-    ("unknown-key", "[server]\nlisten = \"127.0.0.1:0\"\nlisen = 1\n", "unknown field"),
-    ("unknown-section", "[serveur]\nlisten = \"127.0.0.1:0\"\n", "unknown field"),
-    ("listen-hostname", "[server]\nlisten = \"localhost:8080\"\n", "expected \"IP:port\""),
-    ("socks5-listen-port-only", "[server]\nlisten = \"127.0.0.1:0\"\n[socks5]\nlisten = \"1080\"\n", "invalid socks5 address"),
-    ("tls-listen-garbage", "[server]\nlisten = \"127.0.0.1:0\"\n[tls]\nlisten = \"nope\"\ncert = \"x\"\nkey = \"y\"\n", "certificate"),
-    ("tls-missing-cert", "[server]\nlisten = \"127.0.0.1:0\"\n[tls]\nlisten = \"127.0.0.1:0\"\ncert = \"/nonexistent/cert.pem\"\nkey = \"/nonexistent/key.pem\"\n", "reading certificate"),
-    ("bad-duration", "[server]\nlisten = \"127.0.0.1:0\"\n[timeouts]\nidle = \"soon\"\n", "idle"),
-    ("bad-log-level", "[server]\nlisten = \"127.0.0.1:0\"\n[log]\naccess = \"verbose\"\n", "verbose"),
-    ("bad-cidr", "[server]\nlisten = \"127.0.0.1:0\"\n[filter]\ndeny = [\"10.0.0.0/99\"]\n", "10.0.0.0/99"),
-    ("bad-type", "[server]\nlisten = \"127.0.0.1:0\"\nworkers = \"two\"\n", "workers"),
+    (
+        "unknown-key",
+        "[server]\nlisten = \"127.0.0.1:0\"\nlisen = 1\n",
+        "unknown field",
+    ),
+    (
+        "unknown-section",
+        "[serveur]\nlisten = \"127.0.0.1:0\"\n",
+        "unknown field",
+    ),
+    (
+        "listen-hostname",
+        "[server]\nlisten = \"localhost:8080\"\n",
+        "expected \"IP:port\"",
+    ),
+    (
+        "socks5-listen-port-only",
+        "[server]\nlisten = \"127.0.0.1:0\"\n[socks5]\nlisten = \"1080\"\n",
+        "invalid socks5 address",
+    ),
+    (
+        "tls-listen-garbage",
+        "[server]\nlisten = \"127.0.0.1:0\"\n[tls]\nlisten = \"nope\"\ncert = \"x\"\nkey = \"y\"\n",
+        "certificate",
+    ),
+    (
+        "tls-missing-cert",
+        "[server]\nlisten = \"127.0.0.1:0\"\n[tls]\nlisten = \"127.0.0.1:0\"\ncert = \"/nonexistent/cert.pem\"\nkey = \"/nonexistent/key.pem\"\n",
+        "reading certificate",
+    ),
+    (
+        "bad-duration",
+        "[server]\nlisten = \"127.0.0.1:0\"\n[timeouts]\nidle = \"soon\"\n",
+        "idle",
+    ),
+    (
+        "bad-log-level",
+        "[server]\nlisten = \"127.0.0.1:0\"\n[log]\naccess = \"verbose\"\n",
+        "verbose",
+    ),
+    (
+        "bad-cidr",
+        "[server]\nlisten = \"127.0.0.1:0\"\n[filter]\ndeny = [\"10.0.0.0/99\"]\n",
+        "10.0.0.0/99",
+    ),
+    (
+        "bad-type",
+        "[server]\nlisten = \"127.0.0.1:0\"\nworkers = \"two\"\n",
+        "workers",
+    ),
     ("not-toml", "this is = = not toml", "loading config"),
 ];
 

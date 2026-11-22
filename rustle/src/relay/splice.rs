@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use tokio::io::Interest;
 use tokio::net::TcpStream;
 
-use super::{IdleTimer, RELAY_BUF0, RELAY_BUF_MAX};
+use super::{IdleTimer, RELAY_BUF_MAX, RELAY_BUF0};
 
 /// Wanted pipe capacity: one fill/drain pair per MB of bulk.
 const PIPE_CAPACITY: libc::c_int = 1024 * 1024;

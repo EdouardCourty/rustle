@@ -13,7 +13,7 @@ use crate::accesslog::TargetMode;
 use crate::config::Config;
 use crate::dns::DnsCache;
 use crate::http::{
-    read_response_head, HeadError, RequestHead, RespError, ResponseHead, Span, Target,
+    HeadError, RequestHead, RespError, ResponseHead, Span, Target, read_response_head,
 };
 use crate::policy::DestPolicy;
 use crate::relay;

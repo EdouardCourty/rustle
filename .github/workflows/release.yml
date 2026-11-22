@@ -18,7 +18,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2
         with:
           tool: parse-changelog
@@ -41,7 +41,7 @@ jobs:
           - { os: macos-latest, target: aarch64-apple-darwin }
           - { os: macos-15-intel, target: x86_64-apple-darwin }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Version must match the tag
         if: startsWith(github.ref, 'refs/tags/v')
@@ -76,7 +76,7 @@ jobs:
           cp target/release/rustle rustle/config.toml.example README.md LICENSE dist/pkg/
           tar -czf "dist/rustle-${{ matrix.target }}.tar.gz" -C dist/pkg rustle config.toml.example README.md LICENSE
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: rustle-${{ matrix.target }}
           path: dist/rustle-${{ matrix.target }}.tar.gz
@@ -92,9 +92,9 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: rustle-*
@@ -108,7 +108,7 @@ jobs:
           cat SHA256SUMS
 
       - name: Build provenance attestation
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/rustle-*.tar.gz
 

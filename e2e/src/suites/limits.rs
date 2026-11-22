@@ -8,10 +8,10 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 
 use super::matrix::split_echo;
-use crate::clients::http1::{self, default_auth, get, request, Client};
+use crate::clients::http1::{self, Client, default_auth, get, request};
 use crate::clients::{closed_within, h2 as h2c};
-use crate::harness::{payload, Config, Proxy};
-use crate::runner::{scenario, Scenario};
+use crate::harness::{Config, Proxy, payload};
+use crate::runner::{Scenario, scenario};
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![

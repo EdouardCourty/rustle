@@ -5,13 +5,13 @@
 use std::path::Path;
 use std::time::Duration;
 
-use anyhow::{ensure, Context};
+use anyhow::{Context, ensure};
 
 use crate::clients::basic;
-use crate::clients::http1::{request, Client};
-use crate::harness::proxy::{binary, KEY, KEY2};
+use crate::clients::http1::{Client, request};
+use crate::harness::proxy::{KEY, KEY2, binary};
 use crate::harness::{Config, Proxy};
-use crate::runner::{scenario, Scenario};
+use crate::runner::{Scenario, scenario};
 
 /// Runs `rustle reload <dir>/config.toml`: (exit code, stdout, stderr).
 fn reload_cmd(dir: &Path) -> anyhow::Result<(i32, String, String)> {

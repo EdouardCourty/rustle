@@ -1,11 +1,11 @@
 //! The command line: version/help, argument errors, `init` → `check` →
 //! run, `status` against a live proxy, `service … --dry-run`.
 
-use anyhow::{ensure, Context};
+use anyhow::{Context, ensure};
 
 use crate::harness::proxy::binary;
 use crate::harness::{Config, Proxy};
-use crate::runner::{scenario, Scenario};
+use crate::runner::{Scenario, scenario};
 
 /// Runs the binary with `args`: (exit code, stdout, stderr).
 fn rustle(args: &[&str], envs: &[(&str, &str)]) -> anyhow::Result<(i32, String, String)> {

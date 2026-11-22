@@ -6,9 +6,9 @@ use std::time::Duration;
 use anyhow::ensure;
 
 use super::matrix::split_echo;
-use crate::clients::http1::{self, default_auth, get, Client};
-use crate::harness::{payload, Config, Proxy};
-use crate::runner::{scenario, Scenario};
+use crate::clients::http1::{self, Client, default_auth, get};
+use crate::harness::{Config, Proxy, payload};
+use crate::runner::{Scenario, scenario};
 
 fn post_head(url: &str, extra: &str) -> Vec<u8> {
     format!(

@@ -11,12 +11,12 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as B64;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::task::JoinSet;
 
-use crate::connect::{connect_proxy, h2_connect, h2_enabled, parse_url, resolve_once, ProxyStream};
+use crate::connect::{ProxyStream, connect_proxy, h2_connect, h2_enabled, parse_url, resolve_once};
 use crate::metrics::{Hist, Metrics};
 use crate::rt::{run_threads, share};
 
@@ -351,10 +351,10 @@ async fn http_get(
                         }
                     }
                 }
-                if let Some(want) = expect {
-                    if cl != Some(want) {
-                        anyhow::bail!("bad response: body length {cl:?}, expected {want}");
-                    }
+                if let Some(want) = expect
+                    && cl != Some(want)
+                {
+                    anyhow::bail!("bad response: body length {cl:?}, expected {want}");
                 }
                 break (len, cl.unwrap_or(0), reusable && keepalive);
             }
@@ -402,10 +402,10 @@ async fn h2_get(
         let _ = body.flow_control().release_capacity(chunk.len());
         got += chunk.len() as u64;
     }
-    if let Some(want) = expect {
-        if got != want {
-            anyhow::bail!("bad response: body length {got}, expected {want}");
-        }
+    if let Some(want) = expect
+        && got != want
+    {
+        anyhow::bail!("bad response: body length {got}, expected {want}");
     }
     Ok((got, true))
 }

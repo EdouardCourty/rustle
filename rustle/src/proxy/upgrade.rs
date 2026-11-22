@@ -10,13 +10,13 @@ use tokio::io::AsyncWriteExt;
 use tokio::time::timeout;
 
 use crate::http::{
-    read_response_head, rewrite_head_into, HeadError, RequestHead, RespError, Target,
+    HeadError, RequestHead, RespError, Target, read_response_head, rewrite_head_into,
 };
 use crate::relay;
 use crate::stream::ClientStream;
 
-use super::pipeline::{connect_upstream, push_u16, UpstreamError};
-use super::{reply, Services, Tunnel, RESP_400, RESP_403, RESP_502, RESP_504};
+use super::pipeline::{UpstreamError, connect_upstream, push_u16};
+use super::{RESP_400, RESP_403, RESP_502, RESP_504, Services, Tunnel, reply};
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn websocket<C: ClientStream>(

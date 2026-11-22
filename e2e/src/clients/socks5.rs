@@ -2,7 +2,7 @@
 
 use std::net::{IpAddr, SocketAddr};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 

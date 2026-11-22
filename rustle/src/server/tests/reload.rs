@@ -100,13 +100,17 @@ async fn control_socket_reloads_and_rejects_unknown_commands() {
         out
     }
     assert_eq!(ask(&sock, "reload\n").await, "ok reloaded\n");
-    assert!(ask(&sock, "bogus\n")
-        .await
-        .starts_with("error unknown command"));
+    assert!(
+        ask(&sock, "bogus\n")
+            .await
+            .starts_with("error unknown command")
+    );
     std::fs::write(&cfg_path, "[server]\nlisen = 1\n").unwrap();
-    assert!(ask(&sock, "reload\n")
-        .await
-        .starts_with("error reload failed"));
+    assert!(
+        ask(&sock, "reload\n")
+            .await
+            .starts_with("error reload failed")
+    );
     // 0600: owner only.
     use std::os::unix::fs::PermissionsExt;
     assert_eq!(

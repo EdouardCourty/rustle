@@ -7,12 +7,12 @@ use std::time::Duration;
 use anyhow::ensure;
 use tokio::io::AsyncWriteExt;
 
-use crate::clients::http1::{default_auth, get, request, Client};
+use crate::clients::http1::{Client, default_auth, get, request};
 use crate::clients::socks5::{self, Outcome, Target};
 use crate::clients::{basic, echo_roundtrip, h2 as h2c};
 use crate::harness::proxy::KEY;
 use crate::harness::{Config, Proxy};
-use crate::runner::{scenario, Scenario};
+use crate::runner::{Scenario, scenario};
 
 fn log_cfg(level: &str) -> Config {
     let c = Config::new();

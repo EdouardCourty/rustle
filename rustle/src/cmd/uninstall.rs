@@ -19,22 +19,21 @@ pub fn run(args: Args) -> anyhow::Result<i32> {
             config: None,
             dry_run: false,
         };
-        if let Err(e) = service::run(cmd) {
-            if !system {
-                eprintln!("note: user service: {e:#}");
-            }
+        if let Err(e) = service::run(cmd)
+            && !system
+        {
+            eprintln!("note: user service: {e:#}");
         }
         if cfg!(target_os = "macos") {
             break;
         }
     }
-    if purge {
-        if let Ok(dir) = super::user_config_dir() {
-            if dir.exists() {
-                std::fs::remove_dir_all(&dir)?;
-                println!("removed {}", dir.display());
-            }
-        }
+    if purge
+        && let Ok(dir) = super::user_config_dir()
+        && dir.exists()
+    {
+        std::fs::remove_dir_all(&dir)?;
+        println!("removed {}", dir.display());
     }
     let exe = std::env::current_exe()?.canonicalize()?;
     std::fs::remove_file(&exe)?;

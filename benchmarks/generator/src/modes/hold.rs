@@ -10,7 +10,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 use crate::connect::{connect_via_proxy, resolve_once};
-use crate::metrics::{pcts_ms, Metrics};
+use crate::metrics::{Metrics, pcts_ms};
 
 // ---------------------------------------------------------------------------
 

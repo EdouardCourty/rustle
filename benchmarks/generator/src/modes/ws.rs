@@ -11,12 +11,12 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as B64;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::task::JoinSet;
 
-use crate::connect::{connect_proxy, h2_enabled, parse_url, resolve_once, ProxyStream};
+use crate::connect::{ProxyStream, connect_proxy, h2_enabled, parse_url, resolve_once};
 use crate::metrics::{Hist, Metrics};
 use crate::rt::{run_threads, share};
 

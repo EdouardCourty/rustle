@@ -150,9 +150,11 @@ async fn access_log_errors_only_and_reopen() {
     )
     .await;
     wait_log(&path, &["target=127.0.0.1:2", "status=403"]).await;
-    assert!(!std::fs::read_to_string(&rotated)
-        .unwrap()
-        .contains("127.0.0.1:2"));
+    assert!(
+        !std::fs::read_to_string(&rotated)
+            .unwrap()
+            .contains("127.0.0.1:2")
+    );
     tokio::task::spawn_blocking(move || srv.shutdown_and_join())
         .await
         .unwrap()

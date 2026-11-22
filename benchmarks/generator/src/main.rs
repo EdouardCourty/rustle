@@ -221,11 +221,11 @@ async fn amain(cli: Cli) {
     // 4 GB dev instance once OOM'd mid-matrix). Read at start …
     let own_rss_start = rss_pages();
     {
-        if !cli.no_warmup {
-            if let Some(w) = modes::warmup_of(&cli.cmd) {
-                eprintln!("--- warmup");
-                let _ = modes::run_once(&cli, &w).await;
-            }
+        if !cli.no_warmup
+            && let Some(w) = modes::warmup_of(&cli.cmd)
+        {
+            eprintln!("--- warmup");
+            let _ = modes::run_once(&cli, &w).await;
         }
         if cli.warmup_only {
             return;

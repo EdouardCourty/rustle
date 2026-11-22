@@ -7,12 +7,12 @@ use std::time::Duration;
 use anyhow::ensure;
 use tokio::net::TcpSocket;
 
-use crate::clients::http1::{default_auth, request, Client};
+use crate::clients::http1::{Client, default_auth, request};
 use crate::clients::socks5::{self, Outcome, Target};
 use crate::clients::{basic, h2 as h2c};
 use crate::harness::proxy::{KEY, KEY2};
 use crate::harness::{Config, Proxy};
-use crate::runner::{scenario, Scenario};
+use crate::runner::{Scenario, scenario};
 
 /// Result of one access attempt, transport-independent.
 #[derive(Debug, PartialEq)]
